@@ -9,10 +9,10 @@ const CONTEXT_DEPENDENCIES = Object.freeze({
 });
 const CONTEXT_COMPANIONS = new Set(['radio']);
 /**
- * Layers Context never touches: Space Missions and the Satellites layer it
- * depends on. Contacts neither switches them off on entry nor restores them
- * on exit, so they run beside it in either order and keep their own state
- * (the mission controller owns the Satellites dependency).
+ * Layers the Contacts window never touches: Space Missions and the
+ * Satellites layer it depends on. Contacts neither switches them off on
+ * entry nor restores them on exit (the mission controller owns the
+ * Satellites dependency).
  */
 export const CONTEXT_INDEPENDENT_LAYER_IDS = Object.freeze([
   'rocket-launches',

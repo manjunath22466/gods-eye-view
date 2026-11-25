@@ -1712,6 +1712,8 @@ export class SdrController {
       return true;
     }
     if (this.state.mode !== 'fm') await this.setMode('fm');
+    // Tuning a held FM plays it again.
+    if (this.state.status === 'held') this._beginAudioSession();
     // Spectra are dropped from here until the worker takes this tag, so a
     // retune that fails part-way never has them read at the wrong frequency.
     const tune = ++this._fmTune;
@@ -1755,6 +1757,39 @@ export class SdrController {
       const timer = setTimeout(() => finish(false), timeoutMs);
       this._spectrumWaiters.add(waiter);
     });
+  }
+
+  /**
+   * Silence FM and keep the receiver open: the player takes no more audio
+   * until FM resumes (resumeFm, a tune, or FM chosen again). The device stays
+   * connected and tuned. Used when Radio switches to its internet stations.
+   * @param {object} [options]
+   * @param {string|Function} [options.message] Status text explaining it.
+   * @returns {boolean} Whether FM was playing and is now held.
+   */
+  holdFm({ message = null } = {}) {
+    if (!this._device || this.state.mode !== 'fm') return false;
+    if (this.state.status !== 'streaming') return false;
+    this.cancelSeek();
+    this._endAudioSession();
+    this._setState({
+      status: 'held',
+      ...(message ? { message } : {}),
+    });
+    return true;
+  }
+
+  /**
+   * Play FM again after holdFm, on the frequency it was tuned to.
+   * @returns {boolean} Whether FM was held and now plays.
+   */
+  resumeFm() {
+    if (!this._device || this.state.mode !== 'fm') return false;
+    if (this.state.status !== 'held') return false;
+    this._audioNode?.port.postMessage({ type: 'clear' });
+    this._beginAudioSession();
+    this._setState({ status: 'streaming', message: streamingMessage('fm') });
+    return true;
   }
 
   async seekFm(direction = 1) {

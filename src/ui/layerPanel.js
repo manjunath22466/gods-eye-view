@@ -527,8 +527,8 @@ export class LayerPanel {
   }
 
   /**
-   * A layer's row chips, one-of-many switch, slider, start/end pickers, color legend, info line
-   * and ordered list. The block
+   * A layer's row chips, one-of-many switch, slider, start/end pickers, color legend, info line,
+   * ordered list and a lent panel (Radio's local receiver card). The block
    * is hidden while the layer is off (or while a dependency owner has
    * surrendered it), so a quiet row stays quiet. Chips and list items are
    * keyed, so the refresh a chip's own click triggers keeps keyboard focus.
@@ -566,6 +566,8 @@ export class LayerPanel {
     const segmented = controls?.segmented || null;
     const slider = controls?.slider || null;
     const range = controls?.range || null;
+    // An element of the page lent to the row while it shows (RowPanel.vue).
+    const panel = typeof controls?.panel === 'string' ? controls.panel : null;
     // The info line, once shown, stays in place and hides when empty.
     if (infoText) row.info = true;
     return {
@@ -576,8 +578,10 @@ export class LayerPanel {
         !alert &&
         !segmented &&
         !slider &&
-        !range,
+        !range &&
+        !panel,
       chips,
+      panel,
       segmented,
       slider,
       range,

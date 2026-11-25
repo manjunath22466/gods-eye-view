@@ -27,7 +27,9 @@ import { applicationHooksOf } from '../render/applicationHooks.js';
 import { findCamera, findGlobe, rendererOf } from '../render/rendererOf.js';
 import { WORLD_FOCUS_FRAMING } from '../worldFocus.js';
 import { heightsOf } from '../queries/heights.js';
+import { t } from '../i18n/index.js';
 import { useCockpitStore } from './stores/cockpit.js';
+import { useDockedStore } from './stores/docked.js';
 import { isGlobeView, useEntityCardStore } from './stores/entityCard.js';
 import { useOmnibarStore } from './stores/omnibar.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
@@ -101,6 +103,7 @@ export function installEntityContext({
   const store = useEntityCardStore(pinia);
   const omnibar = useOmnibarStore(pinia);
   const voice = useVoiceStore(pinia);
+  const docked = useDockedStore(pinia);
   const cockpitStore = useCockpitStore(pinia);
   const chrome = usePanelChromeStore(pinia);
   const scenes = useSceneStore(pinia);
@@ -110,6 +113,7 @@ export function installEntityContext({
   const doc = globalThis.document;
   const contextShown = () => isOpen() && isContextSurfaceVisible(doc?.body);
   let disposed = false;
+  let dockedCardPick = null;
   // The renderer's camera; looked up on use, as a renderer can be bound
   // after Context is installed.
   const camera = () => findCamera(viewer);
@@ -345,11 +349,49 @@ export function installEntityContext({
     });
   }
 
+  // A pinned view: back to the camera as it was, its position and its
+  // heading, pitch and roll.
+  function flyToPose(pose) {
+    const port = camera();
+    if (!port || ![pose?.lat, pose?.lon, pose?.height].every(Number.isFinite))
+      return;
+    const fly = () =>
+      port.flyTo(
+        { lon: pose.lon, lat: pose.lat, height: pose.height },
+        {
+          orientation: {
+            heading: pose.heading || 0,
+            pitch: Number.isFinite(pose.pitch) ? pose.pitch : -Math.PI / 2,
+            roll: pose.roll || 0,
+          },
+          durationS: 2,
+        },
+      );
+    if (navigateToSelection) return navigateToSelection(fly);
+    supersedeDeferredNavigation?.();
+    return fly();
+  }
+
+  /** Dock a street-level photo in place of the docked one. */
+  function dockStreetPhoto(identity) {
+    const found = store.describe(identity);
+    const title =
+      !found || found.titleWords ? t('Street-level photo') : found.title;
+    docked.dock({
+      key: streetLevelCardKey(identity.id),
+      kind: 'street',
+      icon: found?.icon || 'streetview',
+      title,
+      identity,
+    });
+  }
+
   store.connect({
     dataManager: getDataManager,
     creditAirports,
     openPanel,
     flyTo,
+    flyToPose,
     follow,
     letGo,
     reselect,
@@ -366,6 +408,28 @@ export function installEntityContext({
       );
     },
     isOpen,
+    replaceDockedPhoto(identity, { fromPin }) {
+      const current = docked.view;
+      if (current?.kind !== 'street' || current.identity.id === identity.id)
+        return;
+      const layer = getDataManager()?.layers?.get('street-level')?.module;
+      if (docked.stowed || layer?.dockedPhotoAdmission?.()?.() === false)
+        return false;
+      if (!layer?.hasDockedPhoto?.()) return;
+      // The restore already announces itself and keeps ownership of the card.
+      if (layer.dockedPhotoRestoring?.()) return false;
+      const pick = {
+        id: identity.id,
+        fromPin,
+        generation: store.selectionGeneration(),
+      };
+      dockedCardPick = pick;
+      const clearPick = () => {
+        if (dockedCardPick === pick) dockedCardPick = null;
+      };
+      layer.openPhoto(identity.id, { frame: true }).then(clearPick, clearPick);
+      return true;
+    },
     regionalBrief,
     spotWeather,
     // The renderer's card previews, when it has them.
@@ -468,6 +532,15 @@ export function installEntityContext({
         groundM: readGround(settled),
         // Horizon tests use the camera position even when the view is tilted.
         eye: { lat: pose.lat, lon: pose.lon },
+        // Keep the camera's orientation so the view can be pinned.
+        pose: {
+          lon: pose.lon,
+          lat: pose.lat,
+          height: pose.height,
+          heading: pose.heading,
+          pitch: pose.pitch,
+          roll: pose.roll,
+        },
       },
       { settled },
     );
@@ -756,7 +829,7 @@ export function installEntityContext({
     // click on something else Context cannot describe (a label, a trail)
     // leaves the card as it is.
     // Only a clean click lets go, as the layers' own clicks do; Context then
-    // describes the view.
+    // describes the view (its place header pins the view itself).
     if (event.surface && isTrackingClickGesture(event.gesture)) store.clear();
   });
 
@@ -811,11 +884,28 @@ export function installEntityContext({
       lat: detail.lat,
       lon: detail.lon,
     };
+    const priorDock = docked.view?.kind === 'street' ? docked.view : null;
+    if (priorDock && priorDock.key !== key) dockStreetPhoto(identity);
     // The card shows on the Inspector tab, not behind Properties.
     const showInspector = () =>
-      globalThis.dispatchEvent?.(new Event('gev:context-show-view'));
+      globalThis.dispatchEvent?.(
+        new CustomEvent('gev:context-show-view', { detail: { inspect: true } }),
+      );
     // The person selected a different surface while a row OPEN was pending.
     if (detail.revealFromOpen === false) return;
+    if (
+      detail.revealFromOpen === true &&
+      !doc?.body?.classList.contains('ui-embed')
+    ) {
+      if (requestGeneration !== store.selectionGeneration()) return;
+      const reveal = !contextShown();
+      if (store.card?.key === key) {
+        if (reveal) openPanel();
+      } else if (!store.select(identity, { reveal })) return;
+      showInspector();
+      photoCardGeneration = store.selectionGeneration();
+      return;
+    }
     // A voice request to show Street Level names the photo already open:
     // its card comes up while Context is on screen.
     if (detail.explicit === true) {
@@ -828,6 +918,26 @@ export function installEntityContext({
           photoCardGeneration = store.selectionGeneration();
       }
       return;
+    }
+    if (priorDock) {
+      if (priorDock.key === key) return;
+      if (
+        dockedCardPick?.generation === store.selectionGeneration() &&
+        dockedCardPick.id === detail.cardPhotoId
+      ) {
+        store.select(identity, {
+          fromPin: dockedCardPick.fromPin,
+          follow: false,
+        });
+        photoCardGeneration = store.selectionGeneration();
+        return;
+      }
+      if (store.card?.key !== priorDock.key) return;
+      if (requestId == null) {
+        if (store.advance(identity))
+          photoCardGeneration = store.selectionGeneration();
+        return;
+      }
     }
     const now = store.selectionGeneration();
     if (requestId == null) {
@@ -876,7 +986,7 @@ export function installEntityContext({
         : null;
 
     const id = vesselId ? String(vesselId) : record.id;
-    // A layer can echo a card selection. Keep its Back history.
+    // A layer can echo a card selection. Keep pin ownership and Back history.
     if (
       store.card?.layerId === record.layerId &&
       store.card.identity?.id === id
@@ -897,7 +1007,7 @@ export function installEntityContext({
   // first, as it does inside Context. Every other Esc owner keeps its own:
   // Cockpit, dialogs (a camera's enlarged view among them), a control that
   // takes its own Esc (data-owns-escape), a phone sheet (which closes
-  // first), panels and fields.
+  // first), panels and fields. Pins stay until unpinned.
   const onKey = (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing)
       return;

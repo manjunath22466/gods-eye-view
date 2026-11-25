@@ -12,6 +12,7 @@ import { createApp, nextTick } from 'vue';
 import ContextView from './views/ContextView.vue';
 import { useEntityCardStore } from './stores/entityCard.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
+import { usePinnedStore } from './stores/pinned.js';
 import { _setAirportsFetchForTest } from '../data/airports.js';
 import {
   announcePlacePick,
@@ -109,6 +110,7 @@ function fixture(t, layers = [], navigation = null) {
     previews: () => null,
     canFollow: () => false,
     flyTo: (card) => flown.push(card.key),
+    flyToPose: (pose) => flown.push(pose),
   });
   // The location search's state channel, as the shell offers it.
   const listeners = new Set();
@@ -314,6 +316,87 @@ test('a place leads with a street-level photo where Street Level remembers a pho
   cards.select(placeIdentity({ name: 'Elsewhere', lat: 30.3, lon: -97.7 }));
   await settle();
   assert.ok($('.entity-hero .close-up-map'));
+});
+
+test('a place pins as a still with a map; its pin flies there and shows no Nearby of its own', async (t) => {
+  useAirports(t, []);
+  const { $, cards, pinia, flown } = fixture(t, [
+    flightsLayer([{ id: 'abc', callsign: 'ABC1', lat: 30.262, lon: -97.745 }]),
+  ]);
+  const pinned = usePinnedStore(pinia);
+  cards.select(
+    placeIdentity({ name: 'Congress Ave Bridge', lat: 30.261, lon: -97.7454 }),
+  );
+  await settle();
+  assert.ok($('.spot-conditions'), 'Nearby on the place card');
+  $('.entity-card__action--pin').click();
+  t.after(() => pinned.unpin('place:30.2610,-97.7454'));
+  const [pin] = pinned.pins;
+  assert.equal(pin.kind, 'place');
+  assert.match(pinned.stillOf(pin.key), /\/tile\/13\//, 'a map still');
+  cards.clear();
+  pinned.show('pinned');
+  await nextTick();
+  assert.match($('.pinned-grid__frame').getAttribute('src'), /\/tile\/13\//);
+  assert.match(
+    $('.pinned-grid__credit').textContent,
+    /Powered by Esri .*Esri, Maxar, Earthstar Geographics/,
+    'the imagery is credited on screen, every source named',
+  );
+  $('.pinned-grid__open').click();
+  await settle();
+  assert.equal(cards.card.key, 'place:30.2610,-97.7454');
+  assert.deepEqual(
+    flown,
+    ['place:30.2610,-97.7454'],
+    'tapping the pin flies there',
+  );
+  assert.equal($('.spot-conditions'), null, 'no Nearby of its own');
+});
+
+test('the place header pins the view: the camera as it is, and its tile flies back to it', async (t) => {
+  useAirports(t, []);
+  const { $, cards, pinia, flown } = fixture(t, []);
+  const pinned = usePinnedStore(pinia);
+  t.after(() =>
+    pinned.pins.map((pin) => pin.key).forEach((key) => pinned.unpin(key)),
+  );
+  const pose = {
+    lon: -98.62,
+    lat: 29.46,
+    height: 1800,
+    heading: 1.2,
+    pitch: -0.6,
+    roll: 0,
+  };
+  cards.setView({
+    center: { lat: 29.4727, lon: -98.6197 },
+    rect: { west: -98.7, south: 29.4, east: -98.5, north: 29.5 },
+    heightM: 1800,
+    pose,
+  });
+  await settle();
+  // One place header, with the 📌 beside its name.
+  assert.equal(document.querySelectorAll('.view-context__title').length, 1);
+  const pin = $('.view-context__pin');
+  assert.equal(pin.getAttribute('aria-pressed'), 'false');
+  pin.click();
+  await nextTick();
+  assert.equal(pinned.pins.length, 1);
+  const [saved] = pinned.pins;
+  assert.equal(saved.kind, 'view');
+  assert.deepEqual(saved.pose, pose, 'the camera itself, not only the point');
+  assert.equal(saved.title, $('.view-context__title span').textContent);
+  assert.match(pinned.stillOf(saved.key), /^https?:|^\//, 'a still of the map');
+  assert.equal($('.view-context__pin').getAttribute('aria-pressed'), 'true');
+  // Its tile flies back to that view, and Context describes it there.
+  pinned.show('pinned');
+  await nextTick();
+  $('.pinned-grid__open').click();
+  await settle();
+  assert.deepEqual(flown.at(-1), pose);
+  assert.equal(cards.card, null);
+  assert.equal(pinned.tab, 'inspect');
 });
 
 test('an airport from search opens its card with the flights already loaded within 50 km, arrivals first', async (t) => {
@@ -1149,6 +1232,42 @@ test('only a place pick opens a place card: a search that is part of something e
   });
   await settle();
   assert.equal(cards.card?.title, 'Zilker Park');
+});
+
+test('pinning the view asks for nothing: its name and place come from the header', async (t) => {
+  useAirports(t, []);
+  const { $, cards, pinia } = fixture(t, []);
+  const pinned = usePinnedStore(pinia);
+  t.after(() =>
+    pinned.pins.map((pin) => pin.key).forEach((key) => pinned.unpin(key)),
+  );
+  cards.setView({
+    center: { lat: 12.3456, lon: 45.6789 },
+    rect: { west: 45.6, south: 12.3, east: 45.7, north: 12.4 },
+    heightM: 2000,
+    pose: {
+      lon: 45.67,
+      lat: 12.33,
+      height: 2000,
+      heading: 0,
+      pitch: -1,
+      roll: 0,
+    },
+  });
+  await settle();
+  const fetched = [];
+  const before = globalThis.fetch;
+  globalThis.fetch = async (url) => (
+    fetched.push(String(url)),
+    new Response('', { status: 503 })
+  );
+  t.after(() => {
+    globalThis.fetch = before;
+  });
+  $('.view-context__pin').click();
+  await settle();
+  assert.equal(pinned.pins.length, 1);
+  assert.deepEqual(fetched, [], 'no request');
 });
 
 test('with the bundled pack, picking "SFO" or "Austin airport" opens that airport card; "Austin" opens the place', async (t) => {

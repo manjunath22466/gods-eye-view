@@ -212,6 +212,8 @@ export function createViewerHost({ state, parts }) {
       requestId = null,
       cardPhotoId = null,
       proceed = null,
+      commit = null,
+      restore = null,
     } = {},
   ) {
     const entry = state.providers.get(providerId);
@@ -227,11 +229,16 @@ export function createViewerHost({ state, parts }) {
     }
     const previousImageId = state.street.imageId;
     const previousMount = active;
+    const docked = commit !== null || restore !== null;
     const seq = ++openSeq;
     pendingPose = null;
     const current = () => seq === openSeq;
     const cancel = (keep) => {
       if (!current()) return;
+      if (docked) {
+        unmount();
+        return;
+      }
       if (
         !keep ||
         !photoAvailable ||
@@ -251,7 +258,9 @@ export function createViewerHost({ state, parts }) {
     cancelPending = cancel;
     signal?.addEventListener('abort', onAbort, { once: true });
     // Claimed now, honoured after loading only if nothing newer took the camera.
-    const ticket = frame ? parts.framing.begin() : null;
+    const ticket = frame
+      ? parts.framing.begin({ keepSelection: docked })
+      : null;
     Object.assign(state.street, {
       loading: true,
       opening: true,
@@ -301,15 +310,29 @@ export function createViewerHost({ state, parts }) {
         explicit: requestId !== null,
       });
       if (!current()) return false;
-      if (!pendingPose || (displayId && pendingPose.imageId !== displayId))
+      if (
+        !pendingPose ||
+        (displayId && String(pendingPose.imageId) !== String(displayId)) ||
+        (restore && String(pendingPose.imageId) !== String(imageId))
+      )
         throw new Error(msg('Image could not be opened'));
-      // Given up while it loaded (proceed() turned false): its pose stayed
-      // unpublished under loading, and the photo closes now.
-      if (proceed && proceed() !== true) {
-        close();
+      if ((proceed && proceed() !== true) || (commit && !commit())) {
+        // The dock owns the original and will restore it.
+        if (docked) state.street.opening = false;
+        else close();
         return false;
       }
-      applyPose(pendingPose);
+      applyPose(restore ? { ...pendingPose, ...restore.street } : pendingPose);
+      if (docked) {
+        // Publish the dock's accepted pose before framing reads it.
+        Object.assign(state.street, { opening: false, error: null });
+        if (restore) {
+          acceptedPhoto = restore.acceptance;
+          photoAvailable = Boolean(acceptedPhoto);
+        } else {
+          rememberPhoto({ requestId, cardPhotoId, opened: true });
+        }
+      }
       if (ticket) parts.framing.frame(ticket);
     } catch (error) {
       failed = true;
@@ -345,8 +368,10 @@ export function createViewerHost({ state, parts }) {
     }
     // Accepted: still current and still wanted. Only now is the photo
     // published: announced, in the history that Nearby lists, selected.
-    Object.assign(state.street, { opening: false, error: null });
-    rememberPhoto({ requestId, cardPhotoId, opened: true });
+    if (!docked) {
+      Object.assign(state.street, { opening: false, error: null });
+      rememberPhoto({ requestId, cardPhotoId, opened: true });
+    }
     selectCurrentSequence();
     notify();
     return true;

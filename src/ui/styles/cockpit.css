@@ -2064,6 +2064,15 @@ html:not([lang='en']) .cockpit-brief-tabs button {
 .cockpit-help span {
   color: var(--cockpit-accent);
 }
+/* From 1200px the map credits sit on the bottom edge, 1rem up and about
+   28px tall (command-dock-trays.css): at the left, or at the right in a
+   right-to-left page. The keyboard hint and the position readout sit above
+   that row. Below 1200px the credits sit higher, above both. */
+@media (min-width: 1200px) {
+  body.cockpit-mode :is(.cockpit-help, .cockpit-position-readout) {
+    bottom: 3.5rem;
+  }
+}
 body.cockpit-mode
   :is(
     #title-bar,

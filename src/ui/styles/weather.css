@@ -370,3 +370,51 @@ html:not([lang='en']) .rail-card-setting {
 .rail-card[data-open='true'] > .rail-card-header {
   padding-bottom: 0;
 }
+/* The briefing reads top to bottom: conditions, observed frames, wind,
+   alerts. Each section is a title and its lines, with no disclosure. */
+.weather-briefing[hidden] {
+  display: none !important;
+}
+.weather-briefing {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px;
+  border: 1px solid var(--weather-card-border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.weather-briefing-section {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.weather-briefing-section > .panel-title {
+  margin: 0;
+}
+.weather-briefing-section .rail-card-line {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.weather-briefing-section .rail-card-line.muted {
+  color: var(--text-dim);
+}
+.weather-briefing [hidden] {
+  display: none !important;
+}
+.weather-briefing .data-row-list {
+  padding-left: 0;
+  margin: 0;
+}
+.weather-briefing .data-row-list-item {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+.weather-briefing .data-toggle-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -5,13 +5,16 @@ import {
   recordPosition,
   recordTitle,
 } from '../data/entityContext.js';
+import { mapStill } from './mapTiles.js';
 import { msg } from '../i18n/marker.js';
 import { t } from '../i18n/index.js';
 
 /**
  * Places and spots in Context. A place picked from search
  * gets a card of its own; so does an airport, from the bundled OurAirports
- * pack, which is part of picking a place rather than a layer. A base is the Military Installations layer's own record and opens its
+ * pack, which is part of picking a place rather than a layer. A spot (a
+ * click on empty ground, or a place) can be pinned as a still with a map.
+ * A base is the Military Installations layer's own record and opens its
  * card; it is never copied here.
  */
 
@@ -25,8 +28,8 @@ export const AIRPORT_TRAFFIC_KM = 50;
 const fixed = (n) => (Number.isFinite(n) ? n.toFixed(4) : 'x');
 
 /**
- * A place's identity for the card store. An airport goes by
- * its code, so finding it again (search, a near link) is the same
+ * A place's identity for the card store and for its pin. An airport goes by
+ * its code, so finding it again (search, a near link, a pin) is the same
  * card; any other place by where it is.
  * @param {{name?: string, lat: number, lon: number, from?: 'search'|'spot', airport?: object|null}} place
  */
@@ -61,7 +64,7 @@ export function spotCoordinates(lat, lon, format = (n) => n.toFixed(4)) {
 
 /**
  * The card for a place, in the shape `describeEntity` gives every card, so
- * the card and Nearby treat it as any other item that stays put.
+ * the card, its pin and Nearby treat it as any other item that stays put.
  * Its facts (an airport's codes, elevation and runways) go under More
  * details; the figures on top are the card's own (EntityCard).
  * @param {ReturnType<typeof placeIdentity>} identity
@@ -373,6 +376,60 @@ export async function nearSite(
     };
   }
   return airport ? { kind: 'airport', airport, km: airport.distanceKm } : null;
+}
+
+/**
+ * A pin for a place: a still with a map, its name and where it is. Tapping
+ * it flies there (the card store's `open`).
+ * @param {ReturnType<typeof placeIdentity>} identity
+ * @param {string} title
+ */
+export function placePin(identity, title) {
+  return {
+    key: placeKey(identity),
+    kind: 'place',
+    title,
+    icon: identity.place?.airport ? 'local_airport' : 'location_on',
+    identity,
+    still: mapStill(identity.lat, identity.lon),
+  };
+}
+
+/**
+ * The view itself as a pin, from Context's place header: the camera as it
+ * is (position, heading, pitch, roll) and the place's name, so its tile
+ * flies back to the same view. Made from what the header already has: no
+ * request.
+ * @param {{center: {lat: number, lon: number}, pose: object}} view
+ * @param {string} name The place header's name.
+ */
+export function viewPin(view, name) {
+  const { center, pose } = view || {};
+  if (!center || ![pose?.lat, pose?.lon, pose?.height].every(Number.isFinite))
+    return null;
+  const at = `${fixed(center.lat)},${fixed(center.lon)}`;
+  return {
+    key: `view:${at}@${Math.round(pose.height)}`,
+    kind: 'view',
+    title: name,
+    icon: 'location_on',
+    identity: {
+      layerId: 'view',
+      id: at,
+      label: name,
+      lat: center.lat,
+      lon: center.lon,
+    },
+    pose: {
+      lon: pose.lon,
+      lat: pose.lat,
+      height: pose.height,
+      heading: pose.heading,
+      pitch: pose.pitch,
+      roll: pose.roll,
+    },
+    still: mapStill(center.lat, center.lon),
+  };
 }
 
 /**

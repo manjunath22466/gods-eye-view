@@ -418,12 +418,14 @@ test('cyclones lead, and observed history owns one bordered group with only acti
   const view = createWeatherPanel(f);
   view.update([lightning, radar, wind, cyclone, satellite]);
   const root = f.container.children[0];
+  // The briefing leads; the cards follow it.
+  assert.equal(root.children[0].className, 'weather-briefing');
   assert.deepEqual(
-    [...root.children[0].children].map((n) => n.dataset.cardId),
+    [...root.children[1].children].map((n) => n.dataset.cardId),
     ['weather-cyclones', 'wind'],
   );
   const group = f.find((n) => n.className === 'weather-observed-group');
-  assertSameNode(root.children[1], group);
+  assertSameNode(root.children[2], group);
   assert.equal(group.children[0].textContent, 'Observed history');
   assert.equal(
     group.children[1].textContent,
@@ -839,5 +841,154 @@ test('the wind card notes it stays live only while its source does not follow th
     line(f, 'wind', 'time').textContent,
     /Does not follow history/,
   );
+  view.destroy();
+});
+
+const section = (f, id) => f.find((n) => n.dataset?.sectionId === id);
+const sectionIds = (f) =>
+  [...f.find((n) => n.className === 'weather-briefing').children].map(
+    (n) => n.dataset.sectionId,
+  );
+const sectionLines = (f, id) =>
+  [...section(f, id).querySelectorAll('.rail-card-line')].map(
+    (n) => n.textContent,
+  );
+const readWind = {
+  id: 'read-wind',
+  label: 'Read wind at map center',
+  params: { inspect: true },
+};
+const radarWithLegend = {
+  ...radar,
+  legend: [
+    { label: '5', color: '#04e9e7' },
+    { label: '60', color: '#fdf8fd' },
+  ],
+  summary: {
+    ...radar.summary,
+    units: 'dBZ',
+    status: 'Map center outside coverage',
+  },
+};
+const readWindEntry = {
+  ...wind,
+  summary: {
+    ...wind.summary,
+    actions: [readWind],
+    result: {
+      id: 'reading',
+      label: 'WIND AT 29.93°N 97.74°W',
+      lines: [
+        { id: 'wind', text: '12.0 km/h from NW' },
+        { id: 'meta', text: 'GFS · valid 09-22 01:00 UTC' },
+        { id: 'scalar', text: 'Air temperature · 2 m · 21.5 °C' },
+        { id: 'explanation', text: 'Model forecast' },
+      ],
+    },
+  },
+};
+const calmSeas = {
+  id: 'weather-cyclones',
+  icon: '◉',
+  summary: { label: 'Cyclones', detail: 'No active NHC/CPHC systems' },
+  list: { items: [] },
+};
+
+test('the briefing reads conditions, observed frames with the radar legend, wind, then alerts, in plain statuses', (t) => {
+  t.mock.timers.enable({
+    apis: ['Date'],
+    now: Date.parse('2026-09-22T01:09:00Z'),
+  });
+  const f = fixture();
+  const view = createWeatherPanel(f);
+  view.update([calmSeas, lightning, radarWithLegend, readWindEntry]);
+  assert.deepEqual(sectionIds(f), ['here', 'observed', 'wind', 'alerts']);
+  assert.deepEqual(
+    [...f.container.querySelectorAll('.weather-briefing-section > h3')].map(
+      (n) => n.textContent,
+    ),
+    ['WIND AT 29.93°N 97.74°W', 'Observed', 'Wind', 'Alerts'],
+  );
+  // Temperature before wind; the model and explanation stay in the card.
+  assert.deepEqual(sectionLines(f, 'here'), [
+    'Air temperature · 2 m · 21.5 °C',
+    '12.0 km/h from NW',
+  ]);
+  assert.deepEqual(sectionLines(f, 'observed'), [
+    'Rain radar · 4 min ago',
+    'Map center outside coverage',
+    'Lightning density · Waiting for observation',
+  ]);
+  const legend = section(f, 'observed').querySelector('.rail-card-legend');
+  assert.equal(legend.hidden, false);
+  assert.equal(
+    [...section(f, 'observed').children].indexOf(legend),
+    2,
+    'the radar legend follows the radar line',
+  );
+  assert.equal(sectionLines(f, 'wind').length, 1);
+  assert.match(sectionLines(f, 'wind')[0], /^Forecast · valid .*01:00 UTC$/);
+  assert.deepEqual(sectionLines(f, 'alerts'), ['No active NHC/CPHC systems']);
+  // Plain statuses: no section says a value is missing.
+  for (const id of sectionIds(f))
+    for (const text of sectionLines(f, id))
+      assert.doesNotMatch(text, /unavailable|no value|—/i, text);
+  // Past an hour, the age counts hours.
+  f.state({
+    products: [{ id: radar.id, shown: ticks[0], selected: ticks[0] }],
+  });
+  t.mock.timers.setTime(Date.parse('2026-09-22T02:15:00Z'));
+  f.state({});
+  assert.equal(sectionLines(f, 'observed')[0], 'Rain radar · 1h 15m ago');
+  // At a past time: the frame's clock time, or a plain status without one.
+  f.state({ mode: 'history', target: ticks[0] });
+  assert.equal(sectionLines(f, 'observed')[0], 'Rain radar · 01:00 UTC');
+  f.state({
+    products: [{ id: radar.id, shown: null, selected: null }],
+  });
+  assert.equal(
+    sectionLines(f, 'observed')[0],
+    'Rain radar · No frame at this time',
+  );
+  assert.ok(
+    sectionLines(f, 'wind').includes('Forecast · does not follow history'),
+  );
+  view.destroy();
+});
+
+test('the briefing offers the wind reading at the map center, and its rows act on their own layer', () => {
+  const f = fixture();
+  const calls = [];
+  const view = createWeatherPanel({
+    ...f,
+    setLayerParams: (...args) => calls.push(args),
+  });
+  view.update([
+    cyclone,
+    { ...wind, summary: { ...wind.summary, actions: [readWind] } },
+  ]);
+  assert.deepEqual(sectionIds(f), ['here', 'wind', 'alerts']);
+  assert.equal(
+    section(f, 'here').querySelector('h3').textContent,
+    'At map center',
+  );
+  const read = section(f, 'here').querySelector('[data-action-id="read-wind"]');
+  assert.equal(read.textContent, 'Read wind at map center');
+  read.click();
+  section(f, 'alerts')
+    .querySelector('[data-list-item-id="fay"] button')
+    .click();
+  assert.deepEqual(calls, [
+    ['wind', { inspect: true }, { origin: 'user' }],
+    ['weather-cyclones', { stormId: 'fay', focus: true }, { origin: 'user' }],
+  ]);
+  // A wind field still loading says so rather than showing an empty time.
+  view.update([
+    { ...wind, summary: { label: 'Wind motion', status: 'Loading forecast' } },
+  ]);
+  assert.deepEqual(sectionLines(f, 'wind'), ['Loading forecast']);
+  // With no layer behind any section the briefing is hidden.
+  view.update([{ id: 'air-quality', icon: '◌', summary: { label: 'AQ' } }]);
+  assert.equal(f.find((n) => n.className === 'weather-briefing').hidden, true);
   view.destroy();
 });

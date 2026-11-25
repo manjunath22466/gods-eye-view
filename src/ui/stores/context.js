@@ -12,6 +12,9 @@ import { markRaw, shallowRef } from 'vue';
 export const useContextStore = defineStore('gev-context', () => {
   /** The presented mode switch; null until the controls first render. */
   const view = shallowRef(null);
+  // The inner tab matters to an OPEN that is still waiting for a photo.
+  const inspectorTab = shallowRef('inspect');
+  const setInspectorTab = (tab) => (inspectorTab.value = tab);
 
   /** @param {object} next A fresh presentation; every publish re-renders. */
   function publish(next) {
@@ -43,6 +46,8 @@ export const useContextStore = defineStore('gev-context', () => {
     awareness,
     publishAwareness,
     awarenessLayer,
+    inspectorTab,
+    setInspectorTab,
     connectAwareness,
   };
 });

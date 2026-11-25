@@ -116,8 +116,8 @@ test('the panel shows the last 24 h as event cards and opens once', () => {
   assert.equal(opened(), 1);
   assert.equal(document.getElementById('news-panel-count').textContent, '2');
   assert.equal(
-    panel.querySelector('.news-readout__window').textContent,
-    'Last 24 h',
+    panel.querySelector('.news-readout__chosen').textContent,
+    'Last 24 h · Significant and above · All categories',
   );
   assert.deepEqual(
     [...panel.querySelectorAll('.news-readout__chips [data-chip-id]')].map(
@@ -368,10 +368,37 @@ test('scrolling to the end asks once per page, again after a filter change or a 
   news.destroy();
 });
 
+test('the window, severity and category fold into one Filters row', () => {
+  const { news, panel } = fixture();
+  news.update(view({ windowHours: 24, windowChoices: [24, 12, 6, 3, 1] }));
+  const filters = panel.querySelectorAll('details.news-readout__filters');
+  assert.equal(filters.length, 1);
+  const [row] = filters;
+  assert.equal(row.open, false, 'folded at first');
+  // The summary (a keyboard stop of its own) names what is chosen.
+  const summary = row.querySelector('summary');
+  assert.equal(
+    summary.querySelector('.news-readout__filters-label').textContent,
+    'Filters',
+  );
+  assert.equal(
+    summary.querySelector('.news-readout__chosen').textContent,
+    'Last 24 h · Significant and above · All categories',
+  );
+  // Every select is inside it, and none is left outside.
+  assert.deepEqual(
+    [...row.querySelectorAll('select')].map((select) =>
+      select.getAttribute('aria-label'),
+    ),
+    ['Time window', 'Severity', 'Category'],
+  );
+  assert.equal(panel.querySelectorAll('select').length, 3);
+  news.destroy();
+});
+
 test('the window choice offers shorter windows; the longest is the server window', () => {
   const { news, panel, calls } = fixture();
   news.update(view({ windowHours: 12, windowChoices: [12, 6, 3, 1] }));
-  assert.equal(panel.querySelector('.news-readout__window') === null, true);
   const choice = panel.querySelector('select[aria-label="Time window"]');
   assert.deepEqual(
     [...choice.options].map((option) => option.textContent),
@@ -399,9 +426,9 @@ test('the time window agrees with its number of hours', (t) => {
     ['Últimas 24 h', 'Últimas 12 h', 'Últimas 6 h', 'Últimas 3 h', 'Última 1 h'],
   );
   news.update(view({ windowHours: 1, items: [], hasMore: false }));
-  assert.equal(
-    panel.querySelector('.news-readout__window').textContent,
-    'Última 1 h',
+  assert.match(
+    panel.querySelector('.news-readout__chosen').textContent,
+    /^Última 1 h · /,
   );
   assert.equal(
     panel.querySelector('.news-readout').getAttribute('aria-label'),
@@ -437,9 +464,14 @@ test('the Latest news heading agrees with the news it heads (fr)', (t) => {
 test('the panel names the window the server serves', () => {
   const { news, panel } = fixture();
   news.update(view({ windowHours: 12 }));
+  assert.match(
+    panel.querySelector('.news-readout__chosen').textContent,
+    /^Last 12 h · /,
+  );
+  // With one window there is nothing to choose: no window select.
   assert.equal(
-    panel.querySelector('.news-readout__window').textContent,
-    'Last 12 h',
+    panel.querySelector('select[aria-label="Time window"]'),
+    null,
   );
 });
 

@@ -2,7 +2,7 @@
 // Mercator position as the rest of the app (stories' thumbnails).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tileBlock } from './mapTiles.js';
+import { mapStill, tileBlock } from './mapTiles.js';
 import { tilePosition } from '../stories/thumbs.js';
 
 test('the tile block centres on the shared Web Mercator position, to the edge of the map', () => {
@@ -24,4 +24,6 @@ test('the tile block centres on the shared Web Mercator position, to the edge of
       `${lat}, ${lon}`,
     );
   }
+  // Near the pole the map's own limit (85.0511°) holds, not a rounder 85°.
+  assert.match(mapStill(85.04, 0, 10), /\/10\/0\/512$/);
 });

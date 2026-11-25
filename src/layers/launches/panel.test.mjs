@@ -138,9 +138,11 @@ test('the selected mission is presented with its rows and returns to the top', (
   assert.equal(first.title, 'MISSION B');
   assert.equal(first.site, null);
   assert.equal(first.orbit, 'LEO');
-  assert.equal(first.index, '2 / 2');
-  assert.equal(first.previousDisabled, false);
-  assert.equal(first.nextDisabled, true);
+  assert.equal(first.id, 'b');
+  assert.equal(first.when, 'Nov 1, 2026, 10:00 AM UTC');
+  // A launch without a site position has no map or pin.
+  assert.equal(first.lat, null);
+  assert.equal(first.lon, null);
   assert.equal(first.payloads.length, 5);
   assert.deepEqual(first.payloads[0], {
     name: 'Sat 0 ×2',
@@ -170,8 +172,7 @@ test('the panel commands act on the selected mission', () => {
   state._launches = [launch('a'), launch('b'), launch('c')];
   state._selectedLaunchId = 'b';
   const { commands } = panel;
-  commands.selectPreviousMission();
-  commands.selectNextMission();
+  commands.selectMissionAt(0);
   commands.selectMissionAt(9);
   commands.focusSelectedLaunchSite();
   commands.startSelectedReplay();
@@ -184,8 +185,6 @@ test('the panel commands act on the selected mission', () => {
   assert.deepEqual(calls, [
     ['select', 'a', true],
     ['focus-mission', 'a'],
-    ['select', 'c', true],
-    ['focus-mission', 'c'],
     ['focus-site', 'b'],
     ['replay', 'b'],
     ['pause'],

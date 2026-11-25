@@ -8,9 +8,11 @@ body:not(.mobile-shell):not(.cockpit-mode):not(.scene-playback-mode):not(
   /* Clear of the attribution line under it, however many lines it wraps
      onto (--credit-line-height, src/ui/creditLineHeight.js). */
   --omnibar-credits-clear: calc(1rem + var(--credit-line-height, 28px) + 6px);
-  /* The World Timeline, and the dock and narrow corners placed from it,
-     rise over a line wrapped taller than its usual one or two lines. */
-  --omnibar-dock-bottom: max(74px, calc(var(--omnibar-credits-clear) + 2px));
+  /* The World Timeline, or the dock when it is alone, sits just above the
+     attribution line, as the docked view sits above the corner buttons; they
+     and the narrow corners placed from it rise over a line wrapped taller
+     than usual. */
+  --omnibar-dock-bottom: calc(var(--omnibar-credits-clear) + 4px);
   /* The dock sits above the World Timeline, rising by its height
      (--world-timeline-lift, world-timeline.css) as the plain dock does. */
   --omnibar-dock-raised: calc(

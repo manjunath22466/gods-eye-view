@@ -8,9 +8,11 @@ import RailChips from '../rail/RailChips.vue';
 import NewsCard from './NewsCard.vue';
 
 // The News panel: the window the server serves only (the last 24 hours, or
-// fewer where the host serves less), or a shorter one chosen at the
-// top (24/12/6/3/1 h), and two sections. Conflicts: hotspot chips, the
-// severity floor, the chosen event and a continuous feed, newest first.
+// fewer where the host serves less), or a shorter one chosen under Filters
+// (24/12/6/3/1 h), and two sections. Filters folds the window, the severity
+// floor and the category into one row that reads what is chosen.
+// Conflicts: hotspot chips, the severity floor, the chosen event and a
+// continuous feed, newest first.
 // Local: every report in the area at the view centre (its country, a large
 // country's state; within a radius at sea) while the camera is low, named at
 // the top, which the map then shows, outlined, instead of the hotspots' news.
@@ -72,6 +74,24 @@ function lastHours(hours) {
     hours: formatNumber(hours),
   });
 }
+// The Filters row, folded, reads what is chosen: the window, the severity
+// floor (Conflicts only) and the category.
+const chosen = computed(() => {
+  const view = props.view;
+  if (!view) return '';
+  const severity = String(filters.value.minSeverity ?? 2);
+  const category = filters.value.category ?? 'all';
+  return [
+    lastHours(view.windowHours),
+    local.value
+      ? null
+      : severityOptions.value.find((option) => option.value === severity)
+          ?.label,
+    categoryOptions.value.find((option) => option.value === category)?.label,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+});
 // The longest choice is the server's whole window, kept as no choice.
 const chooseWindow = (hours) =>
   setFilter('hours', hours === props.view?.windowChoices?.[0] ? null : hours);
@@ -126,17 +146,6 @@ const clear = () => props.onParams({ clear: true });
       )
     "
   >
-    <UiSelect
-      v-if="windowOptions.length > 1"
-      class="gev-field news-filter news-readout__window-choice"
-      :aria-label="t('Time window')"
-      :model-value="String(view.windowHours)"
-      :options="windowOptions"
-      @update:model-value="chooseWindow(Number($event))"
-    />
-    <p v-else class="news-readout__window ui-mono">{{
-      lastHours(view.windowHours)
-    }}</p>
     <div
       class="news-readout__sections"
       role="group"
@@ -158,23 +167,39 @@ const clear = () => props.onParams({ clear: true });
         :on-select="(chip) => setFilter('hotspot', chip.id)"
       />
     </div>
-    <div class="news-readout__filters">
-      <UiSelect
-        v-if="!local"
-        class="gev-field news-filter"
-        :aria-label="t('Severity')"
-        :model-value="String(filters.minSeverity ?? 2)"
-        :options="severityOptions"
-        @update:model-value="setFilter('minSeverity', Number($event))"
-      />
-      <UiSelect
-        class="gev-field news-filter"
-        :aria-label="t('Category')"
-        :model-value="filters.category ?? 'all'"
-        :options="categoryOptions"
-        @update:model-value="setFilter('category', $event)"
-      />
-    </div>
+    <details class="news-readout__filters">
+      <summary class="news-readout__filters-summary">
+        <span class="news-readout__filters-label">{{ t('Filters') }}</span>
+        <span class="news-readout__chosen ui-mono" :title="chosen">{{
+          chosen
+        }}</span>
+      </summary>
+      <div class="news-readout__filter-fields">
+        <UiSelect
+          v-if="windowOptions.length > 1"
+          class="gev-field news-filter news-readout__window-choice"
+          :aria-label="t('Time window')"
+          :model-value="String(view.windowHours)"
+          :options="windowOptions"
+          @update:model-value="chooseWindow(Number($event))"
+        />
+        <UiSelect
+          v-if="!local"
+          class="gev-field news-filter"
+          :aria-label="t('Severity')"
+          :model-value="String(filters.minSeverity ?? 2)"
+          :options="severityOptions"
+          @update:model-value="setFilter('minSeverity', Number($event))"
+        />
+        <UiSelect
+          class="gev-field news-filter"
+          :aria-label="t('Category')"
+          :model-value="filters.category ?? 'all'"
+          :options="categoryOptions"
+          @update:model-value="setFilter('category', $event)"
+        />
+      </div>
+    </details>
 
     <NewsCard
       v-if="selectedApart"

@@ -16,6 +16,7 @@ const props = defineProps({
   view: { type: Object, required: true },
   modes: { type: Array, required: true },
   onOpenDetails: { type: Function, default: () => {} },
+  onDrawArea: { type: Function, default: () => {} },
   onSetMode: { type: Function, default: () => {} },
 });
 const modeOptions = computed(() =>
@@ -33,6 +34,7 @@ const modeOptions = computed(() =>
     :aria-label="t('Recent imagery')"
     :hidden="view.hidden"
     :data-mode="view.mode"
+    :data-owns-escape="view.ownsEscape || undefined"
     ><div id="ri-actions" class="ri-block ri-actions-row"
       ><RailCardBlocks :blocks="view.actions" card-id="recent-imagery" /></div
     ><div
@@ -69,18 +71,28 @@ const modeOptions = computed(() =>
         'ri-block ri-strip ui-scroll',
         { searching: view.strip.searching },
       ]"
-      tabindex="0"
-      role="listbox"
-      aria-orientation="horizontal"
+      :tabindex="view.strip.draw ? -1 : 0"
+      :role="view.strip.draw ? undefined : 'listbox'"
+      :aria-orientation="view.strip.draw ? undefined : 'horizontal'"
       :aria-label="
-        t('Imagery days, newest first · arrows move, S or A and B pin')
+        view.strip.draw
+          ? undefined
+          : t('Imagery days, newest first · arrows move, S or A and B pin')
       "
-      aria-keyshortcuts="A B S"
+      :aria-keyshortcuts="view.strip.draw ? undefined : 'A B S'"
       :aria-activedescendant="view.strip.activeDescendant || undefined"
       ><RecentImageryCard
         v-for="card in view.strip.cards"
         :key="card.key"
-        :card="card" /><UiEmpty
+        :card="card" /><UiButton
+        v-if="view.strip.draw"
+        id="ri-draw-area"
+        class="data-toggle-chip ri-draw-area"
+        :disabled="Boolean(view.strip.draw.disabled)"
+        @click="onDrawArea"
+        >{{ view.strip.draw.label }}</UiButton
+      ><UiEmpty
+        v-else
         class="ri-strip-empty"
         :hidden="view.strip.cards.length > 0"
         :title="view.strip.empty" /></div

@@ -198,7 +198,7 @@ function mockImages(t) {
   return requests;
 }
 
-test("an estimated bearing reads as estimated in the camera card's facts", async (t) => {
+test("an estimated bearing reads as estimated in the camera preview's bigger view", async (t) => {
   const requests = mockImages(t);
   const { controls, cardHost } = fixture(t);
   const state = stillState('a.jpg');
@@ -206,10 +206,10 @@ test("an estimated bearing reads as estimated in the camera card's facts", async
   controls._renderCctvState(state);
   requests[0].onload();
   await nextTick();
-  assert.match(
-    cardHost.querySelector('.cctv-preview__facts').textContent,
-    /Heading\s*~/,
-  );
+  cardHost.querySelector('.cctv-preview__expand').click();
+  await nextTick();
+  const facts = document.querySelector('.cctv-popup figcaption');
+  assert.match(facts.textContent, /Heading\s*~/);
 });
 
 test("the bigger view names a partner camera's owner", async (t) => {
@@ -263,7 +263,7 @@ test('desktop: the Context card keeps refreshing while the accordion folds CCTV'
   assert.equal(cardHost.querySelector('img')?.getAttribute('src'), 'a3.jpg');
 });
 
-test('an HLS camera keeps live video in CCTV and shows its registered snapshot in Context', async (t) => {
+test('an HLS camera moves the live canvas into Context and uses its registered still in the popup', async (t) => {
   const requests = mockImages(t);
   const { controls, panelEl, cardHost, mountCard, unmountCard } = fixture(t, {
     card: false,
@@ -274,33 +274,44 @@ test('an HLS camera keeps live video in CCTV and shows its registered snapshot i
   await settle();
   assert.equal(requests.length, 0, 'the video panel alone needs no still');
 
+  const canvas = panelEl.querySelector('#cctv-video');
   mountCard();
   await settle();
   assert.equal(requests.length, 1);
   assert.equal(requests[0].src, state.activeCamera.liveSnapshotUrl);
-  assert.equal(panelEl.querySelector('#cctv-video').hidden, false);
+  assert.equal(cardHost.querySelector('#cctv-video') === canvas, true);
+  assert.equal(canvas.hidden, false);
   assert.equal(
     panelEl.querySelector('#cctv-frame-wrap').classList.contains('loading'),
     false,
   );
   assert.equal(
     panelEl.querySelector('#cctv-source-badge').textContent,
-    'LIVE · OK',
+    'FRAME · LOADING',
+    'a canvas without a decoded frame does not claim the feed is live',
   );
   requests[0].onload();
   await nextTick();
+  assert.equal(cardHost.querySelector('img'), null);
+  assert.doesNotMatch(
+    cardHost.querySelector('.cctv-preview__badge').textContent,
+    /SNAPSHOT/,
+  );
+  cardHost.querySelector('.cctv-preview__expand').click();
+  await nextTick();
+  const popup = document.body.querySelector('.cctv-popup');
   assert.equal(
-    cardHost.querySelector('img')?.getAttribute('src'),
+    popup.querySelector('img')?.getAttribute('src'),
     state.activeCamera.liveSnapshotUrl,
   );
   assert.match(
-    cardHost.querySelector('.cctv-preview__badge').textContent,
+    popup.querySelector('.cctv-popup__badge').textContent,
     /SNAPSHOT/,
   );
 
   unmountCard();
   await settle();
-  assert.equal(panelEl.querySelector('#cctv-video').hidden, false);
+  assert.equal(panelEl.querySelector('#cctv-video') === canvas, true);
   controls._renderCctvState({
     ...state,
     activeCamera: { ...state.activeCamera, liveSnapshotUrl: '' },
@@ -313,13 +324,14 @@ test('an HLS camera keeps live video in CCTV and shows its registered snapshot i
     'a video-only camera has no registered still',
   );
   assert.equal(cardHost.querySelector('img'), null);
-  assert.match(cardHost.textContent, /FRAME · UNAVAILABLE/);
-  assert.equal(panelEl.querySelector('#cctv-video').hidden, false);
+  assert.equal(cardHost.querySelector('.cctv-preview__expand'), null);
+  assert.equal(cardHost.querySelector('#cctv-video') === canvas, true);
 });
 
 test('a live still is requested only when the Context preview matches the active camera', async (t) => {
   const requests = mockImages(t);
-  const { controls, cardHost, previewId } = fixture(t);
+  const { controls, cardHost, panelEl, previewId } = fixture(t);
+  const canvas = panelEl.querySelector('#cctv-video');
   const a = liveState('a');
   const b = liveState('b');
 
@@ -330,10 +342,7 @@ test('a live still is requested only when the Context preview matches the active
   );
   requests[0].onload();
   await nextTick();
-  assert.equal(
-    cardHost.querySelector('img')?.getAttribute('src'),
-    a.activeCamera.liveSnapshotUrl,
-  );
+  assert.equal(cardHost.querySelector('#cctv-video') === canvas, true);
   cardHost.querySelector('.cctv-preview__expand').click();
   await nextTick();
   const popup = document.body.querySelector('.cctv-popup');
@@ -348,6 +357,7 @@ test('a live still is requested only when the Context preview matches the active
   assert.equal(requests.length, 1);
   assert.equal(cardHost.querySelector('img'), null);
   assert.equal(popup.querySelector('img'), null);
+  assert.equal(panelEl.querySelector('#cctv-video') === canvas, true);
 
   // The same component can then receive the new card identity.
   previewId.value = 'b';
@@ -358,8 +368,9 @@ test('a live still is requested only when the Context preview matches the active
   );
   requests[1].onload();
   await nextTick();
+  assert.equal(cardHost.querySelector('#cctv-video') === canvas, true);
   assert.equal(
-    cardHost.querySelector('img')?.getAttribute('src'),
+    popup.querySelector('img')?.getAttribute('src'),
     b.activeCamera.liveSnapshotUrl,
   );
 });
@@ -412,8 +423,11 @@ test('an inactive camera card hides another camera’s status and pose', async (
   requests[0].onload();
   await nextTick();
   assert.equal(cardHost.querySelector('img')?.getAttribute('src'), 'a.jpg');
-  assert.ok(cardHost.querySelector('.cctv-preview__facts'));
   assert.ok(cardHost.querySelector('.cctv-preview__badge'));
+  cardHost.querySelector('.cctv-preview__expand').click();
+  await nextTick();
+  const popup = document.body.querySelector('.cctv-popup');
+  assert.match(popup.querySelector('figcaption').textContent, /Heading/);
 
   const b = stillState('b.jpg', 'b');
   b.activeCamera.headingDeg = 204;
@@ -426,7 +440,10 @@ test('an inactive camera card hides another camera’s status and pose', async (
     !cardHost.querySelector('.cctv-preview__badge'),
     'status is hidden',
   );
-  assert.ok(!cardHost.querySelector('.cctv-preview__facts'), 'pose is hidden');
+  assert.doesNotMatch(
+    popup.querySelector('figcaption').textContent,
+    /Heading|204/,
+  );
   assert.ok(!cardHost.querySelector('img'), 'the inactive card has no image');
   assert.equal(store.frame?.cameraId, '', 'the shared frame is cleared');
   assert.match(cardHost.textContent, /FRAME · UNAVAILABLE/);

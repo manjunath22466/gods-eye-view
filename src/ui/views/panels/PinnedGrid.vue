@@ -1,0 +1,188 @@
+<script setup>
+import { nextTick, ref } from 'vue';
+import { storeToRefs } from 'pinia';
+import { formatNumber, t } from '../../../i18n/index.js';
+import { usePinnedStore } from '../../stores/pinned.js';
+import { useEntityCardStore } from '../../stores/entityCard.js';
+import { ESRI_IMAGERY_CREDIT } from '../../../maps/attribution.js';
+import { streetPhotoCredit } from '../../streetPhotoCredit.js';
+import { cameraCredit } from '../../cameraCredit.js';
+import { useDockedStore } from '../../stores/docked.js';
+import { stationPlayback, useRadioLayer } from '../../radioContext.js';
+import { pinnedStationMiss, playPinnedStation } from '../../pinnedStation.js';
+import EntityMark from './EntityMark.vue';
+import FeedDot from './FeedDot.vue';
+import PausedChip from './PausedChip.vue';
+import UiButton from '../../kit/UiButton.vue';
+import UiCloseButton from '../../kit/UiCloseButton.vue';
+import UiIcon from '../../kit/UiIcon.vue';
+
+// The Pinned tab: what was pinned, two to a row, as many as were pinned; the
+// panel scrolls. Every pin is a still: the picture a camera or a
+// photo showed when it was pinned, a station's name, a place's map, where a
+// moving item was. Nothing here plays, refreshes or asks for anything until
+// it is tapped. Tapping a tile opens that item's card on Inspect, and tapping
+// a station plays it; the pin stays until it is unpinned, and unpinning
+// offers Undo.
+// The Undo notice for an unpin sits in Context above the tabs, so it stays
+// when the last pin goes (and the Pinned tab with it).
+const emit = defineEmits(['open-station']);
+const props = defineProps({
+  /** Whether Radio is on; a pinned station plays either way, Radio left as it is. */
+  radioOn: { type: Boolean, default: true },
+});
+
+const pinned = usePinnedStore();
+const { pins } = storeToRefs(pinned);
+const cards = useEntityCardStore();
+
+// A pin whose layer is off is paused, its reason in the chip's tooltip. A
+// camera that is also docked follows the dock: its tile shows the dock's
+// latest frame (the same feed) and the dock's own dot and wording, live only
+// while the dock is (stores/docked.js). Read when the grid draws; nothing
+// re-reads it on a timer.
+const docked = useDockedStore();
+// A place (an airport, a spot, a search, a pinned view) wears its own
+// marker, the badge its card's map draws, not an item's icon. An item wears
+// its mark (EntityMark.vue): the sprite the map drew it with, as it was
+// pinned, or its layer's glyph.
+const PLACE_PINS = new Set(['place', 'view']);
+const withDock = (pin) => pin.kind === 'camera' && docked.isDocked(pin.key);
+// Until the dock has shown its feed, the pin says it is loading.
+const dockFeed = (pin) => docked.feedOf(pin.key) || { dot: 'loading', text: '' };
+// A station's tile is paused until that station plays, then shows the live
+// dot, read as the mini player reads it (stationPlayback); its chip says
+// why while Radio is off, the stream loads or failed, or the catalogue has
+// no such station. A pinned station plays on with Radio off, so it stays
+// live.
+const { ui: radio } = useRadioLayer();
+const stationState = (pin) => stationPlayback(radio.value, pin.identity?.id);
+const stationLive = (pin) => pin.kind === 'station' && stationState(pin) === 'live';
+const stationNote = (pin) => {
+  const state = stationState(pin);
+  if (pinnedStationMiss.value?.id === pin.identity?.id)
+    return t('{name} is not in the station directory right now', { name: pin.title });
+  if (state === 'loading') return t('Loading');
+  if (state === 'lost') return radio.value?.audioError ? t(radio.value.audioError) : t('Broadcaster stream unavailable');
+  if (state === 'idle' && !props.radioOn) return t('Radio off');
+  return '';
+};
+const isPaused = (pin) => !withDock(pin) && !stationLive(pin) && (pin.kind === 'station' || Boolean(offNote(pin)));
+const offNote = (pin) => {
+  if (withDock(pin)) return '';
+  if (pin.kind === 'station') return stationNote(pin);
+  if (pin.kind === 'camera') return cards.layerOff('cctv') ? t('Cameras off · last frame') : '';
+  if (pin.kind === 'street') return cards.layerOff('street-level') ? t('Street Level off · last image') : '';
+  return '';
+};
+
+// Map stills (a place, where a moving item was) are Esri World Imagery,
+// credited while any shows.
+const MAP_KINDS = new Set(['place', 'item', 'view']);
+const mapShown = () => pins.value.some((pin) => MAP_KINDS.has(pin.kind) && pinned.stillOf(pin.key));
+// A street-level still carries its provider's credit on its tile, as long
+// as the picture shows; a camera's still, its provider and a partner feed's
+// owner, read from the layer or, with Cameras off, kept with the pin. A pin
+// that kept none credits its camera once the layer knows it again.
+const photoCredit = (pin) => {
+  if (!pinned.stillOf(pin.key)) return '';
+  if (pin.kind === 'street') return streetPhotoCredit(cards.layerModule('street-level'), pin.identity?.id);
+  return pin.kind === 'camera' ? cameraCredit(cards.cameraDetails(pin.identity?.id), pin.source) : '';
+};
+
+// A pin opens its card on Inspect, and the card stays while its layer is
+// off. A station plays, and Radio stays as it is: with the layer off the
+// stream comes from the station catalogue already read, with no markers
+// drawn, and the mini player holds it (pinnedStation.js). With Radio on,
+// Context shows Inspect, where the station list holds the station.
+// A pinned view flies back to the camera as it was; Context then describes
+// that view, its place header first.
+function playStation(pin) {
+  const id = pin.identity?.id;
+  const module = cards.layerModule('radio');
+  // Without a Radio layer there is nothing to play, and the tile stays.
+  if (!id || !module) return false;
+  if (props.radioOn) {
+    emit('open-station', pin);
+    pinned.show('inspect');
+  }
+  playPinnedStation({ id, name: pin.title }, { module: () => module });
+  return true;
+}
+// Unpinning from the keyboard keeps focus in reach: on the next pin's
+// unpin button (the previous one's when it was the last in the list), or on
+// Undo once no pin is left, the Pinned tab gone with it. The notice holds
+// while focus is on it. A pointer unpin leaves focus be.
+const root = ref(null);
+async function focusAfter(event, index) {
+  if (event?.detail !== 0) return;
+  const panel = root.value?.closest('#global-context-panel') || root.value?.ownerDocument;
+  await nextTick();
+  const buttons = root.value?.isConnected ? [...root.value.querySelectorAll('.pinned-grid__unpin')] : [];
+  const next = buttons.length ? buttons[Math.min(index, buttons.length - 1)] : panel?.querySelector('.pin-undo-notice button');
+  next?.focus();
+}
+function unpin(pin, event) {
+  const index = pins.value.findIndex((entry) => entry.key === pin.key);
+  pinned.unpin(pin.key);
+  void focusAfter(event, index);
+}
+function clearAll(event) {
+  pinned.clearAll();
+  void focusAfter(event, 0);
+}
+// Opening a pin from the keyboard: Inspect takes the grid's place, the
+// focused tile with it, so focus moves to the card's first action, or with
+// no card (a pinned view, a station) to Context's body. A tile still there
+// (a station played with Radio off) keeps it; a pointer open leaves focus be.
+async function focusOpened(event) {
+  const tile = event?.currentTarget;
+  if (event?.detail !== 0 || !tile) return;
+  const body = root.value?.closest('[tabindex="-1"]');
+  // After the change the open made has rendered.
+  await nextTick();
+  if (tile.isConnected) return;
+  const card = tile.ownerDocument.getElementById('entity-card');
+  (card?.querySelector('.entity-card__actions button:not(:disabled)') ?? card?.querySelector('button:not(:disabled)') ?? body)?.focus({ preventScroll: true });
+}
+function open(pin, event) {
+  if (pin.kind === 'station') playStation(pin);
+  else {
+    if (pin.kind === 'view') {
+      cards.clear();
+      cards.flyToPose(pin.pose);
+    } else cards.open(pin.identity, { fromPin: true });
+    pinned.show('inspect');
+  }
+  void focusOpened(event);
+}
+</script>
+
+<template>
+  <section ref="root" class="pinned-grid" :aria-label="t('Pinned')">
+    <div class="pinned-grid__head">
+      <h4 class="pinned-grid__title">{{ t('Pinned · {n}', { n: formatNumber(pins.length) }) }}</h4>
+      <UiButton class="pinned-grid__clear" @click="clearAll">{{ t('Clear all') }}</UiButton>
+    </div>
+    <ul class="pinned-grid__tiles">
+      <li v-for="pin in pins" :key="pin.key" class="pinned-grid__tile" :data-kind="pin.kind" :data-pin-key="pin.key">
+        <UiButton class="pinned-grid__open" :title="pin.kind === 'station' ? t('Play {name}', { name: pin.title }) : t('Show {name} on Inspect', { name: pin.title })" @click="open(pin, $event)">
+          <img v-if="pinned.stillOf(pin.key)" class="pinned-grid__frame" :src="pinned.stillOf(pin.key)" alt="" />
+          <EntityMark v-if="pin.kind === 'item' && pin.identity?.layerId" class="pinned-grid__icon" :class="{ 'pinned-grid__icon--over': Boolean(pinned.stillOf(pin.key)) }" :layer="pin.identity.layerId" :kind="pin.mark || ''" :icon="pin.icon" />
+          <UiIcon v-else class="pinned-grid__icon" :class="{ 'pinned-grid__icon--over': Boolean(pinned.stillOf(pin.key)), 'pinned-grid__icon--place': PLACE_PINS.has(pin.kind) }" :name="pin.icon" :size="null" />
+          <span class="pinned-grid__name">
+            <span>{{ pin.title }}</span>
+            <small v-if="photoCredit(pin)" class="pinned-grid__photo-credit">{{ photoCredit(pin) }}</small>
+          </span>
+          <FeedDot v-if="withDock(pin)" class="pinned-grid__state" :state="dockFeed(pin).dot" :label="dockFeed(pin).text" />
+          <FeedDot v-else-if="stationLive(pin)" class="pinned-grid__state" state="live" />
+          <PausedChip v-else-if="isPaused(pin)" :reason="offNote(pin)" />
+        </UiButton>
+        <UiCloseButton class="pinned-grid__unpin" glyph="icon" :label="t('Unpin {name}', { name: pin.title })" :title="t('Unpin')" @click="unpin(pin, $event)" />
+      </li>
+    </ul>
+    <!-- The map stills' credit, in full. -->
+    <p v-if="mapShown()" class="pinned-grid__credit">{{ ESRI_IMAGERY_CREDIT }}</p>
+    <p class="pinned-grid__hint">{{ t('Tap a pin to open it on Inspect.') }}</p>
+  </section>
+</template>

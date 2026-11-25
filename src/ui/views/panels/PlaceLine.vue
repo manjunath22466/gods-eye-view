@@ -4,11 +4,14 @@ import { formatNumber, t } from '../../../i18n/index.js';
 import { nearestCity } from '../../../data/wikidataCities.js';
 import { airportCode, NEAR_AIRPORT_KM } from '../../../data/airports.js';
 import { useEntityCardStore } from '../../stores/entityCard.js';
+import { usePinnedStore } from '../../stores/pinned.js';
 import UiButton from '../../kit/UiButton.vue';
+import UiIcon from '../../kit/UiIcon.vue';
 import { focusInCard } from '../../cardFocus.js';
-import { BASES_LAYER, nearSite, spotCoordinates } from '../../placeCard.js';
+import { BASES_LAYER, nearSite, placeIdentity, placeKey, placePin, spotCoordinates } from '../../placeCard.js';
 
-// A place line: a spot's name, then its coordinates, its local time and, within about 2 km of
+// A place line: a spot's name with a 📌 that pins it as a still
+// place pin, then its coordinates, its local time and, within about 2 km of
 // an airport or base, a "near" link to that site's card. The link only
 // offers the card; it never opens by itself. A spot without a
 // name goes by the nearest city, from the bundled cities pack.
@@ -17,14 +20,17 @@ const props = defineProps({
   lon: { type: Number, required: true },
   /** The place's name; empty names the spot after the nearest city. */
   name: { type: String, default: '' },
+  /** How the place was picked: 'spot' (empty ground), 'search' or 'airport'. */
+  from: { type: String, default: 'spot' },
   /** The airport this line is about, when it is one (no near link to itself). */
   airport: { type: Object, default: null },
-  /** Show the name; a card already shows it in its own header. */
+  /** Show the name and the 📌; a card already shows its name and its Pin. */
   headed: { type: Boolean, default: true },
   time: { type: String, default: '' },
 });
 
 const store = useEntityCardStore();
+const pinned = usePinnedStore();
 
 const cityName = ref('');
 watch(
@@ -87,12 +93,22 @@ function openNear() {
     if (nearest?.record.id === site.identity.id && store.open(site.identity)) void focusInCard([], store);
   }
 }
+
+// The 📌: a still place pin with a map, its name and where it is.
+const identity = computed(() => placeIdentity({ name: shownName.value, lat: props.lat, lon: props.lon, from: props.from, airport: props.airport }));
+const isPinned = computed(() => pinned.isPinned(placeKey(identity.value)));
+function togglePin() {
+  pinned.toggle(placePin(identity.value, shownName.value));
+}
 </script>
 
 <template>
   <div class="place-line">
     <div v-if="headed" class="place-line__head">
       <strong class="place-line__name">{{ shownName }}</strong>
+      <UiButton class="place-line__pin" :pressed="isPinned" pressed-class="is-on" :label="isPinned ? t('Unpin {name}', { name: shownName }) : t('Pin {name} to the Pinned tab', { name: shownName })" :title="isPinned ? t('Unpin from the Pinned tab') : t('Pin to the Pinned tab')" @click="togglePin">
+        <UiIcon name="keep" :size="null" />
+      </UiButton>
     </div>
     <p class="place-line__meta">
       <span>{{ coordinates }}</span>

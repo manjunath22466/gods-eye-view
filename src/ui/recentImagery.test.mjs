@@ -109,7 +109,10 @@ function fakeDocument() {
   body.id = 'recent-imagery-panel-body';
   panel.append(count, collapse, body);
   document.body.appendChild(panel);
-  return { document, panel, count, collapse, body };
+  // Whether Context's list tab shows, and its count, as the readout reports.
+  const reports = [];
+  const presence = () => reports.at(-1);
+  return { document, panel, count, collapse, body, reports, presence };
 }
 
 // ---- the real layer, with fakes for everything it injects ------------------
@@ -157,6 +160,7 @@ function fixture({ fetchImpl, controller = fakeController() } = {}) {
   const urls = { created: [], revoked: [] };
   const readout = createRecentImageryPanel({
     container: dom.body,
+    onPresence: (state) => dom.reports.push(state),
     layer,
     viewer,
     tool,
@@ -737,6 +741,64 @@ test('clicks: a card previews and focuses the strip, a chip pins, SELECT BOX tog
   assert.equal(f.byAction('clear').disabled, true);
 });
 
+test('with no box the strip offers to draw one: the action starts the box tool, and the passes then list newest first with the count', async () => {
+  const f = fixture();
+  f.layer.enable();
+  const draw = () => f.byId('ri-draw-area');
+  assert.equal(draw().textContent, 'Draw an area to see recent passes ›');
+  assertSameNode(draw().parentNode, f.strip);
+  // A strip with no days is not a list until the passes arrive.
+  assert.equal(f.strip.getAttribute('role'), null);
+  assert.equal(f.strip.getAttribute('tabindex'), '-1');
+  assert.deepEqual(
+    f.presence(),
+    { count: null, reason: 'no area' },
+    'no passes before a box, and the tab says why',
+  );
+  // Enter on the action is the button's own; the strip leaves it alone.
+  assert.equal(
+    draw().dispatch('keydown', { key: 'Enter' }).defaultPrevented,
+    false,
+  );
+  draw().click();
+  assert.deepEqual(f.tool.calls, ['start']);
+  assert.equal(draw(), null);
+  assert.equal(
+    f.root.find((node) => node.classList.contains('ri-strip-empty'))
+      .textContent,
+    'Drag a box on the map (Esc cancels)',
+  );
+  f.tool.cancel('escape');
+  assert.notEqual(draw(), null, 'a cancelled draw offers the action again');
+  await f.ready();
+  assert.equal(draw(), null);
+  assert.equal(f.strip.getAttribute('role'), 'listbox');
+  assert.equal(f.strip.getAttribute('tabindex'), '0');
+  const cards = f.cards();
+  const days = f.snap().candidates.map((candidate) => candidate.day);
+  assert.deepEqual(
+    days,
+    [...days].sort((a, b) => b.localeCompare(a)),
+    'newest first',
+  );
+  assert.deepEqual(
+    cards.map((node) => node.dataset.key),
+    f.snap().candidates.map((candidate) => candidate.key),
+  );
+  for (const node of cards) {
+    assert.ok(f.part(node, 'ri-card-date').textContent);
+    assert.match(f.part(node, 'ri-card-cloud').textContent, /cloud/);
+  }
+  assert.deepEqual(f.presence(), { count: cards.length }, 'one per pass');
+  // A pass row shows that pass.
+  f.card(L16).click();
+  assert.equal(f.snap().preview.key, L16);
+  // Clearing the box brings the action back.
+  f.byAction('clear').click();
+  assert.notEqual(draw(), null);
+  assert.deepEqual(f.presence(), { count: null, reason: 'no area' });
+});
+
 test('Escape clears the preview first, then cancels the box tool, then blurs the strip', async () => {
   const f = fixture();
   await f.ready();
@@ -755,6 +817,27 @@ test('Escape clears the preview first, then cancels the box tool, then blurs the
   assert.equal(f.snap().preview.key, null);
   const idle = f.byId('ri-opacity').dispatch('keydown', { key: 'Escape' });
   assert.equal(idle.defaultPrevented, false);
+});
+
+test('the readout owns Escape only while it has a preview or the box tool to undo, and leaves one an outer handler took', async () => {
+  const f = fixture();
+  await f.ready();
+  const owns = () => f.root.hasAttribute('data-owns-escape');
+  f.key('Escape');
+  assert.equal(owns(), false, 'idle');
+  f.tool.start();
+  assert.equal(owns(), true, 'drawing a box');
+  // Taken on the way down (Context's capture handler): the strip does nothing.
+  const taken = new Event('keydown', { bubbles: true, cancelable: true });
+  Object.defineProperty(taken, 'key', { value: 'Escape' });
+  taken.preventDefault();
+  f.strip.dispatchEvent(taken);
+  assert.equal(f.tool.isActive(), true, 'the tool stays');
+  f.key('Escape');
+  assert.equal(f.tool.isActive(), false);
+  assert.equal(owns(), false);
+  f.card(L16).click();
+  assert.equal(owns(), true, 'previewing a day');
 });
 
 test('the notice line shows the refusal, then errors, then CLEAR, then the Esri note; the hint names the next step and that SWAP trades the sides', async () => {

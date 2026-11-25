@@ -56,6 +56,9 @@ export const RADIO_OVERLAY_SOURCE_OPTIONS = Object.freeze({
 
 export const DEFAULT_RADIO_FILTER = 'all';
 
+/** What Radio plays: the internet station directory or a local receiver. */
+export const RADIO_SOURCES = Object.freeze(['internet', 'local']);
+
 export const GLOBAL_RADIO_ALTITUDE_M = 2_000_000;
 
 // Genre labels stay English data (the radio source, shared with the AI tools,

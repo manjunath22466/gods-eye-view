@@ -18,7 +18,10 @@ import { h, render as renderVue } from 'vue';
 import { t } from '../i18n/index.js';
 import { EXCLUSIVE_SURFACE_CLASSES } from '../exclusiveSurfaces.js';
 import { LABEL_LAYERS } from './contextLayerTabs.js';
-import { ESCAPE_OWNING_DIALOGS } from './contextEvents.js';
+import {
+  CAMERA_SETTINGS_EVENT,
+  ESCAPE_OWNING_DIALOGS,
+} from './contextEvents.js';
 import OmnibarGuide from './views/panels/OmnibarGuide.vue';
 
 const LEFT_RAIL = '.ui-rail--left .ui-rail__item';
@@ -171,6 +174,26 @@ export function layerSettingsGuide(layer) {
             '3D models: Proximity shows them up close only, All shows every aircraft as a model.',
           ),
         )
+      : []),
+    // A camera's own tools are Context's Camera settings tab, there while
+    // its card is open.
+    ...(layer.id === 'cctv'
+      ? [
+          {
+            prepare: () => {
+              if (typeof CustomEvent === 'function')
+                globalThis.document?.dispatchEvent(
+                  new CustomEvent(CAMERA_SETTINGS_EVENT),
+                );
+            },
+            targets: () => [$('#context-tab-camera')],
+            text: () =>
+              t(
+                "Camera settings in Context holds the open camera's projection, coverage, auto-hop and calibration.",
+              ),
+            skip: () => !$('#context-tab-camera'),
+          },
+        ]
       : []),
   ];
 }

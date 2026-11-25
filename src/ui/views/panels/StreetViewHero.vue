@@ -4,9 +4,11 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { t } from '../../../i18n/index.js';
 import { useEntityCardStore } from '../../stores/entityCard.js';
+import { usePinnedStore } from '../../stores/pinned.js';
 import { useStreetLevelStore } from '../../stores/streetLevel.js';
 import UiButton from '../../kit/UiButton.vue';
 import UiIcon from '../../kit/UiIcon.vue';
+import PausedChip from './PausedChip.vue';
 import { isStreetViewerExpanded, placeStreetLevelViewer, returnStreetLevelViewerHome } from '../../streetLevelViewerPlacement.js';
 import { streetPhotoCredit } from '../../streetPhotoCredit.js';
 
@@ -20,10 +22,13 @@ const streetLevel = useStreetLevelStore();
 const { view, expanded } = storeToRefs(streetLevel);
 const cards = useEntityCardStore();
 const { tick } = storeToRefs(cards);
+const pinned = usePinnedStore();
 const viewerSlot = ref(null);
 
 const photoId = computed(() => props.card.identity?.id || '');
-const open = computed(() => view.value?.viewer.photo?.id === photoId.value);
+const open = computed(() =>
+  !view.value?.dockPhotoUnavailable && view.value?.viewer.photo?.id === photoId.value,
+);
 const layerOn = computed(() => {
   void tick.value;
   return view.value?.enabled === true && !cards.layerOff(STREET_LEVEL_LAYER);
@@ -39,12 +44,16 @@ function rejectStill(event) {
 }
 const still = computed(() => {
   void tick.value;
-  const url = cards.layerModule(STREET_LEVEL_LAYER)?.photo?.(photoId.value)?.still;
-  return layerOn.value && url && url !== brokenStill.value ? url : '';
+  const url = layerOn.value
+    ? cards.layerModule(STREET_LEVEL_LAYER)?.photo?.(photoId.value)?.still || pinned.stillOf(props.card.key)
+    : pinned.stillOf(props.card.key);
+  return url && url !== brokenStill.value ? url : '';
 });
 
 // The still carries the photo's credit (its provider's, who took it, its
-// licence) while it shows; the open viewer's caption credits it otherwise.
+// licence) while it shows, as a pinned tile and the dock do; the open
+// viewer's caption credits it otherwise.
+const pausedStill = computed(() => !layerOn.value && Boolean(still.value));
 const credit = computed(() => {
   void tick.value;
   return still.value ? streetPhotoCredit(cards.layerModule(STREET_LEVEL_LAYER), photoId.value) : '';
@@ -148,7 +157,10 @@ onBeforeUnmount(() => {
         <span>{{ failure }}</span>
         <UiButton class="sl-hero__retry" @click="retry">{{ t('Retry') }}</UiButton>
       </div>
-      <div v-if="credit" class="sl-hero__foot"><small class="sl-hero__credit">{{ credit }}</small></div>
+      <div v-if="pausedStill || credit" class="sl-hero__foot">
+        <PausedChip v-if="pausedStill" :reason="t('Street Level off · last image')" />
+        <small v-if="credit" class="sl-hero__credit">{{ credit }}</small>
+      </div>
     </div>
   </div>
 </template>

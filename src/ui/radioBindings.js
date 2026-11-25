@@ -564,6 +564,7 @@ export function bindRadioControls() {
         finishTuner(false);
     },
     tunerKeyDown: (event) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape' && this._radioTunerDragging) {
         event.preventDefault();
         finishTuner(false);

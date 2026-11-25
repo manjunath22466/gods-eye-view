@@ -1,6 +1,6 @@
 <script setup>
 import { STREET_LEVEL_LAYER } from '../../streetLevelEvents.js';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { formatDate, formatNumber, getLocale, msg, t, translateKnown } from '../../../i18n/index.js';
 import { contextAgeText, durationText } from '../../contextTime.js';
@@ -14,6 +14,7 @@ import LocalConditions from './LocalConditions.vue';
 import { contextNeedle, contextSearchText, matchesContextSearch } from '../../contextSearch.js';
 import { useCockpitStore } from '../../stores/cockpit.js';
 import { useCctvStore } from '../../stores/cctv.js';
+import { useDockedStore } from '../../stores/docked.js';
 import SpotConditions from './SpotConditions.vue';
 import ReadingHero from './ReadingHero.vue';
 import { shownLayerName } from '../../layerNames.js';
@@ -27,8 +28,12 @@ import ItemCharts from './ItemCharts.vue';
 import EntityMark from './EntityMark.vue';
 import { markKind } from '../../entityMark.js';
 import { roundHeadingDegrees } from '../../../data/headingDegrees.js';
-import { PLACE_LAYER, spotCoordinates } from '../../placeCard.js';
+import { usePinnedStore } from '../../stores/pinned.js';
+import { PLACE_LAYER, placePin, spotCoordinates } from '../../placeCard.js';
+import { mapStill } from '../../mapTiles.js';
 import PlaceDetails from './PlaceDetails.vue';
+import { captureFrameStill } from '../../frameStill.js';
+import { cameraSource } from '../../cameraCredit.js';
 import UiButton from '../../kit/UiButton.vue';
 import UiCloseButton from '../../kit/UiCloseButton.vue';
 import UiEmpty from '../../kit/UiEmpty.vue';
@@ -42,7 +47,7 @@ import UiIcon from '../../kit/UiIcon.vue';
 // the omnibar and the nearby lists all fill.
 const props = defineProps({ withContacts: Boolean });
 const store = useEntityCardStore();
-const { card, lost, locationWithheld, tick, away, finding, located } = storeToRefs(store);
+const { card, lost, locationWithheld, tick, fromPin, away, finding, located } = storeToRefs(store);
 // A place or an airport: its own card parts.
 const isPlace = computed(() => card.value?.layerId === PLACE_LAYER);
 // A matching frame can supply a label for the camera card.
@@ -180,7 +185,7 @@ const launchFacts = computed(() => {
 // A street-level photo: its source and capture date on the
 // source line; source, date, heading and whether it is flat or 360° under
 // More details. Its record is the layer's (layers/streetLevel/photos.js),
-// kept while its layer is off so its card still describes it.
+// kept while its layer is off so a pinned photo still describes itself.
 const streetPhoto = computed(() => {
   void tick.value;
   const current = card.value;
@@ -219,6 +224,7 @@ const camera = computed(() => {
   const current = card.value;
   return current?.layerId === 'cctv' && current.identity?.id ? store.cameraDetails(current.identity.id) : null;
 });
+const docked = useDockedStore();
 // Every figure a camera can show, each either in the row of figures or under
 // More details, never both. The row has city, field of view and range; a
 // missing one's place goes to facing, refresh, then provider. A row of fewer
@@ -252,6 +258,106 @@ const extraFacts = computed(() => {
   for (const tile of cameraFields.value.tiles) facts.push({ label: tile.label, value: tile.number });
   return facts.filter((fact) => matchesContextSearch(fact.label, fact.value));
 });
+// Dock, a button on a camera's card: the camera's
+// live view stays bottom right while other things are inspected. Pressed
+// while this camera is docked; pressing again undocks. A flight's cockpit
+// view keeps its dock icon on the image, its row being full.
+// A street-level photo docks the same way: the photo itself moves into the
+// dock while another card shows (streetLevelViewerPlacement.js).
+const DOCK_KINDS = { cctv: 'camera', 'street-level': 'street' };
+const cameraDockKey = computed(() => (DOCK_KINDS[card.value?.layerId] ? card.value.key : ''));
+const cameraDocked = computed(() => Boolean(cameraDockKey.value && docked.isDocked(cameraDockKey.value)));
+function toggleCameraDock() {
+  const current = card.value;
+  const kind = DOCK_KINDS[current?.layerId];
+  if (!current?.identity?.id || !kind) return;
+  const identity = { layerId: current.layerId, id: current.identity.id };
+  // A photo reopens where it was taken, from the dock's ⤢; a camera keeps its
+  // name and place as a pin does, so its card opens even with Cameras off.
+  if (kind === 'street') Object.assign(identity, { lat: current.lat, lon: current.lon });
+  if (kind === 'camera') Object.assign(identity, { label: shownTitle.value, lat: current.lat, lon: current.lon });
+  // A camera's dock keeps who its feed is from, to credit it with Cameras off.
+  const source = kind === 'camera' ? cameraSource(store.cameraDetails(current.identity.id)) : null;
+  docked.toggle({ key: current.key, kind, title: shownTitle.value, identity, ...(source && { source }) });
+}
+
+// Pin: the item goes to the Pinned tab as a still: a camera's
+// frame as it is now, a photo's picture, a place's map, or the map where a
+// moving item is now. Nothing on Pinned refreshes it. The card stays on
+// Inspect.
+const pinned = usePinnedStore();
+const isPinned = computed(() => Boolean(card.value && pinned.isPinned(card.value.key)));
+function stillFor(current) {
+  if (current.layerId === 'wildlife-sightings' || locationWithheld.value || current.obscured) return '';
+  // A camera's still is saved from its frame once it is pinned (frameStill.js).
+  if (current.layerId === 'cctv') return '';
+  if (current.layerId === 'street-level') return store.layerModule('street-level')?.photo?.(current.identity?.id)?.still || '';
+  return Number.isFinite(current.lat) && Number.isFinite(current.lon) ? mapStill(current.lat, current.lon) : '';
+}
+function togglePin() {
+  const current = card.value;
+  if (!current) return;
+  if (pinned.isPinned(current.key)) return pinned.unpin(current.key);
+  if (current.layerId === PLACE_LAYER) return pinned.pin(placePin(current.identity, shownTitle.value));
+  pinned.pin({
+    key: current.key,
+    kind: DOCK_KINDS[current.layerId] || 'item',
+    title: shownTitle.value,
+    icon: current.icon,
+    // The sprite its tile wears (EntityMark.vue), as the map draws it now.
+    mark: markKind(current.layerId, current),
+    still: stillFor(current),
+    // Who a camera's feed is from, credited on its tile (cameraCredit.js).
+    ...(current.layerId === 'cctv' && { source: cameraSource(store.cameraDetails(current.identity?.id)) }),
+    identity: {
+      layerId: current.layerId,
+      id: current.identity?.id,
+      label: shownTitle.value,
+      ...(current.layerId !== 'wildlife-sightings' && !locationWithheld.value && !current.obscured && { lat: current.lat, lon: current.lon }),
+    },
+  });
+  // A camera's pin keeps the frame as it is now, saved once, small: it never
+  // changes or asks the camera again. Its card's own image (or video) gives
+  // it; otherwise the frame is read once.
+  if (current.layerId === 'cctv') {
+    const key = current.key;
+    void cameraShown(key, String(current.identity?.id || '')).then((shown) =>
+      captureFrameStill({ shown, url: store.cameraFrame(current.identity?.id)?.url || '' }).then((still) => {
+        if (still) pinned.setStill(key, still);
+      }),
+    );
+  }
+}
+
+// What the card's top image shows of a camera: its frame, or its live
+// video's canvas once that has drawn a frame. A pin made while the video is
+// still connecting waits a moment for its first frame, never saving a black
+// still; past that, the camera's frame is read once instead. Another camera
+// picked meanwhile draws on the same canvas, so its picture is never saved
+// under this pin: the frame is read instead.
+const PIN_FRAME_WAIT_MS = 6000;
+const drawn = () => cctv.liveState === 'playing' || cctv.liveState === 'stalled';
+const stillShowing = (key, cameraId) => card.value?.key === key && String(cctv.view?.activeCameraId || '') === cameraId;
+async function cameraShown(key, cameraId) {
+  const find = (selector) => globalThis.document?.querySelector?.(`#entity-card ${selector}`) || null;
+  const image = find('.cctv-preview__frame img');
+  if (image) return image;
+  if (!find('.cctv-preview__video canvas')) return null;
+  if (!drawn() && cctv.liveState === 'waiting') {
+    await new Promise((resolve) => {
+      let stop = null;
+      const done = () => {
+        clearTimeout(timer);
+        stop?.();
+        resolve();
+      };
+      const timer = setTimeout(done, PIN_FRAME_WAIT_MS);
+      stop = watch(() => cctv.liveState, (next) => next !== 'waiting' && done());
+    });
+  }
+  return drawn() && stillShowing(key, cameraId) ? find('.cctv-preview__video canvas') : null;
+}
+
 const countryMark = computed(() => ownerMark(
   { countryCode: card.value?.countryCode || satellite.value?.ownerCountryCode },
   { locale: getLocale() },
@@ -417,19 +523,12 @@ const rideFace = computed(() => {
   return { icon: face.icon, label: t(face.label) };
 });
 
-// A new item starts at the top of the panel, not wherever the last one was
-// scrolled to.
+// Reset the expanded details when a deliberate pick opens a different item.
 const detailsKey = ref(card.value?.key);
 watch(
   [() => card.value?.key, () => store.selectionGeneration()],
-  async ([key, generation], [previous, priorGeneration]) => {
-    if (!key || key === previous || generation === priorGeneration) return;
-    detailsKey.value = key;
-    await nextTick();
-    document
-      .getElementById('entity-card')
-      ?.closest('[data-rail-scroller]')
-      ?.scrollTo({ top: 0, behavior: 'smooth' });
+  ([key, generation], [previous, priorGeneration]) => {
+    if (key && key !== previous && generation !== priorGeneration) detailsKey.value = key;
   },
 );
 </script>
@@ -484,6 +583,12 @@ watch(
               </UiButton>
               <UiButton v-else class="entity-card__action" :class="{ 'entity-card__action--primary': leadAction === 'fly' }" @click="flyTo">
                 <UiIcon name="my_location" :size="null" />{{ t('Fly to') }}
+              </UiButton>
+              <UiButton class="entity-card__action entity-card__action--pin" :pressed="isPinned" pressed-class="entity-card__action--on" :title="isPinned ? t('Unpin from the Pinned tab') : t('Pin to the Pinned tab')" @click="togglePin">
+                <UiIcon name="keep" :size="null" />{{ isPinned ? t('Pinned') : t('Pin') }}
+              </UiButton>
+              <UiButton v-if="cameraDockKey" class="entity-card__action entity-card__action--dock" :pressed="cameraDocked" pressed-class="entity-card__action--on" :title="t('Dock this view bottom right')" @click="toggleCameraDock">
+                <UiIcon name="picture_in_picture_alt" :size="null" />{{ cameraDocked ? t('Docked') : t('Dock') }}
               </UiButton>
               <!-- The chat bubble is no Material symbol the page loads, so it stays drawn. -->
               <UiButton class="entity-card__action entity-card__action--ask-icon" :label="t('Ask GEV about {name}', { name: shownTitle })" @click="store.ask(shownTitle)">
@@ -543,7 +648,7 @@ watch(
 
           <!-- Nearby, on every card; a satellite lists what is inside its swath. -->
           <SpotConditions
-            v-if="!locationWithheld && Number.isFinite(card.lat) && Number.isFinite(card.lon)"
+            v-if="!locationWithheld && Number.isFinite(card.lat) && Number.isFinite(card.lon) && !(isPlace && fromPin)"
             :key="card.key"
             :lat="card.lat"
             :lon="card.lon"

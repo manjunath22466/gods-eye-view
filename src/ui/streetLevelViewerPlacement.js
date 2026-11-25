@@ -1,4 +1,4 @@
-// Move the same provider-owned viewer between Context's home and photo slot.
+// Move the same provider-owned viewer between Context’s home, card and dock.
 import { isContextSurfaceVisible, MOBILE_SHEET_ATTR } from './mobileSheets.js';
 
 let home = null;
@@ -35,7 +35,7 @@ function releaseHome() {
   wrap = null;
 }
 
-/** A phone sheet switch moves the viewer between the card and its home. */
+/** A phone sheet switch changes whether the card can host the viewer. */
 function watchSheets() {
   const body = home?.ownerDocument?.body;
   if (!home || !body || sheetWatch || typeof MutationObserver !== 'function')
@@ -50,12 +50,12 @@ function watchSheets() {
     sheetWatch.observe(rail, { attributes: true, attributeFilter: ['class'] });
 }
 
-/** Whether the card's slot can be seen. */
+/** Whether a slot or one of its ancestors is hidden. */
 function slotShown(slot) {
   if (slot.closest('[hidden]')) return false;
   for (let node = slot; node; node = node.parentElement)
     if (node.style?.display === 'none') return false;
-  return isContextSurfaceVisible(slot.ownerDocument?.body);
+  return true;
 }
 
 /** Native fullscreen and an open popover must stay attached to their original parent. */
@@ -69,23 +69,27 @@ export function isStreetViewerExpanded(element = wrap) {
 const lifted = () =>
   wrap.classList.contains('sl-viewer-wrap-embed') || isStreetViewerExpanded();
 
-/** The card's slot while it can be seen, else home. */
+/** Prefer a visible card, then a visible dock, then home. */
 export function placeStreetLevelViewer() {
   if (!home || !wrap || lifted()) return;
   const doc = home.ownerDocument;
   const card = doc.getElementById('sl-viewer-slot');
   const loading = doc.getElementById('sl-viewer-loading-slot');
-  const target =
-    [card, loading].find((slot) => slot && slotShown(slot)) ?? home;
+  const dock = doc.getElementById('sl-docked-slot');
+  const contextSlot = isContextSurfaceVisible(doc.body)
+    ? [card, loading].find((slot) => slot && slotShown(slot))
+    : null;
+  const target = contextSlot ?? (dock && slotShown(dock) ? dock : home);
   if (wrap.parentElement !== target) target.appendChild(wrap);
 }
 
 /**
  * Send the viewer home before its slot goes. Only from that slot: the
- * viewer may already be home.
+ * viewer may already be in the other slot or at home.
+ * @param {string} slotId The card or dock slot being removed.
  */
-export function returnStreetLevelViewerHome() {
+export function returnStreetLevelViewerHome(slotId = 'sl-viewer-slot') {
   if (!home || !wrap || lifted()) return;
-  if (wrap.parentElement?.id !== 'sl-viewer-slot') return;
+  if (wrap.parentElement?.id !== slotId) return;
   home.appendChild(wrap);
 }

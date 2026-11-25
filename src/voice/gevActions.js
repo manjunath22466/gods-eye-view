@@ -1571,6 +1571,7 @@ export function createGevActionRunner({
       if (
         (args.query || args.locationId) &&
         !args.entity &&
+        !(Number.isFinite(args.latitude) && Number.isFinite(args.longitude)) &&
         args.waitForArrival !== true
       ) {
         const pickCurrent = () =>
@@ -2491,15 +2492,22 @@ export async function controlCctv(
     };
   }
   if (action === 'next' || action === 'prev') {
+    // The Data Layers row's Prev/Next walk: the cameras nearest the view,
+    // in the order Context lists them under Nearby.
     styleManager?.supersedeDeferredNavigation?.();
-    const nextId = cctv.cycleCamera(action === 'next' ? 1 : -1);
-    const focusResult = nextId
-      ? cctv.focusCamera(nextId, 1.8)
-      : CCTV_FOCUS_RESULT.NO_ACTIVE_CAMERA;
+    const step = cctv.stepNearbyCamera?.(action === 'next' ? 1 : -1) || null;
+    if (!step) {
+      return {
+        ok: false,
+        action: 'control_cctv',
+        error: 'No other camera nearby',
+        ...summarize(),
+      };
+    }
     return {
       action: 'control_cctv',
       ...summarize(),
-      ...cctvVoiceFocusOutcome(focusResult, { cameraSelected: !!nextId }),
+      ...cctvVoiceFocusOutcome(step.focusResult, { cameraSelected: true }),
     };
   }
   if (action === 'nearest') {
@@ -2911,7 +2919,11 @@ export async function controlRadio(
         ...summarize(),
       };
     }
-    const authorized = await authorizeRadioPlayerMutation();
+    // A station kept playing with the layer off (a pinned tile, say) is
+    // still heard: its volume changes as the mini player's slider does.
+    // A paused kept station takes a volume too, for when it plays again.
+    const keptStream = radioKeptStream(radio, true);
+    const authorized = keptStream || (await authorizeRadioPlayerMutation());
     if (!radioActionIsCurrent(options)) return cancelled(summarize);
     if (!authorized) {
       return lifecycleFailure(
@@ -2967,8 +2979,14 @@ export async function controlRadio(
     // never resurrect a layer that an explicit Disable just turned off. Keep
     // its established cancellation authority while an enable is in flight:
     // the controller commits a successful Pause by aborting that older work.
+    // A station kept playing with the layer off pauses as the mini player's
+    // Pause does.
     const lifecycle = readRadioLifecycle();
-    if (!lifecycle.enabled && lifecycle.lifecycleState !== 'enabling') {
+    if (
+      !lifecycle.enabled &&
+      lifecycle.lifecycleState !== 'enabling' &&
+      !radioKeptStream(radio)
+    ) {
       return {
         ok: true,
         action: 'control_radio',
@@ -4331,8 +4349,10 @@ export async function showStreetLevel(args, context) {
 async function requestStreetLevel(
   args,
   {
+    viewer,
     dataManager,
     styleManager,
+    placeSearch,
     runGevAction,
     owner,
     holdViewer = () => {},
@@ -4381,6 +4401,9 @@ async function requestStreetLevel(
     dataManager?.layers?.get?.(STREET_LEVEL_LAYER_ID)?.module || null;
   if (!layerModule || typeof layerModule.openNearest !== 'function')
     return fail('provider', 'Street Level is unavailable');
+  const admitDockedPhoto =
+    args.autoOpen === false ? null : layerModule.dockedPhotoAdmission?.();
+  const dockedReplacement = Boolean(admitDockedPhoto);
   const providerIds = Array.isArray(layerModule.providerIds)
     ? layerModule.providerIds
     : [];
@@ -4461,11 +4484,44 @@ async function requestStreetLevel(
   atViewCentre = !query && !hasCoordinates && !entity;
   let point = null;
   let location = null;
+  let flew = false;
   // No place at all: the layer looks at the ground under the screen centre,
   // as the OPEN button does. `fly: false` (tests) keeps the camera for a
   // point given by its coordinates.
   if (atViewCentre || (args.fly === false && hasCoordinates)) {
     if (hasCoordinates) point = { lat: latitude, lon: longitude };
+  } else if (dockedReplacement) {
+    // The dock keeps the previous camera and shareable view until the new
+    // photo is ready. Resolve the target without starting a flight.
+    try {
+      const match = query && findPoiByName(query);
+      const poi = match ? CITY_POIS[match.cityId]?.pois?.[match.index] : null;
+      const existing = entity ? locateLayerEntity(dataManager, entity) : poi;
+      location = hasCoordinates
+        ? { latitude, longitude, label }
+        : existing
+          ? {
+              latitude: existing.lat,
+              longitude: existing.lon,
+              label: existing.name || label,
+            }
+          : entity
+            ? null
+            : await searchAndFlyTo(viewer, query, {
+                placeSearch,
+                signal: runOptions.signal,
+                resolveOnly: true,
+              });
+    } catch {
+      return fail('location', `Could not locate ${label}`);
+    }
+    if (
+      !Number.isFinite(location?.latitude) ||
+      !Number.isFinite(location?.longitude)
+    )
+      return fail('location', `Could not locate ${label}`);
+    label = location.label || label;
+    point = { lat: location.latitude, lon: location.longitude };
   } else {
     try {
       location = await runGevAction(
@@ -4495,6 +4551,7 @@ async function requestStreetLevel(
         location?.error || `Could not arrive at ${location?.label || label}`,
         { cancelled: !current() || Boolean(location?.cancelled), location },
       );
+    flew = true;
     // An item, or a named place flown to by its coordinates, keeps its name:
     // such a flight reports only coordinates.
     label =
@@ -4514,7 +4571,7 @@ async function requestStreetLevel(
   // A mode that hides the panel may have started during the flight. The
   // camera is the request's from where its flight landed, unless another
   // navigation took it during the flight.
-  if (location && otherHandoffs() === handoffs) owner.claim();
+  if (flew && otherHandoffs() === handoffs) owner.claim();
   const arrived = interrupted('view');
   if (arrived) return arrived;
 
@@ -4522,6 +4579,11 @@ async function requestStreetLevel(
   const requiredStack = layerModule.requiredMapStack?.(provider) || null;
   const activeStack = styleManager?.mapStackController?.getActiveId?.() ?? null;
   if (requiredStack && activeStack !== requiredStack) {
+    if (dockedReplacement)
+      return fail(
+        'map',
+        `Choose the ${requiredStack} map before replacing the docked photo with ${providerName}.`,
+      );
     reportProgress('map', requiredStack);
     const map = await runGevAction(
       'set_map_stack',
@@ -4542,19 +4604,22 @@ async function requestStreetLevel(
   // Light the source the way a chip click does, so the choice is kept. An
   // open photo of another source stays up until this request replaces it.
   const openPhoto = layerModule.getUIState?.()?.street;
-  if (openPhoto?.open === true && openPhoto.providerId !== provider)
+  if (
+    !dockedReplacement &&
+    openPhoto?.open === true &&
+    openPhoto.providerId !== provider
+  )
     holdViewer(layerModule);
   const switches = Object.fromEntries(
     providerIds.map((id) => [id, id === provider]),
   );
-  let accepted = true;
-  if (typeof dataManager.setLayerParams === 'function')
-    accepted =
-      dataManager.setLayerParams(STREET_LEVEL_LAYER_ID, switches, {
-        origin: actionIntentOrigin(runOptions),
-      }) !== false;
-  else layerModule.setProviderEnabled?.(provider, true);
-  if (!accepted)
+  const lightProvider = () =>
+    typeof dataManager.setLayerParams === 'function'
+      ? dataManager.setLayerParams(STREET_LEVEL_LAYER_ID, switches, {
+          origin: actionIntentOrigin(runOptions),
+        }) !== false
+      : layerModule.setProviderEnabled?.(provider, true) !== false;
+  if (!dockedReplacement && !lightProvider())
     return fail('provider', `${providerName} could not be switched on`, {
       location,
     });
@@ -4585,7 +4650,7 @@ async function requestStreetLevel(
       ui.coverage?.hint || `${providerName} is not available on this map`,
       { location },
     );
-  if (snapshot.on !== true)
+  if (!dockedReplacement && snapshot.on !== true)
     return fail('provider', `${providerName} could not be switched on`, {
       location,
     });
@@ -4621,10 +4686,23 @@ async function requestStreetLevel(
   const cards = useEntityCardStore(applicationPinia());
   const cardBefore = cards.card?.key ?? null;
   const selectionBefore = cards.selectionGeneration();
+  if (admitDockedPhoto?.() === false)
+    return fail('imagery', 'The dock changed before the photo lookup', {
+      cancelled: true,
+      location,
+    });
+  let dockedFailure = null;
   const opening = layerModule.openNearest(point, {
     providerIds: [provider],
     frame: false,
-    replace: true,
+    replace: !dockedReplacement,
+    ...(dockedReplacement
+      ? {
+          onDockedFailure: (failure) => {
+            dockedFailure = failure;
+          },
+        }
+      : {}),
     proceed: () => current() && !owner.taken() && !photoHidden(),
     // Under the screen centre, not the middle of a tilted view's footprint;
     // this request is the user's own, not a link's armed one.
@@ -4637,18 +4715,30 @@ async function requestStreetLevel(
   // The layer claims the request before its first provider await.
   const photoRequest = layerModule.getUIState?.()?.photoRequests;
   const opened = await opening;
-  const street = layerModule.getUIState?.()?.street || {};
-  // A photo that opened after the camera moved on, or into a panel hidden
-  // meanwhile, is closed again, and so is the card it brought up.
+  const street = dockedFailure ?? layerModule.getUIState?.()?.street ?? {};
+  // Close a late ordinary photo and the card it opened. A dock replacement
+  // owns its commit or rollback and keeps control of its photo and card.
   const late = interrupted('imagery');
   if (late) {
-    if (opened === true) {
+    if (opened === true && !dockedReplacement) {
       layerModule.closeViewer?.();
       releaseLateStreetCard(cardBefore);
     }
     return late;
   }
   if (opened !== true) {
+    // The layer refuses to replace a docked photo while it restores the
+    // previous one after a failed replacement.
+    if (
+      dockedReplacement &&
+      !dockedFailure &&
+      layerModule.dockedPhotoRestoring?.() === true
+    )
+      return fail(
+        'imagery',
+        'The docked photo is still being restored. Try again in a moment.',
+        { restoring: true, location },
+      );
     // Why nothing opened: the key, a change under the lookup, or no imagery.
     const after = layerModule.providerStatus?.(provider) || status || {};
     if (after.keyRequired === true || after.keyRejected === true)
@@ -4659,7 +4749,7 @@ async function requestStreetLevel(
       );
     if (
       !dataManager.isEnabled?.(STREET_LEVEL_LAYER_ID) ||
-      after.on === false ||
+      (!dockedReplacement && after.on === false) ||
       after.available === false
     )
       return fail(
@@ -4689,6 +4779,26 @@ async function requestStreetLevel(
       filter ? `${reason} with the ${filter.label} on` : reason,
       { location, noImagery: true, ...(filter ? { filter } : {}) },
     );
+  }
+  if (dockedReplacement) {
+    if (!lightProvider())
+      return fail(
+        'provider',
+        `The photo opened, but ${providerName} could not be selected in Data Layers.`,
+        { photoOpened: true },
+      );
+    if (location && args.fly !== false) {
+      const flight = await runGevAction(
+        'fly_to_location',
+        {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          viewMode: 'close',
+        },
+        runOptions,
+      );
+      flew = flight?.ok === true;
+    }
   }
   // Show the result only while this request still owns the selection.
   const settled = layerModule.getUIState?.();
@@ -4728,7 +4838,9 @@ async function requestStreetLevel(
       styleManager?.revealPanel?.(STREET_LEVEL_PANEL_ID);
       if (photo?.requestId === photoRequest && photo) {
         if (cards.card?.key === streetLevelCardKey(photo.id))
-          globalThis.dispatchEvent?.(new Event('gev:context-show-view'));
+          globalThis.dispatchEvent?.(
+            new CustomEvent('gev:context-show-view', { detail: { inspect: true } }),
+          );
         else announceStreetLevelPhoto(photo, { explicit: true });
       }
     }
@@ -4745,10 +4857,19 @@ async function requestStreetLevel(
     capturedAtPrecision: street.capturedAtPrecision ?? null,
     position: street.position ?? null,
     externalUrl: street.externalUrl ?? null,
-    flew: location !== null,
+    flew,
     ...(atViewCentre ? { atViewCentre } : {}),
     ...(location ? { location: location.label } : {}),
   };
+}
+
+// A station heard with the Radio layer off (a pinned tile, say); with
+// `paused`, also one paused there.
+function radioKeptStream(radio, paused = false) {
+  const heard = radio?.getUIState?.() || {};
+  const states = ['loading', 'buffering', 'playing'];
+  if (paused) states.push('paused');
+  return Boolean(heard.playingStationId) && states.includes(heard.audioState);
 }
 
 async function flyToRequestedLocation(

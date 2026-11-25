@@ -1,6 +1,6 @@
-// A street-level photo's picture away from its viewer (its card's still, a
-// place card's photo) carries its provider's credit, with who took it and
-// its licence when known, for as long as the picture shows.
+// A street-level photo's picture away from its viewer (a pinned tile, the
+// dock) carries its provider's credit, with who took it and its licence when
+// known, for as long as the picture shows.
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +12,11 @@ import { createPhotoHistory } from '../layers/streetLevel/photos.js';
 import { createStreetLevelLayer } from '../layers/streetLevel/index.js';
 import { KARTAVIEW_CREDIT_HTML } from '../layers/streetLevel/providers/kartaview/policy.js';
 import { fakeStreetLevelProvider } from '../testSupport/streetLevelFakes.mjs';
+import PinnedGrid from './views/panels/PinnedGrid.vue';
+import DockedView from './views/panels/DockedView.vue';
 import StreetViewHero from './views/panels/StreetViewHero.vue';
+import { usePinnedStore } from './stores/pinned.js';
+import { useDockedStore } from './stores/docked.js';
 import { useEntityCardStore } from './stores/entityCard.js';
 
 const KARTAVIEW_TEXT =
@@ -131,6 +135,79 @@ function mount(t, component) {
   });
   return { host, pinia, cards, mount: () => app.mount(host) };
 }
+
+test('a pinned street still shows its provider’s credit on its tile; other pins carry none', async (t) => {
+  const { host, pinia, cards, mount: go } = mount(t, PinnedGrid);
+  connect(
+    cards,
+    streetModule({ 'kartaview:42': record({ creator: 'mapfool' }) }),
+    { streetOn: false },
+  );
+  const pinned = usePinnedStore(pinia);
+  pinned.pin({
+    key: 'street-level:kartaview:42',
+    kind: 'street',
+    title: 'Drottninggatan',
+    icon: 'streetview',
+    identity: { layerId: 'street-level', id: 'kartaview:42' },
+    still: 'https://example.org/42.jpg',
+  });
+  pinned.pin({
+    key: 'street-level:kartaview:43',
+    kind: 'street',
+    title: 'No picture',
+    icon: 'streetview',
+    identity: { layerId: 'street-level', id: 'kartaview:43' },
+  });
+  pinned.pin({
+    key: 'place:a',
+    kind: 'place',
+    title: 'Zilker Park',
+    icon: 'location_on',
+    identity: { layerId: 'place', id: 'a' },
+    still: '/still/a.png',
+  });
+  go();
+  await nextTick();
+  const tiles = [...host.querySelectorAll('.pinned-grid__tile')];
+  const credit = (tile) =>
+    tile.querySelector('.pinned-grid__photo-credit')?.textContent ?? null;
+  assert.equal(
+    credit(tiles[0]),
+    `${KARTAVIEW_TEXT} · Image by mapfool`,
+    'with the picture, on its tile',
+  );
+  assert.equal(
+    tiles[0].querySelector('.pinned-grid__frame')?.getAttribute('src'),
+    'https://example.org/42.jpg',
+  );
+  assert.equal(credit(tiles[1]), null, 'no picture, nothing to credit');
+  assert.equal(credit(tiles[2]), null, 'a map still is credited below');
+});
+
+test('a docked street still shows its provider’s credit under the picture', async (t) => {
+  const { host, pinia, cards, mount: go } = mount(t, DockedView);
+  connect(cards, streetModule({ 'kartaview:42': record({ license: null }) }), {
+    streetOn: false,
+  });
+  useDockedStore(pinia).dock({
+    key: 'street-level:kartaview:42',
+    kind: 'street',
+    title: 'Drottninggatan',
+    icon: 'streetview',
+    identity: { layerId: 'street-level', id: 'kartaview:42' },
+  });
+  go();
+  await nextTick();
+  assert.equal(
+    host.querySelector('.docked-view__frame img')?.getAttribute('src'),
+    'https://example.org/42.jpg',
+  );
+  assert.equal(
+    host.querySelector('.docked-view__credit')?.textContent,
+    KARTAVIEW_TEXT,
+  );
+});
 
 test('a waiting street card credits its own still', async (t) => {
   const {

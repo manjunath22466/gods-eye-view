@@ -415,3 +415,20 @@ test('a silent dial release drops the fallback a voice step left behind', async 
     assert.equal(radioLayer.getUIState().audioState, 'error');
   });
 });
+
+test('Prev and Next on the Data Layers row step through the stations, silent while nothing plays', async () => {
+  await withLayer([], async ({ playUrls }) => {
+    radioLayer.selectStation(ids[0], { autoplay: false });
+    const chip = (id) => radioLayer.getRowControls()?.chips.find((one) => one.id === id);
+    assert.ok(chip('previous-station') && chip('next-station'));
+    const before = radioLayer.getUIState().selected?.id;
+    chip('next-station').onClick();
+    await settle();
+    const after = radioLayer.getUIState().selected?.id;
+    assert.ok(after && after !== before, 'the next station is selected');
+    assert.deepEqual(playUrls, [], 'nothing starts playing');
+    chip('previous-station').onClick();
+    await settle();
+    assert.equal(radioLayer.getUIState().selected?.id, before, 'and back');
+  });
+});
