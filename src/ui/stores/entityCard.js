@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { computed, markRaw, ref, shallowRef, triggerRef } from 'vue';
+import { STREET_LEVEL_LAYER } from '../streetLevelEvents.js';
 import { shownLayerName, sourceLabel } from '../layerNames.js';
 import {
   alertsNear,
@@ -548,6 +549,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
         limit,
         !!options.breakdown,
         !!options.includeEmpty,
+        !!options.includeDrawnCoverage,
         getLocale(),
       ]),
       (row, onSnapshotFallback) =>
@@ -555,6 +557,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
           perLayer: limit,
           breakdown: options.breakdown,
           includeEmpty: options.includeEmpty,
+          includeDrawnCoverage: options.includeDrawnCoverage,
           query,
           shownLayerName,
           hemisphere,
@@ -797,8 +800,13 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
       return;
     }
     openedWhileOff = false;
-    // A place stays put and belongs to no layer: only its ages tick.
-    if (current.layerId === PLACE_LAYER) {
+    // Places and selected coverage points keep their selected coordinates.
+    // A drawn street line is not a photo-history entry to poll for loss.
+    if (
+      current.layerId === PLACE_LAYER ||
+      (current.layerId === STREET_LEVEL_LAYER &&
+        current.identity.id.startsWith('near:'))
+    ) {
       tick.value++;
       return;
     }
@@ -926,6 +934,13 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
   const generation = ref(0);
   const selectionGeneration = () => generation.value;
 
+  // Starting a lookup takes priority without replacing the displayed card.
+  let deferredPick = 0;
+  function claimDeferredPick() {
+    const mine = ++deferredPick;
+    return () => mine === deferredPick;
+  }
+
   /** Things that move are followed as soon as they are picked. */
   const AUTO_FOLLOW = new Set(['flights', 'military', 'satellites']);
   /**
@@ -956,6 +971,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     const previous = card.value;
     if (!read(identity)) return false;
     openedWhileOff = layerOff(identity.layerId);
+    dismissedKey = null;
     generation.value++;
     // Back belongs to the airport card it was made for.
     if (backTo.value && backTo.value.key !== card.value?.key)
@@ -971,6 +987,11 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
       layerOf(identity.layerId)?.retainContextRecord?.(card.value.identity.id),
     );
     shell.value?.openPanel?.({ reveal });
+    if (identity.layerId === STREET_LEVEL_LAYER && (fly || explicit)) {
+      const street = layerOf(STREET_LEVEL_LAYER);
+      if (street?.settledPhotoId?.() === identity.id)
+        void street.openPhoto(identity.id);
+    }
     const current = card.value;
     // With its layer off, nothing moves to follow: fly to where the
     // item was last seen instead.
@@ -999,6 +1020,23 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
       if (fly) shell.value?.flyTo?.(current, { explicit, fromSelection: true });
     }
     requestRoute(current?.identity);
+    return true;
+  }
+
+  /**
+   * Move a card on to the next item of the same layer (a street-level
+   * photo's next image) without counting a new pick: the selection
+   * generation, the refresh timer and Context stay as they are.
+   * @param {object} identity
+   * @returns {boolean} Whether the card moved.
+   */
+  function advance(identity) {
+    if (!card.value || card.value.layerId !== identity?.layerId) return false;
+    if (!read(identity)) return false;
+    away.value = false;
+    reference =
+      layerOf(identity.layerId)?.referenceOf?.(card.value?.identity?.id) ??
+      null;
     return true;
   }
 
@@ -1077,7 +1115,17 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     return open(to.identity, { follow: false });
   }
 
-  function clear() {
+  /** The key of the card last closed with its × button, until a pick. */
+  let dismissedKey = null;
+  /** Whether `key` was the card last closed with its × button. */
+  const wasDismissed = (key) => Boolean(key) && key === dismissedKey;
+
+  /**
+   * @param {{dismiss?: boolean}} [options] `dismiss`: the card's × button
+   *   was activated.
+   */
+  function clear({ dismiss = false } = {}) {
+    dismissedKey = dismiss ? (card.value?.key ?? null) : null;
     replaceContextRecordRelease();
     generation.value++;
     backTo.value = null;
@@ -1156,7 +1204,10 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     connect,
     syncDataManager,
     select,
+    advance,
+    wasDismissed,
     selectionGeneration,
+    claimDeferredPick,
     open,
     openAirport,
     backTo,
@@ -1178,6 +1229,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     satellite,
     cameraDetails,
     layerModule,
+    layerOff,
     nearbySelected,
     alertsAt,
     liveLayers,
@@ -1185,7 +1237,6 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     managerVersion,
     layerRevision,
     baseCatalogRevision,
-    layerOff,
     valueAt,
     breakdown,
     view,

@@ -83,7 +83,12 @@ const PANEL_NAMES = [
   [/authoring( panel)?|scenes? panel/, 'left', 'scene-panel', msg('Authoring')],
   [/display( panel)?|visual( panel)?/, 'left', 'pp-toggles', msg('Visual')],
   [/cctv panel|cameras? panel/, 'right', 'cctv-panel', msg('CCTV')],
-  [/street ?level panel/, 'right', 'street-level-panel', msg('Street Level')],
+  [
+    /street ?(level|view) panel/,
+    'right',
+    'street-level-panel',
+    msg('Street Level'),
+  ],
   [
     /(space )?missions? panel/,
     'right',

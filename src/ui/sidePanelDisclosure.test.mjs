@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createPinia } from 'pinia';
 import { PanelChrome } from './panelChrome.js';
+import { usePanelChromeStore } from './stores/panelChrome.js';
 import { presentPanelLocally } from '../testSupport/panelState.mjs';
 import { readPanelState } from './rail/panelState.js';
 
@@ -32,8 +34,11 @@ function fixture(theme = 'tactical') {
   for (const panel of rail.children) panel.parentElement = rail;
   context.children = [radio];
   radio.parentElement = context;
+  const chrome = usePanelChromeStore(createPinia());
   const saved = [], claimed = [];
   const owner = {
+    _chromeStore: chrome,
+    _chromeToken: chrome.connect({}),
     _leftPanelStack: left,
     _rightPanelStack: rail,
     _panelLayout: {},

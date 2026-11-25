@@ -1,5 +1,7 @@
 <script setup>
 import { computed, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, reactive, ref, watch } from 'vue';
+import { STREET_LEVEL_LAYER } from '../../streetLevelEvents.js';
+import { computed, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, reactive, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { t } from '../../../i18n/index.js';
 import { sayWords, useEntityCardStore } from '../../stores/entityCard.js';
@@ -8,12 +10,16 @@ import { useCockpitStore } from '../../stores/cockpit.js';
 import AircraftModelHero from './AircraftModelHero.vue';
 import CctvPreview from './CctvPreview.vue';
 import { onTileMap } from '../../mapTiles.js';
+import StreetViewHero from './StreetViewHero.vue';
 import CloseUpMap from './CloseUpMap.vue';
 import FlightCockpitView from './FlightCockpitView.vue';
 import UiButton from '../../kit/UiButton.vue';
 import UiIcon from '../../kit/UiIcon.vue';
 import RouteGlobe from './RouteGlobe.vue';
 import SatelliteGroundView from './SatelliteGroundView.vue';
+import { PLACE_LAYER } from '../../placeCard.js';
+import { streetPhotoCredit } from '../../streetPhotoCredit.js';
+import { distanceKm } from '../../../data/entityContext.js';
 import { fleetModelSet, fleetModelSetLoading } from '../../../data/fleetModels.js';
 import {
   HERO_AUTOPLAY_MS,
@@ -46,8 +52,8 @@ const callouts = computed(() =>
 // on a small globe, its 3D model, the view from its cockpit and a close-up
 // map; anything else drawn with a 3D model (a vessel, a train) shows its
 // photo, its model and the map; a satellite, the ground beneath it; a camera,
-// its latest frame; anything else on the map, a close-up satellite map of
-// where it is (entityHeroViews.js).
+// its latest frame; a street-level photo, the photo itself; anything else on
+// the map, a close-up satellite map of where it is (entityHeroViews.js).
 // The views take turns, first to last and round again, each for
 // HERO_AUTOPLAY_MS once it has drawn; picking one, or Pause, stops the turns.
 // The globe, model and cockpit view are the renderer's (`store.previews()`).
@@ -106,10 +112,45 @@ const activeFlightPreview = computed(() => shownHeroView(views.value, chosen.val
 // The views shown so far for this item; only these are mounted.
 const made = reactive(new Set());
 
+// A place: a street-level photo on top where Street Level has a photo a
+// short walk away, one the layer remembers from this session (nothing is
+// looked up for it); otherwise the close-up map. Never an icon.
+const PLACE_PHOTO_KM = 0.15;
+const failedPlaceStills = reactive(new Set());
+function rejectPlaceStill(event) {
+  failedPlaceStills.add(event.currentTarget.getAttribute('src'));
+}
+watch(() => card.value?.key, () => failedPlaceStills.clear(), { flush: 'sync' });
+const placePhoto = computed(() => {
+  const current = card.value;
+  if (current?.layerId !== PLACE_LAYER || !hasPosition.value) return null;
+  void cards.tick;
+  if (cards.layerOff(STREET_LEVEL_LAYER)) return null;
+  let photos = [];
+  try {
+    photos = cards.layerModule(STREET_LEVEL_LAYER)?.getAnalystRecords?.() || [];
+  } catch {
+    photos = [];
+  }
+  let best = null;
+  for (const photo of photos) {
+    if (!photo?.still || failedPlaceStills.has(photo.still) || !Number.isFinite(photo.lat) || !Number.isFinite(photo.lon)) continue;
+    const km = distanceKm(current, photo);
+    if (km <= PLACE_PHOTO_KM && (!best || km < best.km)) best = { ...photo, km };
+  }
+  return best;
+});
+const placePhotoCredit = computed(() => (placePhoto.value ? streetPhotoCredit(cards.layerModule(STREET_LEVEL_LAYER), placePhoto.value.id) : ''));
+function openPlacePhoto() {
+  const photo = placePhoto.value;
+  if (photo) cards.open({ layerId: STREET_LEVEL_LAYER, id: photo.id, lat: photo.lat, lon: photo.lon });
+}
+
 const heroKind = computed(() =>
   heroKindOf({
     kind: card.value?.kind,
     layerId: card.value?.layerId,
+    placeStreet: Boolean(placePhoto.value),
     photo: photoAvailable.value,
     route: routeKnown.value,
     model: modelKnown.value,
@@ -358,6 +399,11 @@ onBeforeUnmount(() => {
       </div>
     </template>
     <CctvPreview v-else-if="heroKind === 'camera'" :camera-id="card.identity?.id || ''" :shown="contextViewShown && onScreen && pageShown" />
+    <StreetViewHero v-else-if="heroKind === 'street'" :card="card" />
+    <UiButton v-else-if="heroKind === 'place-street'" :key="`place-street-${placePhoto.id}`" class="entity-hero__layer entity-hero__photo entity-hero__place-street is-shown" :title="t('Street-level photo')" :label="t('Open street-level photo')" :aria-describedby="placePhotoCredit ? 'place-street-credit' : undefined" @click="openPlacePhoto">
+      <img :src="placePhoto.still" alt="" referrerpolicy="no-referrer" v-on="{ error: rejectPlaceStill }" />
+      <small v-if="placePhotoCredit" id="place-street-credit">{{ placePhotoCredit }}</small>
+    </UiButton>
     <CloseUpMap v-else-if="heroKind === 'map'" :key="`map-${card.key}`" class="entity-hero__layer is-shown" :active="onScreen && pageShown" :lat="card.lat" :lon="card.lon" :icon="card.icon" :card="card" />
     <slot v-else name="placeholder" />
     <!-- Small icons in the top corner of the image, never in the button row. -->

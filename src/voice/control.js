@@ -153,10 +153,8 @@ function initialState(panel) {
     },
     // The minimized voice bar's last sentence from each side.
     mini: { user: '', assistant: '' },
-    // Above the dock, or docked into the right rail's lane.
-    // `yielded` names the panel minimized to make room for a dock tray;
-    // `trayDocked` marks a dock taken only while a tray was open.
-    layout: { docked: false, yielded: null, trayDocked: false },
+    // The panel minimized to make room for a dock tray.
+    layout: { yielded: null },
     previewEmpty: {
       hidden: false,
       text: () => t('Voice replies appear here.'),
@@ -300,7 +298,7 @@ export function createVoiceControl({
      * `provider-change`, `settings-button`, `settings-close`, `tab`,
      * `tab-keydown`, `panel-keydown`, `pointerenter`, `pointerleave`,
      * `preview-change`, `timeout-select`, `timeout-input`, `card-dismiss`,
-     * `voice-back`, `voice-minimize`, `layout-dock`; the chat's
+     * `voice-back`, `voice-minimize`; the chat's
      * `chat-button`, `chat-close`, `chat-minimize`, `chat-restore`,
      * `chat-back`, `chat-input`, `chat-keydown`, `chat-submit`, `chat-ask`, `chat-stop`,
      * `chat-prompt`, `chat-suggestion`, `chat-quick-change`,

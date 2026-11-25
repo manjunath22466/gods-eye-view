@@ -1207,7 +1207,7 @@ test('reaching for a dock wing minimizes a centred chat or voice panel', async (
   assert.equal($('#gev-voice-panel').dataset.minimized, 'true');
 });
 
-test('expanding a panel over an open tray docks it right without saving', async (t) => {
+test('expanding a panel over an open tray keeps it floating', async (t) => {
   const f = mounted(t, { view: true });
   // The view mount resets the body; the layouts bind on the next tick.
   const wing = dockWing(t);
@@ -1217,19 +1217,17 @@ test('expanding a panel over an open tray docks it right without saving', async 
   wing.toggle.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
   wing.open();
   await f.settle();
-  assert.equal($('#gev-chat-panel').dataset.placement, 'compact');
+  assert.equal($('#gev-chat-panel').style.top, 'auto');
   $('#gev-chat-restore').click();
   await f.settle();
   await f.settle();
   assert.equal($('#gev-chat-panel').dataset.minimized, undefined);
-  assert.equal($('#gev-chat-panel').dataset.placement, 'docked');
-  assert.notEqual(globalThis.localStorage.getItem('gev.panel.docked'), 'true');
-  // The dock was only for the tray; it ends once the tray closes.
+  assert.equal($('#gev-chat-panel').style.top, 'auto');
+  assert.equal(f.ui.state.layout.yielded, null);
   wing.close();
   await f.settle();
   await f.settle();
-  assert.equal(f.ui.state.layout.docked, false);
-  assert.equal($('#gev-chat-panel').dataset.placement, 'compact');
+  assert.equal($('#gev-chat-panel').style.top, 'auto');
   assert.equal($('#gev-chat-panel').dataset.minimized, undefined);
 });
 
@@ -1270,7 +1268,7 @@ test('a panel that yielded to a tray expands in the centre once it closes', asyn
   wing.close();
   await f.settle();
   assert.equal($('#gev-chat-panel').dataset.minimized, undefined);
-  assert.equal($('#gev-chat-panel').dataset.placement, 'compact');
+  assert.equal($('#gev-chat-panel').style.top, 'auto');
   assert.equal(f.ui.state.layout.yielded, null);
 });
 
@@ -1290,22 +1288,40 @@ test('switching to voice while chat yields to a tray starts voice as its bar', a
   assert.equal(f.ui.state.layout.yielded, 'voicePanel');
 });
 
-test('undocking while a tray is open brings the panel back as its bar', async (t) => {
+test('a saved right-dock preference leaves chat and voice floating and able to minimize', async (t) => {
+  const key = 'gev.panel.docked';
+  const previous = globalThis.localStorage.getItem(key);
+  globalThis.localStorage.setItem(key, 'true');
+  t.after(() => {
+    if (previous === null) globalThis.localStorage.removeItem(key);
+    else globalThis.localStorage.setItem(key, previous);
+  });
   const f = mounted(t, { view: true });
-  const wing = dockWing(t);
   await f.settle();
-  $('#gev-chat-button').click();
-  await f.settle();
-  $('#gev-chat-panel [data-layout-dock]').click();
-  await f.settle();
-  assert.equal($('#gev-chat-panel').dataset.placement, 'docked');
-  wing.open();
-  await f.settle();
-  $('#gev-chat-panel [data-layout-dock]').click();
-  await f.settle();
-  await f.settle();
-  assert.equal($('#gev-chat-panel').dataset.minimized, 'true');
-  assert.equal($('#gev-chat-panel').dataset.placement, 'compact');
+  for (const mode of ['chat', 'voice']) {
+    if (mode === 'chat') $('#gev-chat-button').click();
+    else f.commands.voicePanel.select('preview');
+    await f.settle();
+    const panel = $(`#gev-${mode}-panel`);
+    assert.equal(panel.checkVisibility(), true);
+    assert.equal(panel.style.top, 'auto');
+    assert.equal(globalThis.document.body.dataset.assistantDocked, undefined);
+    assert.equal(panel.querySelector('[data-layout-dock]'), null);
+
+    panel.querySelector('[data-layout-minimize]').click();
+    await f.settle();
+    assert.equal(panel.dataset.minimized, 'true');
+    const expand =
+      mode === 'chat'
+        ? $('#gev-chat-restore')
+        : panel.querySelector('[data-layout-minimize]');
+    expand.click();
+    await f.settle();
+    assert.equal(panel.dataset.minimized, undefined);
+    assert.equal(panel.style.top, 'auto');
+
+    if (mode === 'chat') $('#gev-chat-button').click();
+  }
 });
 
 test('opening chat or closing the voice panel clears a stale voice error', async (t) => {
@@ -1484,25 +1500,15 @@ function contextCard(t) {
   return store;
 }
 
-// Docks the assistant panels into the right rail's lane for one test.
-async function dockIntoRail(t, f) {
-  t.after(() => globalThis.localStorage.removeItem('gev.panel.docked'));
-  f.ui.emit('layout-dock');
-  await f.settle();
-  await f.settle();
-}
-
-test('a voice selection opens its Context card, steps the docked voice panel down and keeps the reply', async (t) => {
+test('a voice selection opens its Context card, keeps the floating voice panel open with its reply', async (t) => {
   const context = contextCard(t);
   const f = mounted(t, { view: true, runner: selectionRunner });
   await f.settle();
   await f.commands.session.start();
   f.commands.voicePanel.select('preview');
   await f.settle();
-  await dockIntoRail(t, f);
   const panel = $('#gev-voice-panel');
-  assert.equal(panel.dataset.placement, 'docked');
-  assert.equal(globalThis.document.body.dataset.assistantDocked, 'true');
+  assert.equal(panel.style.top, 'auto');
   const { emit, runAction } = f.instances[0].hooks;
   // A failed selection selects nothing, so the panel stays.
   emit({
@@ -1525,9 +1531,10 @@ test('a voice selection opens its Context card, steps the docked voice panel dow
     responseId: 'r1',
   });
   await f.settle();
+  assert.equal(panel.dataset.minimized, undefined);
+  panel.querySelector('[data-layout-minimize]').click();
+  await f.settle();
   assert.equal(panel.dataset.minimized, 'true');
-  // The rail, and its Context panel, show again.
-  assert.equal(globalThis.document.body.dataset.assistantDocked, undefined);
   assert.equal(
     $('#gev-voice-mini-assistant').textContent,
     'The nearest aircraft is UAL12.',
@@ -1555,7 +1562,7 @@ test('a voice selection leaves a voice panel above the dock as it is', async (t)
   await f.commands.session.start();
   f.commands.voicePanel.select('preview');
   await f.settle();
-  assert.equal($('#gev-voice-panel').dataset.placement, 'compact');
+  assert.equal($('#gev-voice-panel').style.top, 'auto');
   await f.instances[0].hooks.runAction('track_entity', { query: 'RCH401' });
   await f.settle();
   assert.equal(context.card.key, 'military:ae01ce');
@@ -1573,22 +1580,20 @@ test('a voice selection in Cockpit leaves the hidden Context card alone', async 
   assert.equal(context.card, null);
 });
 
-test('a typed chat selection opens its Context card and steps the docked chat panel down', async (t) => {
+test('a typed chat selection opens its Context card and keeps the floating chat open', async (t) => {
   const context = contextCard(t);
   const f = mounted(t, { view: true, runner: selectionRunner });
   typedChat(f);
   await f.settle();
   $('#gev-chat-button').click();
   await f.settle();
-  await dockIntoRail(t, f);
-  assert.equal($('#gev-chat-panel').dataset.placement, 'docked');
+  assert.equal($('#gev-chat-panel').style.top, 'auto');
   await f.commands.session.start({ textOnly: true });
   await f.instances[0].hooks.runAction('track_entity', { query: 'RCH401' });
   await f.settle();
   assert.equal(context.card.key, 'military:ae01ce');
-  assert.equal($('#gev-chat-panel').dataset.minimized, 'true');
+  assert.equal($('#gev-chat-panel').dataset.minimized, undefined);
   assert.equal(f.ui.state.chat.open, true);
-  assert.equal(globalThis.document.body.dataset.assistantDocked, undefined);
 });
 
 test('the voice panel keeps the last reply until the next turn starts', async (t) => {

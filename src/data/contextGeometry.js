@@ -255,7 +255,7 @@ function* segmentIntervals(paths, rect, south, north) {
           Math.max(alongLat, toLat),
           Math.max(alongLon, toLon),
         );
-        if (start <= end) yield { a, dx, dy, start, end };
+        if (start <= end) yield { a, dx, dy, start, end, alongLon, toLon };
       }
     }
   }
@@ -278,7 +278,7 @@ export function linePointInRect(paths, rect, center, spherical = false) {
   const lonWeight = Math.cos((center.lat * Math.PI) / 180) ** 2;
   let best = null;
   let bestKm = Infinity;
-  for (const { a, dx, dy, start, end } of segmentIntervals(
+  for (const { a, dx, dy, start, end, alongLon, toLon } of segmentIntervals(
     paths,
     rect,
     rect.south,
@@ -319,8 +319,13 @@ export function linePointInRect(paths, rect, center, spherical = false) {
       t = Math.max(start, Math.min(end, nearest));
     }
     const at = {
-      lat: a.lat + t * dy,
-      lon: clippedLongitude(a.lon + t * dx, rect),
+      lat: Math.max(rect.south, Math.min(rect.north, a.lat + t * dy)),
+      lon:
+        dx && t === alongLon
+          ? rect.west
+          : dx && t === toLon
+            ? rect.east
+            : clippedLongitude(a.lon + t * dx, rect),
     };
     const km = greatCircleKm(center, at);
     if (km < bestKm) {

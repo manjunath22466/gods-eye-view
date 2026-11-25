@@ -13,7 +13,7 @@ import { PHOTON_SETTING } from '../../../search/photonSetting.js';
 import { citiesAround, countryName, findPlace, nearestCity, placesNear } from '../../../data/wikidataCities.js';
 import { CITY_POIS } from '../../../cityPois.js';
 import { useDisplayStore } from '../../stores/display.js';
-import { useEntityCardStore } from '../../stores/entityCard.js';
+import { sayWords, useEntityCardStore } from '../../stores/entityCard.js';
 import { useGlobeActionsStore } from '../../stores/globeActions.js';
 import { useLocationStore } from '../../stores/location.js';
 import { useOmnibarStore } from '../../stores/omnibar.js';
@@ -26,6 +26,7 @@ import { vRootClass } from '../../rail/rootClass.js';
 // controls, layers through the shell's omnibar actions, and anything else can
 // go to GEV's typed chat. The mic starts voice, as the dock's button does.
 const { controls, runner } = storeToRefs(useOmnibarStore());
+const entityTitle = (item) => sayWords(item.titleWords, item.title);
 
 // A bundled city in the shape the place chips use, keyed by its Wikidata id
 // (namesakes are common). Showing one credits the Wikidata packs (once; the
@@ -123,7 +124,7 @@ const suggester = createPlaceSuggester(
 // place service and count requests all come from it.
 const reader = computed(() => {
   void layerRevision.value;
-  return createOmnibar({ layers: controls.value?.layers() || [], isEntity });
+  return createOmnibar({ layers: controls.value?.layers() || [], isEntity, entityTitle });
 });
 
 /** Whether the text names something loaded on the map ("ISS"), to follow. */
@@ -307,7 +308,7 @@ const strip = computed(() => {
     const counted = countQuery.value;
     return {
       title: tn(counted.count, '{what} in {place}: {count} item', '{what} in {place}: {count} items', { what: counted.what, place: counted.placeName }),
-      chips: counted.items.map((item) => ({ key: `count:${item.key}`, kind: 'entity', icon: item.icon, identity: item.identity, name: item.title })),
+      chips: counted.items.map((item) => ({ key: `count:${item.key}`, kind: 'entity', icon: item.icon, identity: item.identity, name: entityTitle(item) })),
     };
   }
   if (!asked && !selected.value) {
@@ -316,7 +317,7 @@ const strip = computed(() => {
       .flatMap((group) => group.items.map((item) => ({ ...item, icon: group.icon })))
       .sort((a, b) => a.distanceKm - b.distanceKm)
       .slice(0, 6)
-      .map((item) => ({ key: `inview:${item.key}`, kind: 'entity', icon: item.icon, identity: item.identity, name: item.title }));
+      .map((item) => ({ key: `inview:${item.key}`, kind: 'entity', icon: item.icon, identity: item.identity, name: entityTitle(item) }));
     const total = groups.reduce((sum, group) => sum + group.count, 0);
     return chips.length ? { title: tn(total, '{count} item in view', '{count} items in view'), chips } : null;
   }
@@ -325,17 +326,17 @@ const strip = computed(() => {
     const current = selected.value;
     const { same = [], other = [] } = selectedNearby.value || {};
     const chips = [
-      { key: `sel:${current.key}`, kind: 'entity', icon: current.icon, identity: current.identity, name: current.title, pressed: true },
+      { key: `sel:${current.key}`, kind: 'entity', icon: current.icon, identity: current.identity, name: entityTitle(current), pressed: true },
       ...[...same.slice(0, 5), ...other].map((item) => ({
         key: `sel-near:${item.key}`,
         kind: 'entity',
         icon: item.icon,
         identity: item.identity,
-        name: item.title,
+        name: entityTitle(item),
       })),
       ...selectedPlaces.value.map((place) => ({ key: `sel-place:${placeKey(place)}`, kind: 'place', icon: 'location_city', ...place })),
     ];
-    return { title: t('Selected · near {name}', { name: current.title }), chips };
+    return { title: t('Selected · near {name}', { name: entityTitle(current) }), chips };
   }
   if (villagesAsked.value && villages.value?.asked === villagesAsked.value && villages.value.places.length) {
     return {
@@ -838,7 +839,8 @@ async function runPlan(steps, current) {
         result = await run('set_hud', { visible: step.visible });
         break;
       case 'panel':
-        if (!togglePanel(step)) throw new ActionFailed();
+        if (step.item === 'street-level-panel') result = await run('set_panel_open', { panelId: step.item, open: step.action === 'open' });
+        else if (!togglePanel(step)) throw new ActionFailed();
         break;
       case 'radio':
         result = await run(
@@ -890,7 +892,7 @@ async function choose(item, { viaKey = false } = {}) {
     else if (item.kind === 'sel-follow') entityCard.follow();
     else if (item.kind === 'sel-cockpit') entityCard.cockpit();
     else if (item.kind === 'sel-ask') entityCard.ask();
-    else if (item.kind === 'sel-close') entityCard.clear();
+    else if (item.kind === 'sel-close') entityCard.clear({ dismiss: true });
     else if (item.kind === 'count-show' || item.kind === 'place') {
       const { coords, place } = item;
       const selection = entityCard.selectionGeneration();

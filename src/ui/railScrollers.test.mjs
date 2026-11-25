@@ -14,7 +14,6 @@ test('every scroller the rail measuring pass lifts restores its scroll offset', 
     read('./views/ContextView.vue'),
     read('./views/LayerPanelsView.vue'),
     read('./views/panels/CctvPanel.vue'),
-    read('./views/panels/StreetLevelPanel.vue'),
   ].join('\n');
   const lifted = [
     ...css.matchAll(

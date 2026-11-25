@@ -1,4 +1,5 @@
 <script setup>
+import { onBeforeUpdate } from 'vue';
 import RailChips from '../rail/RailChips.vue';
 import RailRowList from '../rail/RailRowList.vue';
 import RowRange from './RowRange.vue';
@@ -11,7 +12,7 @@ import { vClassToggle } from '../rail/classToggle.js';
 // The data layer rows under their group headings. LayerPanel presents every
 // value; clicks reach it with the layer id, and it re-reads the live
 // descriptor before acting.
-defineProps({
+const props = defineProps({
   items: { type: Array, required: true },
   filtered: Set,
   onToggle: { type: Function, default: () => {} },
@@ -19,6 +20,23 @@ defineProps({
   onListItem: { type: Function, default: () => {} },
   onSlider: { type: Function, default: () => {} },
   onRange: { type: Function, default: () => {} },
+});
+
+// Turning off a layer or losing a provider key can remove the focused control.
+onBeforeUpdate(() => {
+  const focused = globalThis.document?.activeElement;
+  const row = focused?.closest('.data-toggle-controls')?.parentElement;
+  if (!row) return;
+  const item = props.items.find((entry) => entry.id === row.dataset.layerId);
+  const sliderId = focused.dataset.sliderId;
+  if (
+    item &&
+    !props.filtered?.has(item.key) &&
+    (!item.controls ||
+      item.controls.hidden ||
+      (sliderId && sliderId !== item.controls.slider?.id))
+  )
+    row.querySelector('.data-toggle-btn')?.focus({ preventScroll: true });
 });
 </script>
 
@@ -72,6 +90,7 @@ defineProps({
             :on-select="(optionId) => onChip(item.id, optionId)"
           /><RowSlider
             v-if="item.controls.slider"
+            :key="item.controls.slider.id"
             :slider="item.controls.slider"
             :on-input="
               (value) => onSlider(item.id, item.controls.slider.id, value)
@@ -99,6 +118,11 @@ defineProps({
             :title="item.controls.info.title"
             :hidden="!item.controls.info.text"
             >{{ item.controls.info.text }}</div
+          ><div
+            v-if="item.controls.alert != null"
+            class="data-toggle-controls-info data-toggle-controls-alert"
+            role="status"
+            >{{ item.controls.alert }}</div
           ></div
         ><RailRowList
           :list="item.controls.list"

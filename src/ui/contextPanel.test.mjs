@@ -16,6 +16,16 @@ import { useLayerFinderStore } from './stores/layerFinder.js';
 import { ownerFlagStyle, preloadOwnerFlags } from './ownerFlag.js';
 import { INSPECTOR_PULSE_MS, useEntityCardStore } from './stores/entityCard.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
+import { useStreetLevelStore } from './stores/streetLevel.js';
+import { placeStreetLevelViewer } from './streetLevelViewerPlacement.js';
+import { StreetLevelControls } from './streetLevelControls.js';
+import { StyleManager } from './applicationShell.js';
+import { applicationPinia } from './vueRuntime.js';
+import { createStreetLevelLayer } from '../layers/streetLevel/index.js';
+import {
+  fakeCesiumViewer,
+  posingStreetLevelProvider,
+} from '../testSupport/streetLevelFakes.mjs';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
 import { useLayerCountsStore } from './stores/layerCounts.js';
 import { createLayerCounts } from './layerCounts.js';
@@ -141,6 +151,7 @@ function fixture(
     weatherClock,
     startOpen = true,
     finderControls = true,
+    pinia = createPinia(),
   } = {},
 ) {
   // Weather and hazard reads stay off the network: every feed answers 503.
@@ -149,7 +160,6 @@ function fixture(
     fetchImpl || (async () => new Response('', { status: 503 }));
   document.body.replaceChildren();
   const host = document.body.appendChild(document.createElement('div'));
-  const pinia = createPinia();
   if (finderControls) t.after(useLayerFinderStore(pinia).attachControls());
   const app = createApp(ContextView).use(pinia);
   const cards = useEntityCardStore(pinia);
@@ -1532,6 +1542,81 @@ test('keyboard selection of a summary row returns focus to that row', async (t) 
   assert.equal(
     document.activeElement.dataset.rowKey,
     'summary:gnss-integrity:gnss-integrity:cell-a',
+  );
+});
+
+test('a keyboard-picked coverage line keeps its feed, details and return focus when its photo arrives', async (t) => {
+  const line = {
+    id: 'near:mapillary:30.300000,-97.740000:line',
+    name: 'Mapillary',
+    providerId: 'mapillary',
+    sequenceId: 'line',
+    ...HERE,
+  };
+  let viewLine = line;
+  const photo = { id: 'mapillary:photo', name: 'Congress Avenue', ...HERE };
+  const { $, cards } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      stats: { count: 0 },
+      module: {
+        getAnalystRecords: () => [photo],
+        getRecordsNear: () => [line],
+        getViewRecords: (_, area) => (area?.rect ? [viewLine, photo] : [photo]),
+      },
+    },
+  ]);
+  cards.setView({
+    center: HERE,
+    heightM: 40_000,
+    rect: {
+      west: -98,
+      south: 29,
+      east: -97,
+      north: 31,
+    },
+  });
+  await nextTick();
+  const row = $(
+    '.nearby-lists[aria-label="In view"] [data-row-key*="near:mapillary:"]',
+  );
+  assert.ok(row, 'the drawn line is available in the viewport group');
+  const rowKey = row.dataset.rowKey;
+  row.focus();
+  row.click();
+  await nextTick();
+  await nextTick();
+  cards.refresh();
+  assert.equal(cards.lost, false);
+  assert.equal($('.entity-card__source-line').textContent.trim(), 'Mapillary');
+  const close = $('.entity-card__close');
+  assert.equal(document.activeElement, close);
+  const details = $('.entity-card__more');
+  if (details) details.open = true;
+  cards.advance({ layerId: 'street-level', id: photo.id });
+  await nextTick();
+  if (details) assert.equal($('.entity-card__more'), details);
+  viewLine = {
+    ...line,
+    id: 'near:mapillary:30.301000,-97.740000:line',
+    lat: 30.301,
+  };
+  cards.setView({
+    ...cards.view,
+    center: { ...HERE, lat: HERE.lat + 0.01 },
+  });
+  close.click();
+  await nextTick();
+  await nextTick();
+  assert.equal(document.activeElement.dataset.rowKey, rowKey);
+  cards.setView({ center: HERE, heightM: 20_000_000 });
+  await nextTick();
+  assert.equal(
+    $('.view-context__block[data-layer="street-level"] strong').textContent,
+    '1',
+    'globe tile counts remembered photos',
   );
 });
 
@@ -3926,6 +4011,663 @@ test('with a layer on, a spot whose weather cannot be read says so', async (t) =
   );
 });
 
+test('Nearby names a remembered photo with no title as its card does, in the language shown', async (t) => {
+  t.after(() => setLocale('en'));
+  const untitled = {
+    id: 'mapillary:3640240722906662',
+    name: null,
+    lat: HERE.lat,
+    lon: HERE.lon,
+    provider: 'Mapillary',
+  };
+  const titled = {
+    ...untitled,
+    id: 'mapillary:7',
+    name: 'Congress Ave',
+    lat: HERE.lat + 0.001,
+  };
+  const { $, cards } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [untitled, titled],
+      stats: { count: 2 },
+    },
+  ]);
+  const rect = { west: -98, south: 29, east: -97, north: 31 };
+  cards.setView({ center: HERE, heightM: 40_000, rect });
+  await nextTick();
+  const shown = () =>
+    [
+      ...document.querySelectorAll(
+        '[data-row-layer="street-level"] .nearby-lists__name',
+      ),
+    ].map((name) => [name.textContent, name.getAttribute('title')]);
+  const rows = shown();
+  assert.ok(rows.length, 'Nearby lists the photos');
+  assert.ok(
+    rows.every(([words]) => !words.includes('3640240722906662')),
+    JSON.stringify(rows),
+  );
+  assert.ok(rows.some(([words]) => words === 'Street-level photo'));
+  assert.ok(rows.some(([words]) => words === 'Congress Ave'));
+  for (const [words, title] of rows)
+    if (title !== null)
+      assert.equal(title, words, 'its tooltip reads the same');
+
+  setLocale('de');
+  cards.setView({ center: HERE, heightM: 40_001, rect });
+  await nextTick();
+  const translated = shown();
+  assert.ok(
+    translated.some(([words]) => words === 'Foto auf Straßenebene'),
+    JSON.stringify(translated),
+  );
+  assert.ok(translated.some(([words]) => words === 'Congress Ave'));
+
+  cards.select({ layerId: 'street-level', id: untitled.id }, { follow: false });
+  await nextTick();
+  assert.equal(
+    cards.card?.title,
+    'Street-level photo',
+    'the card is unchanged',
+  );
+});
+
+test('switching Street Level cards withdraws only the previous pending request', async (t) => {
+  const photo = {
+    id: 'mapillary:1',
+    name: 'Congress Ave',
+    lat: 30.27,
+    lon: -97.74,
+  };
+  const near = { ...photo, id: 'mapillary:2', name: 'Sixth Street' };
+  const { cards, pinia } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo, near],
+      stats: { count: 2 },
+    },
+  ]);
+  const closed = [];
+  let withdrawn = 0;
+  useStreetLevelStore(pinia).attach({
+    closePhoto: (id, options) =>
+      closed.push({ id, pendingOnly: options?.pendingOnly }),
+    withdrawPhoto: () => withdrawn++,
+  });
+  cards.select({ layerId: 'street-level', id: near.id }, { follow: false });
+  await nextTick();
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  assert.deepEqual(closed, [{ id: near.id, pendingOnly: true }]);
+  assert.equal(withdrawn, 0, "another photo's card closes no photo");
+});
+
+test('a deliberate Contacts pick withdraws the photo while automatic Contacts focus leaves it available', async (t) => {
+  const photo = {
+    id: 'mapillary:1',
+    name: 'Congress Ave',
+    lat: 30.27,
+    lon: -97.74,
+  };
+  const { cards, pinia } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo],
+      stats: { count: 1 },
+    },
+    flightsOn([flight('auto01', 30.3, -97.7), flight('picked01', 30.4, -97.8)]),
+  ]);
+  const contacts = useContextStore(pinia);
+  contacts.publish({ flightsActive: true });
+  let withdrawn = 0;
+  useStreetLevelStore(pinia).attach({ withdrawPhoto: () => withdrawn++ });
+  assert.ok(cards.select({ layerId: 'street-level', id: photo.id }));
+  await nextTick();
+  contacts.publishAwareness({
+    kind: 'standby',
+    subjectIdentity: { layerId: 'flights', id: 'auto01' },
+    subjectOrigin: 'programmatic',
+  });
+  await nextTick();
+  assert.equal(cards.card?.identity.id, 'auto01');
+  assert.equal(withdrawn, 0);
+
+  assert.ok(cards.select({ layerId: 'street-level', id: photo.id }));
+  await nextTick();
+  contacts.publishAwareness({
+    kind: 'standby',
+    subjectIdentity: { layerId: 'flights', id: 'picked01' },
+    subjectOrigin: 'user',
+  });
+  await nextTick();
+  assert.equal(cards.card?.identity.id, 'picked01');
+  assert.equal(withdrawn, 1);
+});
+
+test("Context holds the street-level viewer's home: the open photo's card takes it, and unmounting lets it go", async (t) => {
+  const photo = {
+    id: 'mapillary:1',
+    name: 'Congress Ave',
+    lat: 30.27,
+    lon: -97.74,
+  };
+  const { $, cards, pinia, open, unmount } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo],
+      stats: { count: 1 },
+    },
+  ]);
+  const home = $('.sl-viewer-home');
+  const wrap = $('#sl-viewer-wrap');
+  assert.ok(home, 'an offscreen home beside Context');
+  assert.equal(home.getAttribute('aria-hidden'), 'true');
+  assert.ok(home.hasAttribute('inert'));
+  assert.ok(home.contains(wrap), 'the viewer waits in its home');
+  // The photo is open and its card shows in an open Context.
+  useStreetLevelStore(pinia).publish({
+    enabled: true,
+    viewer: { open: true, photo: { id: photo.id }, renderMode: 'letterbox' },
+  });
+  open();
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  await nextTick();
+  const slot = $('#sl-viewer-slot');
+  assert.ok(slot, "the photo's card has its slot");
+  assert.equal(wrap.parentElement, slot, 'the viewer moves onto the card');
+
+  t.after(() => {
+    activeTab.value = 'view';
+  });
+  activeTab.value = 'props';
+  await nextTick();
+  await nextTick();
+  assert.equal(activeTab.value, 'props');
+  assert.ok(home.contains(wrap), 'Properties returns the viewer home');
+  globalThis.dispatchEvent(new Event('gev:context-show-view'));
+  await nextTick();
+  await nextTick();
+  assert.equal(activeTab.value, 'view');
+  assert.equal(wrap.parentElement, slot, 'Inspector restores the same viewer');
+
+  // Unmounted, Context lets its home go: the viewer goes back under it and
+  // nothing moves it again.
+  unmount();
+  assert.ok(home.contains(wrap), 'the viewer is back in its home');
+  const loose = document.body.appendChild(document.createElement('div'));
+  loose.id = 'sl-viewer-slot';
+  t.after(() => loose.remove());
+  placeStreetLevelViewer();
+  assert.equal(loose.childElementCount, 0, 'no viewer comes back to a slot');
+});
+
+test('picking something else closes a shown photo and shows the new card; open ground keeps it', async (t) => {
+  const photo = {
+    id: 'mapillary:1',
+    name: 'Congress Ave',
+    lat: 30.27,
+    lon: -97.74,
+  };
+  const { $, cards, pinia } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo],
+      stats: { count: 1 },
+    },
+    flightsOn([flight('test01', 30.3, -97.7)]),
+  ]);
+  const closed = [];
+  let withdrawn = 0;
+  useStreetLevelStore(pinia).attach({
+    closePhoto: (id, options) =>
+      closed.push({ id, pendingOnly: options?.pendingOnly }),
+    withdrawPhoto: () => withdrawn++,
+  });
+  // A flight picked over the photo's card closes the photo, and the
+  // flight's card takes Context.
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  assert.equal(withdrawn, 1);
+  assert.equal(cards.card?.layerId, 'flights');
+  assert.ok($('#entity-card'), "the flight's card shows");
+  // A click on open ground selects nothing new: only a pending load is
+  // cancelled, and a photo already showing stays open.
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  cards.clear();
+  await nextTick();
+  // The photo card's close button closes the photo.
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  $('#entity-card .entity-card__close').click();
+  await nextTick();
+  assert.equal(cards.card, null);
+  assert.deepEqual(closed, [
+    { id: photo.id, pendingOnly: true },
+    { id: photo.id, pendingOnly: false },
+  ]);
+  assert.equal(withdrawn, 1, 'only the flight closed the photo');
+});
+
+test('on a phone a new pick closes the photo and shows its card in the Context sheet, without reopening the photo', async (t) => {
+  const photo = {
+    id: 'mapillary:1',
+    name: 'Congress Ave',
+    lat: 30.27,
+    lon: -97.74,
+  };
+  const body = document.body;
+  t.after(() => {
+    body.classList.remove('mobile-shell');
+    body.removeAttribute('data-mobile-sheet');
+  });
+  const { $, cards, pinia, open } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo],
+      stats: { count: 1 },
+    },
+    flightsOn([flight('test01', 30.3, -97.7)]),
+  ]);
+  body.classList.add('mobile-shell');
+  body.setAttribute('data-mobile-sheet', 'context');
+  const streetLevel = useStreetLevelStore(pinia);
+  const show = (shown) =>
+    streetLevel.publish({
+      enabled: true,
+      viewer: {
+        open: shown,
+        photo: shown ? { id: photo.id } : null,
+        renderMode: 'letterbox',
+      },
+    });
+  const closed = [];
+  let withdrawn = 0;
+  const reopened = [];
+  streetLevel.attach({
+    closePhoto: (id, options) => {
+      closed.push({ id, pendingOnly: options?.pendingOnly });
+      if (!options?.pendingOnly) show(false);
+    },
+    withdrawPhoto: () => {
+      withdrawn++;
+      show(false);
+    },
+    openPhoto: (id) => reopened.push(id),
+  });
+  show(true);
+  open();
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  await nextTick();
+  assert.equal($('#sl-viewer-wrap').parentElement, $('#sl-viewer-slot'));
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  await nextTick();
+  assert.equal(withdrawn, 1);
+  assert.deepEqual(closed, []);
+  assert.equal(cards.card?.layerId, 'flights', "the flight's card shows");
+  assert.equal(body.getAttribute('data-mobile-sheet'), 'context');
+  assert.equal($('#sl-viewer-slot'), null, 'no photo slot on the new card');
+  assert.ok(
+    $('.sl-viewer-home').contains($('#sl-viewer-wrap')),
+    'the closed viewer waits in its home',
+  );
+  assert.equal($('#sl-viewer-wrap').hidden, true, 'and stays closed');
+  assert.deepEqual(reopened, [], 'nothing opens the photo again');
+});
+
+// A real Street Level layer and its controls behind Context, over a fake
+// source whose viewer poses each image it opens, once `hold` lets it. Its
+// photos are listed under the street-level row Context reads.
+async function liveStreetLevel(t, pinia, { hold = null } = {}) {
+  const provider = posingStreetLevelProvider('mapillary', {
+    nearestImage: async () => 'A',
+    beforePose: hold,
+    positionOf: () => HERE,
+  });
+  const viewer = fakeCesiumViewer();
+  viewer.canvas = viewer.scene.canvas;
+  const layer = createStreetLevelLayer({ providers: [provider] });
+  layer.init(viewer);
+  layer.enable(viewer);
+  const announced = [];
+  const reopened = [];
+  const openPhoto = layer.openPhoto;
+  layer.openPhoto = (id, options) => {
+    reopened.push(id);
+    return openPhoto(id, options);
+  };
+  const controls = new StreetLevelControls({
+    root: document.getElementById('sl-viewer-root'),
+    layer,
+    store: useStreetLevelStore(pinia),
+    actions: {
+      isEnabled: () => true,
+      setEnabled() {},
+      setParams() {},
+      showToast() {},
+      showPhoto: (photo) => announced.push(photo.id),
+    },
+  });
+  controls.connect();
+  t.after(() => {
+    controls.destroy();
+    layer.destroy();
+  });
+  await turn();
+  return { layer, announced, reopened };
+}
+
+test('paid Street Level loads in a visible Inspector and is retired if the phone sheet changes before mount', async (t) => {
+  const body = document.body;
+  const { $, open } = fixture(t, [], {
+    startOpen: false,
+    pinia: applicationPinia(),
+  });
+  body.classList.add('mobile-shell', 'ui-clean-view');
+  body.setAttribute('data-mobile-sheet', 'layers');
+  t.after(() => {
+    body.classList.remove('mobile-shell', 'ui-embed', 'ui-clean-view');
+    body.removeAttribute('data-mobile-sheet');
+  });
+
+  const started = Promise.withResolvers();
+  const sdk = Promise.withResolvers();
+  t.after(sdk.resolve);
+  const provider = posingStreetLevelProvider('google', {
+    nearestImage: async () => 'A',
+    positionOf: () => HERE,
+  });
+  provider.billedPerImage = true;
+  const create = provider.create;
+  let constructions = 0;
+  provider.create = (context) => {
+    const instance = create(context);
+    instance.viewer.mount = async (_target, { isVisible }) => {
+      started.resolve(isVisible);
+      await sdk.promise;
+      if (!isVisible()) throw new Error('Context is hidden');
+      constructions++;
+    };
+    return instance;
+  };
+
+  const viewer = fakeCesiumViewer();
+  viewer.canvas = viewer.scene.canvas;
+  const layer = createStreetLevelLayer({ providers: [provider] });
+  layer.init(viewer);
+  layer.enable(viewer);
+  const shell = {
+    services: { streetLevelLayer: layer },
+    _streetLevelViewer: $('#sl-viewer-root'),
+    setPanelCollapsed: (_id, collapsed) => {
+      if (!collapsed) open();
+    },
+    revealPanel: () => body.setAttribute('data-mobile-sheet', 'context'),
+    setCleanView: StyleManager.prototype.setCleanView,
+    toggleCleanView: StyleManager.prototype.toggleCleanView,
+    exitContextSelectionView: StyleManager.prototype.exitContextSelectionView,
+    contextSelectionCover: StyleManager.prototype.contextSelectionCover,
+    _scheduleLeftPanelLayout() {},
+  };
+  StyleManager.prototype._initStreetLevelControls.call(shell);
+  t.after(() => {
+    shell._streetLevelControls.destroy();
+    shell._streetLevelPhotoUnsubscribe?.();
+    layer.destroy();
+  });
+  await turn();
+  layer.setProviderEnabled('google', true);
+  const opening = layer.openNearest(HERE, { frame: false });
+  const isVisible = await started.promise;
+  const wrap = $('#sl-viewer-wrap');
+  assert.equal(wrap.parentElement?.id, 'sl-viewer-loading-slot');
+  assert.equal(isVisible(), true);
+  assert.equal(body.classList.contains('ui-clean-view'), false);
+  body.setAttribute('data-mobile-sheet', 'layers');
+  sdk.resolve();
+  assert.equal(await opening, false);
+  assert.equal(constructions, 0);
+  assert.equal(layer.settledPhotoId(), null);
+  assert.equal(body.getAttribute('data-mobile-sheet'), 'layers');
+
+  assert.equal(await layer.openNearest(HERE, { frame: false }), true);
+  assert.equal(constructions, 1);
+  assert.equal(layer.settledPhotoId(), 'google:A');
+
+  layer.closeViewer();
+  body.classList.remove('mobile-shell');
+  body.classList.add('ui-embed', 'ui-clean-view');
+  assert.equal(await layer.openNearest(HERE, { frame: false }), true);
+  assert.equal(wrap.classList.contains('sl-viewer-wrap-embed'), true);
+  assert.equal(wrap.parentElement?.tagName, 'BODY');
+});
+
+const liveStreetRow = (live) => ({
+  id: 'street-level',
+  name: 'Street Level',
+  enabled: true,
+  stats: { count: 1 },
+  module: { getAnalystRecords: () => live.layer?.getAnalystRecords() ?? [] },
+});
+
+for (const phone of [false, true]) {
+  test(`${phone ? 'on a phone, ' : ''}picking a flight closes a photo opened with Context closed, which has no card, and shows the flight's card`, async (t) => {
+    const body = document.body;
+    t.after(() => {
+      body.classList.remove('mobile-shell');
+      body.removeAttribute('data-mobile-sheet');
+    });
+    const fx = fixture(t, [flightsOn([flight('test01', 30.3, -97.7)])], {
+      startOpen: false,
+      // As the app reveals Context for a pick: on a phone, its sheet.
+      openPanel: () => {
+        if (phone) body.setAttribute('data-mobile-sheet', 'context');
+        fx.open();
+      },
+    });
+    if (phone) {
+      body.classList.add('mobile-shell');
+      body.setAttribute('data-mobile-sheet', 'layers');
+    }
+    const { layer, reopened } = await liveStreetLevel(t, fx.pinia);
+    // A click on a street-level line: the photo opens, and no card shows it.
+    assert.equal(await layer.openNearest(HERE, { frame: false }), true);
+    await turn();
+    assert.equal(layer.settledPhotoId(), 'mapillary:A');
+    assert.equal(fx.cards.card, null);
+    fx.cards.select({ layerId: 'flights', id: 'test01' }, { explicit: true });
+    await nextTick();
+    await turn();
+    assert.equal(layer.settledPhotoId(), null, 'the photo is closed');
+    assert.equal(layer.getUIState().street.open, false);
+    assert.equal(fx.cards.card?.layerId, 'flights');
+    assert.ok(fx.$('#entity-card'), "the flight's card shows");
+    assert.equal(fx.$('#sl-viewer-slot'), null, 'no photo slot on it');
+    assert.equal(fx.$('#sl-viewer-wrap').hidden, true, 'the viewer is closed');
+    assert.deepEqual(reopened, [], 'nothing opens the photo again');
+    if (phone)
+      assert.equal(
+        body.getAttribute('data-mobile-sheet'),
+        'context',
+        'the Context sheet shows, not Cameras',
+      );
+  });
+}
+
+for (const phone of [false, true])
+  for (const priorCard of [false, true])
+    test(`${phone ? 'on a phone, ' : ''}a photo still loading when a flight is picked never opens after it (${priorCard ? 'a photo card shown before' : 'no Street Level card'})`, async (t) => {
+      const body = document.body;
+      t.after(() => {
+        body.classList.remove('mobile-shell');
+        body.removeAttribute('data-mobile-sheet');
+      });
+      const live = {};
+      const fx = fixture(
+        t,
+        [liveStreetRow(live), flightsOn([flight('test01', 30.3, -97.7)])],
+        {
+          startOpen: priorCard,
+          openPanel: () => {
+            if (phone) body.setAttribute('data-mobile-sheet', 'context');
+            fx.open();
+          },
+        },
+      );
+      if (phone) {
+        body.classList.add('mobile-shell');
+        body.setAttribute(
+          'data-mobile-sheet',
+          priorCard ? 'context' : 'layers',
+        );
+      }
+      const held = Promise.withResolvers();
+      const started = Promise.withResolvers();
+      t.after(held.resolve);
+      Object.assign(
+        live,
+        await liveStreetLevel(t, fx.pinia, {
+          hold: async (imageId) => {
+            if (imageId !== 'B') return;
+            started.resolve();
+            await held.promise;
+          },
+        }),
+      );
+      const { layer, announced } = live;
+      if (priorCard) {
+        // Photo A shows on its card in Context.
+        assert.equal(
+          await layer.openImage('mapillary', 'A', { frame: false }),
+          true,
+        );
+        fx.cards.select(
+          { layerId: 'street-level', id: 'mapillary:A' },
+          { follow: false },
+        );
+        await nextTick();
+        await turn();
+        assert.equal(fx.cards.card?.layerId, 'street-level');
+      }
+      // A click on another line: photo B starts loading.
+      const opening = layer.openImage('mapillary', 'B', { frame: false });
+      await started.promise;
+      assert.equal(layer.photoOpening(), true);
+      fx.cards.select({ layerId: 'flights', id: 'test01' }, { explicit: true });
+      await nextTick();
+      held.resolve();
+      assert.equal(await opening, false, 'the load is withdrawn');
+      await turn();
+      assert.equal(layer.settledPhotoId(), null, 'no photo settles');
+      assert.equal(layer.getUIState().street.open, false);
+      assert.ok(!announced.includes('mapillary:B'), 'nor is it announced');
+      assert.ok(
+        !layer.getAnalystRecords().some((photo) => photo.id === 'mapillary:B'),
+        'nor listed',
+      );
+      assert.equal(
+        fx.cards.card?.layerId,
+        'flights',
+        "the flight's card stays",
+      );
+      if (phone)
+        assert.equal(body.getAttribute('data-mobile-sheet'), 'context');
+    });
+
+test('a click on open ground, map Escape and a refresh of the same card keep a photo; another flight closes it', async (t) => {
+  const live = {};
+  const fx = fixture(t, [
+    liveStreetRow(live),
+    flightsOn([flight('test01', 30.3, -97.7), flight('test02', 30.31, -97.71)]),
+  ]);
+  Object.assign(live, await liveStreetLevel(t, fx.pinia));
+  const { layer } = live;
+  // A photo on its card; open ground (and map Escape, which clears the
+  // same way) lets go of the card and keeps the photo.
+  assert.equal(await layer.openImage('mapillary', 'A', { frame: false }), true);
+  fx.cards.select(
+    { layerId: 'street-level', id: 'mapillary:A' },
+    { follow: false },
+  );
+  await nextTick();
+  fx.cards.clear();
+  await nextTick();
+  await turn();
+  assert.equal(layer.settledPhotoId(), 'mapillary:A');
+  // A flight's card, then a photo opened under it: the card refreshing, or
+  // the same flight picked again, keeps the photo.
+  fx.cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  assert.equal(await layer.openImage('mapillary', 'B', { frame: false }), true);
+  fx.cards.refresh();
+  fx.cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  await turn();
+  assert.equal(layer.settledPhotoId(), 'mapillary:B');
+  // Another flight is a new pick: the photo closes.
+  fx.cards.select({ layerId: 'flights', id: 'test02' }, { follow: false });
+  await nextTick();
+  await turn();
+  assert.equal(layer.settledPhotoId(), null);
+});
+
+test("a street-level photo's card moving on to the next image keeps Context's tab; a new pick shows its card", async (t) => {
+  const photo = {
+    id: 'mapillary:1',
+    name: 'Congress Ave',
+    lat: 30.27,
+    lon: -97.74,
+  };
+  const next = { ...photo, id: 'mapillary:2', name: 'Sixth Street' };
+  const { cards } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo, next],
+      stats: { count: 2 },
+    },
+    flightsOn([flight('test01', 30.3, -97.7)]),
+  ]);
+  t.after(() => {
+    activeTab.value = 'view';
+  });
+  cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
+  await nextTick();
+  activeTab.value = 'props';
+  cards.advance({ layerId: 'street-level', id: next.id });
+  await nextTick();
+  assert.equal(activeTab.value, 'props', 'the walk keeps the tab');
+  cards.select({ layerId: 'street-level', id: photo.id }, { reveal: false });
+  await nextTick();
+  assert.equal(
+    activeTab.value,
+    'view',
+    'another photo pick shows the Inspector',
+  );
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  assert.equal(activeTab.value, 'view', 'a new pick shows its card');
+});
+
 test('nothing on: up to three suggested layers, and Open shows Data Layers without switching any on', async (t) => {
   const off = (id, name) => ({
     id,
@@ -4440,7 +5182,6 @@ test('hiding or replacing the mounted Inspector cancels its weather and count re
   ];
   t.after(() => {
     body.classList.remove(...hiddenModes);
-    delete body.dataset.assistantDocked;
     delete document.visibilityState;
   });
   const counts = useLayerCountsStore(pinia);
@@ -4466,12 +5207,6 @@ test('hiding or replacing the mounted Inspector cancels its weather and count re
       () => body.classList.add(className),
       () => body.classList.remove(className),
     ]),
-    [
-      () => {
-        body.dataset.assistantDocked = 'true';
-      },
-      () => delete body.dataset.assistantDocked,
-    ],
     [
       () => {
         contextSearchStyles(t);

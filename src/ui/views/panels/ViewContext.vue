@@ -5,7 +5,7 @@ import { contextNeedle, contextSearchText } from '../../contextSearch.js';
 import { formatNumber, getLocale, t, tn } from '../../../i18n/index.js';
 import { countryName, nearestCity } from '../../../data/wikidataCities.js';
 import { weatherPoint } from '../../viewWeather.js';
-import { INSPECTOR_PULSE_MS, isGlobeView, useEntityCardStore } from '../../stores/entityCard.js';
+import { INSPECTOR_PULSE_MS, isGlobeView, sayWords, useEntityCardStore } from '../../stores/entityCard.js';
 import { usePanelChromeStore } from '../../stores/panelChrome.js';
 import { PANEL_LABEL_KEYS, shownLayerName, sourceLabel } from '../../layerNames.js';
 import { translateFeedError, translateStatusMessage } from '../../statusText.js';
@@ -300,7 +300,7 @@ function readGroups(query) {
   void onIds.value;
   const excluded = new Set([...CONTEXT_EXEMPT, ...nonItemIds.value, 'satellites']);
   if (missions.enabled) excluded.add(MISSIONS_LAYER);
-  const groups = store.inView({ perLayer: query ? 12 : 3, query, breakdown: true, includeEmpty: true, viewport: true, excludeLayers: excluded });
+  const groups = store.inView({ perLayer: query ? 12 : 3, query, breakdown: true, includeEmpty: true, includeDrawnCoverage: true, viewport: true, excludeLayers: excluded });
   return [...groups.map(group => ({ ...group, inView: true })), ...satelliteGroups(query)];
  }
 const displayedGroups = computed(() => readGroups(''));
@@ -686,7 +686,7 @@ function openSuggested() {
             <ul :aria-label="t('Nearest the centre of the view: {layer}', { layer: tile.name })">
               <li v-for="(item, index) in globeGroups[tile.id].items" :key="item.key">
                 <UiButton :data-row-key="item.key" :data-row-layer="tile.id" :data-row-index="index" @click="selectRow(item, $event)">
-                  <span class="nearby-lists__name">{{ item.title }}</span>
+                  <span class="nearby-lists__name">{{ sayWords(item.titleWords, item.title) }}</span>
                   <span class="nearby-lists__meta">{{ distanceText(item.distanceKm, approximatePosition(item.identity.record)) }}</span>
                 </UiButton>
               </li>

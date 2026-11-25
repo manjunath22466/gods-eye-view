@@ -31,6 +31,8 @@ import {
   normalizeStackId,
 } from './gevActions.js';
 import { useEntityCardStore } from '../ui/stores/entityCard.js';
+import { useStreetLevelStore } from '../ui/stores/streetLevel.js';
+import { STREET_LEVEL_PHOTO_EVENT } from '../ui/streetLevelEvents.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
 import { PLACE_PICK_EVENT } from '../ui/contextEvents.js';
 import { MAP_STACKS } from '../mapStackController.js';
@@ -7136,8 +7138,9 @@ function createStreetLevelHarness({
     getAll: () => [{ id: 'street-level', name: 'Street Level', enabled }],
   };
   styleManager.setPanelCollapsed = (id, collapsed) =>
-    revealed.push(`collapse:${id}:${collapsed}`);
-  styleManager.revealPanel = (id) => revealed.push(`reveal:${id}`);
+    revealed.push(['collapse', id, collapsed]);
+  styleManager.revealPanel = (id, options) =>
+    revealed.push(['reveal', id, options]);
   const runner = createGevActionRunner({ viewer, styleManager, dataManager });
   return {
     runner,
@@ -8784,7 +8787,7 @@ test('show_street_level tells missing imagery from a failing source', async () =
   assert.equal(broken.error, 'Mapillary graph HTTP 500');
 });
 
-test('show_street_level shows every photo it opens, also over a panel the user had closed', async () => {
+test('show_street_level shows every photo it opens, also over a Context panel the user had closed', async () => {
   globalThis.window = globalThis.window || {
     clearTimeout,
     setTimeout,
@@ -8804,10 +8807,10 @@ test('show_street_level shows every photo it opens, also over a panel the user h
     fly: false,
   });
   assert.deepEqual(harness.revealed, [
-    'collapse:street-level-panel:false',
-    'reveal:street-level-panel',
-    'collapse:street-level-panel:false',
-    'reveal:street-level-panel',
+    ['collapse', 'global-context-panel', false],
+    ['reveal', 'global-context-panel', undefined],
+    ['collapse', 'global-context-panel', false],
+    ['reveal', 'global-context-panel', undefined],
   ]);
   const missing = createStreetLevelHarness({ enabled: true, nearest: null });
   await missing.runner('show_street_level', {
@@ -8908,6 +8911,220 @@ test("voice focus is the open camera card's Fly to only while the view is free",
   assert.equal(cockpit.ok, false);
   assert.match(cockpit.error, /exit cockpit/);
   assert.deepEqual(flown, ['cctv:cam-a'], 'Cockpit also retains the view');
+});
+
+/**
+ * A data manager whose Street Level layer reports `street` and, as the
+ * layer's own test of a settled photo, `settled` (by default the viewer has
+ * accepted photo mapillary:1).
+ */
+const acceptedStreetLevel = (
+  street = {},
+  settled = 'mapillary:1',
+  opening = false,
+) => ({
+  layers: new Map([
+    [
+      'street-level',
+      {
+        module: {
+          getUIState: () => ({
+            street: {
+              open: true,
+              loading: false,
+              error: null,
+              providerId: 'mapillary',
+              imageId: '1',
+              ...street,
+            },
+          }),
+          settledPhotoId: () => settled,
+          photoOpening: () => opening,
+        },
+      },
+    ],
+  ]),
+  getAll: () => [],
+});
+
+test("the retired Street Level panel opens the open photo's card, or its Data Layers row", async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  const runnerWith = (dataManager) =>
+    createGevActionRunner({
+      viewer: {
+        clock: { onTick: { addEventListener: () => () => {} } },
+        scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+        camera: { moveEnd: { addEventListener() {} } },
+      },
+      styleManager: {
+        getCockpitState: () => ({ active: false }),
+        setPanelCollapsed(panelId, collapsed) {
+          opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+        },
+        revealPanel(panelId) {
+          opened.push(panelId);
+        },
+      },
+      dataManager,
+    });
+  const runner = runnerWith({ layers: new Map(), getAll: () => [] });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  try {
+    streetLevel.view = null;
+    const { GEV_ACTION_SCHEMAS } = await import('./actionSchemas.js');
+    const panel = GEV_ACTION_SCHEMAS.find(
+      (tool) => tool.name === 'set_panel_open',
+    );
+    assert.ok(
+      panel.parameters.properties.panelId.enum.includes('street-level-panel'),
+    );
+    const none = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    assert.equal(none.action, 'show_data_layers_menu');
+    assert.deepEqual(
+      opened,
+      ['data-panel:open', 'data-panel'],
+      'Data Layers opens, not Context, without a photo',
+    );
+    assert.doesNotMatch(none.say, /\bOPEN\b/);
+    opened.length = 0;
+
+    // The shape the presentation publishes (streetLevelPresentation.js).
+    streetLevel.view = {
+      viewer: {
+        open: true,
+        photo: { id: 'mapillary:1', lat: 30.26, lon: -97.74 },
+      },
+    };
+    const photos = [];
+    const onPhoto = (event) => photos.push(event.detail);
+    globalThis.document?.addEventListener?.(STREET_LEVEL_PHOTO_EVENT, onPhoto);
+    // The viewer has accepted that photo.
+    const shown = await runnerWith(acceptedStreetLevel())('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    globalThis.document?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_EVENT,
+      onPhoto,
+    );
+    assert.equal(shown.ok, true);
+    assert.equal(shown.panelId, 'global-context-panel');
+    assert.deepEqual(opened, [
+      'global-context-panel:open',
+      'global-context-panel',
+    ]);
+    assert.deepEqual(photos, [
+      {
+        layerId: 'street-level',
+        id: 'mapillary:1',
+        lat: 30.26,
+        lon: -97.74,
+        explicit: true,
+      },
+    ]);
+  } finally {
+    streetLevel.view = saved;
+  }
+});
+
+test('the retired Street Level panel reports a Context panel that cannot open', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    // No setPanelCollapsed: this host has no Context panel to open.
+    styleManager: { getCockpitState: () => ({ active: false }) },
+    dataManager: acceptedStreetLevel(),
+  });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  const photos = [];
+  const onPhoto = (event) => photos.push(event.detail);
+  globalThis.document?.addEventListener?.(STREET_LEVEL_PHOTO_EVENT, onPhoto);
+  try {
+    streetLevel.view = {
+      viewer: {
+        open: true,
+        photo: { id: 'mapillary:1', lat: 30.26, lon: -97.74 },
+      },
+    };
+    const result = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.say, 'There is no panel to open here.');
+    assert.deepEqual(photos, [], 'no card is asked for');
+  } finally {
+    globalThis.document?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_EVENT,
+      onPhoto,
+    );
+    streetLevel.view = saved;
+  }
+});
+
+test('the retired Street Level panel says Cockpit hides Context, and closing it closes nothing', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  const styleManager = {
+    getCockpitState: () => ({ active: true }),
+    setPanelCollapsed(panelId, collapsed) {
+      opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+    },
+    revealPanel() {},
+  };
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager,
+    dataManager: {
+      layers: new Map(),
+      getAll: () => [],
+      isEnabled: () => false,
+    },
+  });
+  // In Cockpit, Context is hidden: Street Level's name says so, as contacts
+  // does, and opens nothing.
+  const refused = await runner('set_panel_open', {
+    panelId: 'street-level-panel',
+    open: true,
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /exit Cockpit first/);
+  // "Close the street level panel" closes nothing: Context holds everything
+  // else too.
+  styleManager.getCockpitState = () => ({ active: false });
+  for (const panelId of ['street-level-panel', 'street level', 'street view']) {
+    const result = await runner('set_panel_open', { panelId, open: false });
+    assert.equal(result.ok, false, panelId);
+    assert.equal(result.applied, false, panelId);
+    assert.match(result.error, /nothing was closed/);
+  }
+  assert.deepEqual(opened, []);
 });
 
 test('"go to Austin" is a place pick; a fly-to a later tool waits on is not', async () => {
@@ -9309,5 +9526,198 @@ test('a voice airport pick cannot fly back after newer navigation during its loo
         'the stale lookup cannot start an airport flight',
       );
     });
+  }
+});
+
+test('show_street_level lets go of the card a photo brought up when the camera is taken while it loads', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const saved = globalThis.document;
+  globalThis.document = {
+    body: { classList: { contains: () => false } },
+  };
+  const cards = useEntityCardStore(applicationPinia());
+  const photoCard = {
+    key: 'street-level:mapillary:pano-a',
+    layerId: 'street-level',
+    identity: { layerId: 'street-level', id: 'mapillary:pano-a' },
+  };
+  try {
+    for (const before of [null, { key: 'flights:abc', layerId: 'flights' }]) {
+      cards.card = before;
+      const h = createStreetLevelHarness({ enabled: true });
+      const open = h.layer.openNearest;
+      h.layer.openNearest = async (...call) => {
+        const opened = await open(...call);
+        // The photo settled and Context showed its card; then the globe is
+        // dragged before the request reports back.
+        if (!before) cards.card = photoCard;
+        h.gesture();
+        return opened;
+      };
+      const result = await h.runner('show_street_level', {
+        latitude: 38.58,
+        longitude: -121.49,
+        provider: 'mapillary',
+        fly: false,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(h.order.at(-1), 'close', 'the late photo is closed');
+      assert.equal(
+        cards.card?.key ?? null,
+        before?.key ?? null,
+        before ? 'a card shown before stays' : "the photo's card is let go",
+      );
+    }
+  } finally {
+    cards.card = null;
+    globalThis.document = saved;
+  }
+});
+
+test('the retired Street Level panel opens a shown photo while an unrelated lookup runs or left an error', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  // An empty lookup elsewhere is running and reported its own error; the
+  // accepted photo stays shown.
+  const dataManager = acceptedStreetLevel({
+    loading: true,
+    error: 'No street-level imagery within 50 m of that point',
+  });
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager: {
+      getCockpitState: () => ({ active: false }),
+      setPanelCollapsed(panelId, collapsed) {
+        opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+      },
+      revealPanel() {},
+    },
+    dataManager,
+  });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  try {
+    streetLevel.view = {
+      viewer: {
+        open: true,
+        photo: { id: 'mapillary:1', lat: 30.26, lon: -97.74 },
+      },
+    };
+    const shown = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    assert.equal(shown.panelId, 'global-context-panel');
+    assert.deepEqual(opened, ['global-context-panel:open']);
+  } finally {
+    streetLevel.view = saved;
+  }
+});
+
+/** Run the retired panel action with `dataManager` and a store photo. */
+async function retiredStreetLevelPanel(dataManager, storePhoto) {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  const photos = [];
+  const onPhoto = (event) => photos.push(event.detail);
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager: {
+      getCockpitState: () => ({ active: false }),
+      setPanelCollapsed(panelId, collapsed) {
+        opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+      },
+      revealPanel() {},
+    },
+    dataManager,
+  });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  // A page with no Data Layers row to find; photo events still dispatch.
+  const savedCss = globalThis.CSS;
+  const savedDocument = globalThis.document;
+  globalThis.CSS = { escape: (value) => String(value) };
+  globalThis.document = Object.assign(new EventTarget(), {
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    body: { classList: { contains: () => false } },
+  });
+  globalThis.document?.addEventListener?.(STREET_LEVEL_PHOTO_EVENT, onPhoto);
+  try {
+    streetLevel.view = {
+      viewer: { open: true, photo: storePhoto },
+    };
+    const result = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    return { result, opened, photos };
+  } finally {
+    globalThis.document?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_EVENT,
+      onPhoto,
+    );
+    streetLevel.view = saved;
+    globalThis.CSS = savedCss;
+    globalThis.document = savedDocument;
+  }
+}
+
+test('the retired Street Level panel opens Data Layers, with a reason, for a photo the layer has not accepted', async () => {
+  const photo = { id: 'mapillary:1', lat: 30.26, lon: -97.74 };
+  const empty = { layers: new Map(), getAll: () => [] };
+  for (const [name, dataManager, reason] of [
+    [
+      'still loading',
+      acceptedStreetLevel({ loading: true }, null, true),
+      /still opening/,
+    ],
+    [
+      'rejected by its provider',
+      acceptedStreetLevel({ error: 'Provider unavailable' }, null),
+      /did not open/,
+    ],
+    [
+      'another id accepted',
+      acceptedStreetLevel({}, 'mapillary:2'),
+      /did not open/,
+    ],
+    [
+      'viewer closed',
+      acceptedStreetLevel({ open: false }, null),
+      /did not open/,
+    ],
+    ['no layer, a stored photo', empty, /did not open/],
+  ]) {
+    const { result, opened, photos } = await retiredStreetLevelPanel(
+      dataManager,
+      photo,
+    );
+    assert.equal(result.action, 'show_data_layers_menu', name);
+    assert.match(result.reason, reason, name);
+    assert.match(result.say, /Data Layers/, name);
+    assert.deepEqual(photos, [], `${name}: nothing announced`);
+    assert.ok(!opened.includes('global-context-panel:open'), name);
   }
 });

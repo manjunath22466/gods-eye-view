@@ -1173,7 +1173,6 @@
   "Sequence images unavailable": "シーケンス画像を利用できません",
   "No street-level imagery providers configured": "ストリートレベル画像のプロバイダーが設定されていません",
   "(by upload date)": "（アップロード日基準）",
-  "Open the Street Level panel to view imagery": "画像を表示するには、ストリートレベルパネルを開いてください",
   "Image could not be opened": "画像を開けませんでした",
   "TeleGeography load failed": "TeleGeographyの読み込みに失敗しました",
   "UNAVAILABLE · {source} · Roads unavailable": "利用不可 · {source} · 道路を利用できません",
@@ -2304,8 +2303,6 @@
     "other": "過去{count}日"
   },
   "{window} · SINCE {date}": "{window} · {date}以降",
-  "Turn Street Level off": "ストリートレベルをオフにする",
-  "Turn Street Level on": "ストリートレベルをオンにする",
   "{name} imagery on": "{name}の画像 オン",
   "{name} imagery off": "{name}の画像 オフ",
   "Image by {creator}": "撮影者：{creator}",
@@ -2972,21 +2969,14 @@
   "SAVE CAL": "CAL保存",
   "RESET CAL": "CALリセット",
   "SCENE SUMMARY": "シーン概要",
-  "STREET LEVEL": "ストリートレベル",
-  "Turn Street Level on or off": "ストリートレベルのオン/オフ",
   "Show the street-level view full screen (Esc shrinks it)": "ストリートレベルのビューを全画面表示（Escで縮小）",
   "Image fit": "画像の表示方法",
   "FIT": "全体",
   "Fit: show the whole photo, with dark bars where its shape differs from the frame": "全体：写真全体を表示し、枠と縦横比が異なる部分は黒帯で埋めます",
   "FILL": "全面",
   "Fill: fill the frame edge to edge, cropping the photo": "全面：枠いっぱいに表示し、写真をトリミングします",
-  "Close the image and deselect it on the map": "画像を閉じて地図上の選択を解除",
-  "Close the street-level image": "ストリートレベル画像を閉じる",
   "Street-level viewer": "ストリートレベルビューアー",
   "Open this image on the provider's site": "この画像をプロバイダーのサイトで開く",
-  "Imagery providers": "画像プロバイダー",
-  "PROVIDERS": "プロバイダー",
-  "Imagery filters": "画像フィルター",
   "IMAGERY": "画像",
   "Panorama filter": "パノラマフィルター",
   "ALL": "すべて",
@@ -3167,9 +3157,6 @@
   "Ask GEV anything about the map…": "地図についてGEVに何でも質問…",
   "Stop reply": "応答を停止",
   "Send message": "メッセージを送信",
-  "Panel position": "パネルの位置",
-  "Move above the dock": "ドックの上へ移動",
-  "Dock to the right": "右側にドッキング",
   "Expand panel": "パネルを展開",
   "Minimize panel": "パネルを最小化",
   "You can attach up to four items.": "添付できるのは4件までです。",
@@ -4333,6 +4320,7 @@
   "cable landing point": "ケーブル陸揚げ地点",
   "street photo": "ストリート写真",
   "Street-level photo": "ストリートレベルの写真",
+  "Open street-level photo": "ストリートレベルの写真を開く",
   "No value at the centre of the view": "表示の中心に値がありません",
   "{degraded} of {count} aircraft reported low accuracy": {
     "other": "低精度：{count} 機中 {degraded} 機"
@@ -4396,6 +4384,10 @@
   "Inside the swath · {width} wide": "観測幅内 · 幅 {width}",
   "Broadcast alerts": "発信中の警報",
   "Provider": "プロバイダー",
+  "Captured": "撮影日",
+  "Image type": "画像の種類",
+  "360° panorama": "360°パノラマ",
+  "Flat photo": "平面写真",
   "Codes": "コード",
   "Runways": "滑走路",
   "Picked spot": "選んだ地点",
@@ -4445,5 +4437,6 @@
   "> 10%": "> 10%",
   "{degraded} of {count} aircraft": {
     "other": "{count} 機中 {degraded} 機"
-  }
+  },
+  "Open Context to view street-level imagery": "ストリートレベル画像を見るにはコンテキストを開いてください"
 }

@@ -17,7 +17,14 @@ test('every absolutely laid-out hero kind, the close-up map included, has a heig
   const rule = rules.find(([, , body]) => /\bheight:\s*\d+px/.test(body));
   assert.ok(rule, 'the hero height rule is present');
   const [, selector, body] = rule;
-  for (const kind of ['flight', 'model', 'satellite', 'photo', 'map'])
+  for (const kind of [
+    'flight',
+    'model',
+    'satellite',
+    'photo',
+    'place-street',
+    'map',
+  ])
     assert.match(selector, new RegExp(`data-hero='${kind}'`), kind);
   assert.match(body, /\bheight:\s*\d+px/);
 });
@@ -25,22 +32,28 @@ test('every absolutely laid-out hero kind, the close-up map included, has a heig
 // On a phone the hero is a small thumbnail beside the name. A camera's hero
 // holds its facts and More info under the feed, so it must not be clipped
 // to that thumbnail.
-test('a phone shows a camera card’s top image whole, never as the clipped thumbnail', () => {
+test('a phone shows a camera or street photo card’s top image whole, never as the clipped thumbnail', () => {
   const phone = fs.readFileSync(
     new URL('./styles/mobile-shell.css', import.meta.url),
     'utf8',
   );
-  const rule = phone.match(
-    /body\.mobile-shell #entity-card > \.entity-hero\[data-hero='camera'\] \{([^}]*)\}/,
+  const whole = [
+    ...phone.matchAll(
+      /body\.mobile-shell\s+#entity-card\s+>\s+\.entity-hero:is\(([^)]*)\)\s*\{([^}]*)\}/g,
+    ),
+  ].find(([, kinds]) => /data-hero='camera'/.test(kinds));
+  assert.ok(whole, 'a whole-width hero rule for the phone is present');
+  for (const kind of ['camera', 'street'])
+    assert.match(whole[1], new RegExp(`data-hero='${kind}'`), kind);
+  assert.match(whole[2], /grid-column:\s*1 \/ -1/);
+  assert.match(whole[2], /height:\s*auto/);
+  assert.match(whole[2], /overflow:\s*visible/);
+  const head = phone.match(
+    /#entity-card:has\(\s*> \.entity-hero:is\(([^)]*)\)\s*\)\s*> \.entity-card__head \{\s*grid-column:\s*1 \/ -1/,
   );
-  assert.ok(rule, 'a camera hero rule for the phone is present');
-  assert.match(rule[1], /grid-column:\s*1 \/ -1/);
-  assert.match(rule[1], /height:\s*auto/);
-  assert.match(rule[1], /overflow:\s*visible/);
-  assert.match(
-    phone,
-    /#entity-card:has\(> \.entity-hero\[data-hero='camera'\]\)\s*> \.entity-card__head \{\s*grid-column:\s*1 \/ -1/,
-  );
+  assert.ok(head, 'the name goes full width above it');
+  for (const kind of ['camera', 'street'])
+    assert.match(head[1], new RegExp(`data-hero='${kind}'`), kind);
 });
 
 test('the preview switch’s buttons are at least 24 px each way', () => {

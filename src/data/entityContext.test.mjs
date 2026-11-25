@@ -1,4 +1,5 @@
 import { EARTH_RADIUS_KM } from '../geoDistance.js';
+import { getLocale, setLocale, t } from '../i18n/index.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { twoline2satrec } from 'satellite.js';
@@ -1338,4 +1339,211 @@ test('installation and its Contacts record exclude each other', () => {
     { radiusKm: 25, excludeKey: contactKey },
   );
   assert.equal(list.count, 0, 'the Contacts card lists its own subject');
+});
+
+test('a layer that hands out what it has near a point is counted from that: Street Level counts its drawn lines', () => {
+  const here = { lat: 30, lon: -97 };
+  const asked = [];
+  const lines = [
+    {
+      id: 'near:mapillary:30.001000,-97.000000',
+      name: 'Mapillary',
+      lat: 30.001,
+      lon: -97,
+    },
+    {
+      id: 'near:mapillary:30.010000,-97.000000',
+      name: 'Mapillary',
+      lat: 30.01,
+      lon: -97,
+    },
+  ];
+  const layers = manager({
+    'street-level': { name: 'Street Level', records: [] },
+  });
+  layers.layers.get('street-level').module.getRecordsNear = (
+    point,
+    radiusKm,
+  ) => {
+    asked.push([point, radiusKm]);
+    return lines;
+  };
+  const list = nearbyForLayer(layers, layers.layers.get('street-level'), here, {
+    radiusKm: 5,
+    limit: 3,
+  });
+  assert.deepEqual(asked, [[here, 5]], 'asked for the radius Context shows');
+  assert.equal(list.count, 2, 'not 0 while it has lines in view');
+  assert.equal(list.items[0].title, 'Mapillary');
+  assert.equal(
+    list.items[0].identity.id,
+    'near:mapillary:30.001000,-97.000000',
+    'a row opens the photo nearest its line',
+  );
+  const card = describeEntity(layers, {
+    layerId: 'street-level',
+    id: 'near:mapillary:30.010000,-97.000000',
+    record: lines[1],
+  });
+  assert.equal(
+    nearbyEntities(layers, card).same[0].title,
+    'Mapillary',
+    'a card lists the lines near it too',
+  );
+  layers.layers.get('street-level').enabled = false;
+  assert.equal(
+    nearbyForLayer(layers, layers.layers.get('street-level'), here, {
+      radiusKm: 5,
+    }),
+    null,
+    'never read while off',
+  );
+});
+
+test("Nearby names a remembered photo with no title as its card does, never by its id; lines keep their source's name", () => {
+  const here = { lat: 30, lon: -97 };
+  const untitled = {
+    id: 'mapillary:3640240722906662',
+    name: null,
+    lat: 30.0005,
+    lon: -97,
+    providerId: 'mapillary',
+    provider: 'Mapillary',
+  };
+  const titled = {
+    ...untitled,
+    id: 'mapillary:7',
+    name: 'Congress Ave',
+    lat: 30.002,
+  };
+  const line = {
+    id: 'near:mapillary:30.001000,-97.000000',
+    name: 'Mapillary',
+    lat: 30.001,
+    lon: -97,
+    providerId: 'mapillary',
+    provider: 'Mapillary',
+  };
+  const layers = manager({
+    'street-level': { name: 'Street Level', records: [untitled, titled] },
+  });
+  layers.layers.get('street-level').module.getRecordsNear = () => [
+    untitled,
+    titled,
+    line,
+  ];
+  const card = describeEntity(layers, {
+    layerId: 'street-level',
+    id: untitled.id,
+    record: untitled,
+  });
+  assert.equal(card.title, 'Street-level photo', 'the card is unchanged');
+  const photoWords = { text: 'Street-level photo' };
+  assert.deepEqual(card.titleWords, photoWords);
+
+  const list = nearbyForLayer(layers, layers.layers.get('street-level'), here, {
+    radiusKm: 5,
+    limit: 3,
+  });
+  assert.deepEqual(
+    list.items.map((item) => [item.title, item.titleWords]),
+    [
+      ['Street-level photo', photoWords],
+      ['Mapillary', null],
+      ['Congress Ave', null],
+    ],
+  );
+  assert.equal(list.items[0].identity.id, untitled.id, 'it still opens');
+
+  const near = nearbyEntities(layers, { ...card, key: 'elsewhere' });
+  assert.deepEqual(
+    near.same.map((item) => [item.title, item.titleWords]),
+    [
+      ['Street-level photo', photoWords],
+      ['Mapillary', null],
+      ['Congress Ave', null],
+    ],
+  );
+
+  const inView = viewSummaryForLayer(
+    layers,
+    layers.layers.get('street-level'),
+    { west: -98, south: 29, east: -96, north: 31 },
+    here,
+  );
+  assert.deepEqual(
+    inView.items.map((item) => [item.title, item.titleWords]),
+    [
+      ['Street-level photo', photoWords],
+      ['Congress Ave', null],
+    ],
+  );
+
+  const matched = layerMatches(layers, 'street-level', {
+    center: here,
+    radiusKm: 5,
+  });
+  assert.deepEqual(
+    matched.items.map((item) => [item.title, item.titleWords]),
+    [
+      ['Street-level photo', photoWords],
+      ['Congress Ave', null],
+    ],
+  );
+
+  const previous = getLocale();
+  try {
+    setLocale('fr');
+    for (const query of ['Street-level photo', t('Street-level photo')]) {
+      assert.deepEqual(
+        searchEntities(layers, query).map((row) => row.identity.id),
+        [untitled.id],
+      );
+      assert.equal(
+        nearbyForLayer(layers, layers.layers.get('street-level'), here, {
+          radiusKm: 5,
+          query,
+        }).count,
+        1,
+      );
+    }
+  } finally {
+    setLocale(previous);
+  }
+  const [found] = searchEntities(layers, '3640240722906662');
+  assert.equal(found.title, 'Street-level photo');
+  assert.deepEqual(found.titleWords, photoWords);
+});
+
+test('a fire detection with only its id keeps its list ID and descriptive card title', () => {
+  const fire = { id: 'FIRE-00012', lat: 30.0005, lon: -97, frp: 12 };
+  const layers = manager({
+    'local-firms': { name: 'Fires', records: [fire] },
+  });
+  const card = describeEntity(layers, { layerId: 'local-firms', id: fire.id });
+  assert.equal(card.title, 'Fire detection');
+  const list = nearbyForLayer(
+    layers,
+    layers.layers.get('local-firms'),
+    { lat: 30, lon: -97 },
+    { radiusKm: 5 },
+  );
+  assert.equal(list.items[0].title, fire.id);
+  assert.deepEqual(list.items[0].titleWords, null);
+
+  for (const label of [fire.id, undefined]) {
+    const identityOnly = describeEntity(null, {
+      layerId: 'local-firms',
+      id: fire.id,
+      label,
+    });
+    assert.equal(identityOnly.title, 'Fire detection');
+    assert.deepEqual(identityOnly.titleWords, { text: 'Fire detection' });
+  }
+  const named = describeEntity(null, {
+    layerId: 'local-firms',
+    id: fire.id,
+    label: 'North slope',
+  });
+  assert.equal(named.title, 'North slope');
 });

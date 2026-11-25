@@ -1150,7 +1150,6 @@
   "Panoramax sent an unreadable answer": "Panoramax 返回的响应无法读取",
   "No street-level imagery providers configured": "未配置街景影像服务商",
   "(by upload date)": "（按上传日期）",
-  "Open the Street Level panel to view imagery": "打开街景面板以查看影像",
   "Image could not be opened": "图像无法打开",
   "TeleGeography load failed": "TeleGeography 加载失败",
   "UNAVAILABLE · {source} · Roads unavailable": "不可用 · {source} · 道路不可用",
@@ -2273,8 +2272,6 @@
     "other": "最近 {count} 天"
   },
   "{window} · SINCE {date}": "{window} · 自 {date} 起",
-  "Turn Street Level off": "关闭街景",
-  "Turn Street Level on": "开启街景",
   "{name} imagery on": "{name} 影像已开启",
   "{name} imagery off": "{name} 影像已关闭",
   "Image by {creator}": "图像作者：{creator}",
@@ -2877,20 +2874,13 @@
   "SAVE CAL": "保存校准",
   "RESET CAL": "重置校准",
   "SCENE SUMMARY": "场景摘要",
-  "STREET LEVEL": "街景",
-  "Turn Street Level on or off": "开启或关闭街景",
   "Image fit": "图像适配",
   "FIT": "适应",
   "Fit: show the whole photo, with dark bars where its shape differs from the frame": "适应：显示整张照片，在比例与画框不符处留黑边",
   "FILL": "填充",
   "Fill: fill the frame edge to edge, cropping the photo": "填充：图像铺满画框并裁剪照片",
-  "Close the image and deselect it on the map": "关闭图像并取消其在地图上的选中状态",
-  "Close the street-level image": "关闭街景图像",
   "Street-level viewer": "街景查看器",
   "Open this image on the provider's site": "在服务商网站上打开此图像",
-  "Imagery providers": "影像服务商",
-  "PROVIDERS": "服务商",
-  "Imagery filters": "影像筛选",
   "IMAGERY": "影像",
   "Panorama filter": "全景筛选",
   "ALL": "全部",
@@ -3167,9 +3157,6 @@
   "Ask GEV anything about the map…": "向 GEV 询问地图相关问题…",
   "Stop reply": "停止回复",
   "Send message": "发送消息",
-  "Panel position": "面板位置",
-  "Move above the dock": "移到停靠栏上方",
-  "Dock to the right": "停靠到右侧",
   "Expand panel": "展开面板",
   "Minimize panel": "最小化面板",
   "You can attach up to four items.": "最多可添加四个附件。",
@@ -4333,6 +4320,7 @@
   "cable landing point": "海缆登陆点",
   "street photo": "街景照片",
   "Street-level photo": "街景照片",
+  "Open street-level photo": "打开街景照片",
   "No value at the centre of the view": "视图中心没有数值",
   "{degraded} of {count} aircraft reported low accuracy": {
     "other": "精度低：{count} 架飞机中有 {degraded} 架"
@@ -4396,6 +4384,10 @@
   "Inside the swath · {width} wide": "幅宽内 · 宽 {width}",
   "Broadcast alerts": "已广播的警报",
   "Provider": "提供方",
+  "Captured": "拍摄日期",
+  "Image type": "图像类型",
+  "360° panorama": "360° 全景",
+  "Flat photo": "平面照片",
   "Codes": "代码",
   "Runways": "跑道",
   "Picked spot": "所选地点",
@@ -4445,5 +4437,6 @@
   "> 10%": "> 10%",
   "{degraded} of {count} aircraft": {
     "other": "{count} 架飞机中有 {degraded} 架"
-  }
+  },
+  "Open Context to view street-level imagery": "打开“态势”以查看街景图像"
 }

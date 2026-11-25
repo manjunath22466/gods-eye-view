@@ -1,4 +1,5 @@
 import { analystRecordLimit } from './analystRecordLimit.js';
+import { isFollowing } from './followed.js';
 import { isPointerFree } from './inputOwnership.js';
 import {
   clearOverlaySource,
@@ -3716,6 +3717,16 @@ export function createBhoteKoshiEventLayer({
           _dataManager?.setEnabled(BHOTE_KOSHI_LAYER_ID, false, {
             origin: 'user',
           }),
+        leaveView: () => {
+          if (!panelStore.leaveView(owner)) return false;
+          invalidateIntroAutostart();
+          stopPlayback();
+          const camera = findCamera(_viewer);
+          stopCinematic({
+            releaseCamera: !isFollowing(_viewer) && camera?.flying !== true,
+          });
+          return true;
+        },
         play: handlePlay,
         playScene: playWholeScene,
         toggleCinematic,

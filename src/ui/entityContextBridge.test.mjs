@@ -23,6 +23,10 @@ import { useOmnibarStore } from './stores/omnibar.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
 import { useSceneStore } from './stores/scenes.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
+import {
+  STREET_LEVEL_PHOTO_EVENT,
+  STREET_LEVEL_PHOTO_REQUEST_EVENT,
+} from './streetLevelEvents.js';
 import { fakeInput } from '../input/testDoubles.mjs';
 import { fakeCameraPort } from '../testSupport/fakeCameraPort.mjs';
 import { bindRenderer } from '../render/rendererOf.js';
@@ -49,6 +53,7 @@ test('Context names nothing under a card painted on top, and keeps its card', (t
   const route = { set: 'test-route:1', id: 'route:line' };
   registerPickOwner('test-fires', (id) => id === fire.id);
   registerPickOwner('test-planes', (id) => id === plane.id);
+  registerPickOwner('street-level', (id) => id.startsWith('kv:line:'));
   registerPickOwner('test-route', (id) => id.startsWith('route:'));
   let cardOnTop = false;
   // The card on top at a click, as the host answers the pick registry.
@@ -60,6 +65,7 @@ test('Context names nothing under a card painted on top, and keeps its card', (t
     unregisterPickOwner('test-fires');
     unregisterPickOwner('test-planes');
     unregisterPickOwner('test-route');
+    unregisterPickOwner('street-level');
   });
   let exact = null;
   let near = null;
@@ -99,6 +105,31 @@ test('Context names nothing under a card painted on top, and keeps its card', (t
   };
   assert.deepEqual(tap(null, fire), ['fire:1'], 'open map: a near fire');
   assert.deepEqual(tap(route, null), ['route:line'], 'open map: a route');
+  assert.deepEqual(
+    tap({ set: 'street-level:lines', id: 'kv:line:1' }, null),
+    [],
+    'a Street Level line must not open a card before the lookup finishes',
+  );
+  // With Context open, the line's lookup starts, then its photo opens.
+  const chrome = usePanelChromeStore(pinia);
+  chrome.publish(chrome.connect({}), 'global-context-panel', {
+    collapsed: false,
+  });
+  document.dispatchEvent(
+    new CustomEvent(STREET_LEVEL_PHOTO_REQUEST_EVENT, {
+      detail: { requestId: 1 },
+    }),
+  );
+  document.dispatchEvent(
+    new CustomEvent(STREET_LEVEL_PHOTO_EVENT, {
+      detail: { id: 'kartaview:42', lat: 38, lon: -121, requestId: 1 },
+    }),
+  );
+  assert.deepEqual(
+    named,
+    ['kartaview:42'],
+    'the resolved photo opens its card',
+  );
   cardOnTop = true;
   assert.deepEqual(tap(null, fire), [], 'under a card: a near fire');
   assert.deepEqual(tap(fire, fire), [], 'under a card: an exact fire');
@@ -1186,9 +1217,12 @@ test('the map’s Esc leaves the pick to an Esc another owner takes', (t) => {
     for (const element of extra) element.remove();
   });
   const store = useEntityCardStore(pinia);
-  let clears = 0;
-  store.card = { key: 'flights:a', layerId: 'flights', identity: { id: 'a' } };
-  store.clear = () => clears++;
+  const key = 'street-level:mapillary:A';
+  store.card = {
+    key,
+    layerId: 'street-level',
+    identity: { id: 'mapillary:A' },
+  };
   const esc = (target, { handled = false } = {}) => {
     const event = new KeyboardEvent('keydown', {
       key: 'Escape',
@@ -1197,6 +1231,7 @@ test('the map’s Esc leaves the pick to an Esc another owner takes', (t) => {
     });
     if (handled) event.preventDefault();
     target.dispatchEvent(event);
+    return event;
   };
   const add = (attributes) => {
     const element = document.createElement('div');
@@ -1207,22 +1242,31 @@ test('the map’s Esc leaves the pick to an Esc another owner takes', (t) => {
   };
 
   esc(document.body, { handled: true });
-  assert.equal(clears, 0, 'an Esc already handled');
+  assert.equal(store.card?.key, key, 'an Esc already handled');
   const owner = add({ 'data-owns-escape': '' });
   esc(owner);
-  assert.equal(clears, 0, 'an Esc from a control that takes its own');
+  assert.equal(
+    store.card?.key,
+    key,
+    'an Esc from a control that takes its own',
+  );
   const popup = add({ role: 'dialog', 'data-owns-escape': '' });
   esc(document.body);
-  assert.equal(clears, 0, 'an Esc on the page while such a dialog is open');
+  assert.equal(
+    store.card?.key,
+    key,
+    'an Esc on the page while such a dialog is open',
+  );
   popup.remove();
   owner.remove();
   const scenes = useSceneStore(pinia);
   scenes.publishPanel({ running: true });
   esc(document.body);
-  assert.equal(clears, 0, 'a playing scene owns this Escape');
+  assert.equal(store.card?.key, key, 'a playing scene owns this Escape');
   scenes.publishPanel({ running: false });
-  esc(document.body);
-  assert.equal(clears, 1, 'an Esc on the page with none of these clears it');
+  assert.equal(esc(document.body).defaultPrevented, true);
+  assert.equal(store.card, null, 'an unowned Esc clears the photo card');
+  assert.equal(store.wasDismissed(key), false, 'Esc keeps the photo open');
 });
 
 // Nearby opens a cable laid in pieces at its nearest piece: the card stays

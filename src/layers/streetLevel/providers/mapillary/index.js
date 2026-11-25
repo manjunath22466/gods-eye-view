@@ -80,12 +80,17 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
     keyReady: () =>
       source.hasToken?.() !== false || Boolean(source.graphEndpoint),
     pickPrefix: PICK_PREFIX.root,
+    coverageLabel: Object.freeze({
+      noun: 'sequences',
+      action: 'click a line for its nearest photo',
+    }),
     colors: COLORS,
     credit: Object.freeze({ html: MAPILLARY_CREDIT_HTML }),
 
     create(context) {
       const state = createProviderState(context);
       const parts = {};
+
       parts.coverage = createLineCoverage({
         state,
         fetchTile: async (tile, { signal }) =>
@@ -111,12 +116,11 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
           const records = await source.getSequenceImages(sequenceId, {
             signal,
           });
-          return thinImages(
-            records
-              .map(normalizeSequenceImage)
-              .filter(Boolean)
-              .sort((a, b) => a.capturedAt - b.capturedAt),
-          );
+          const images = records
+            .map(normalizeSequenceImage)
+            .filter(Boolean)
+            .sort((a, b) => a.capturedAt - b.capturedAt);
+          return thinImages(images);
         },
         colors: COLORS,
         pickPrefix: PICK_PREFIX.image,
@@ -173,19 +177,26 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
         },
 
         coverageStats: () => parts.coverage.stats(),
+        coverageNear: (point, radiusKm, rect) =>
+          parts.coverage.linesNear(point, radiusKm, rect),
 
-        /** A line selects its sequence; a cone opens its image. */
-        handlePick(pickId) {
-          const sequenceId = sequenceIdFromPick(pickId, PICK_PREFIX.sequence);
-          if (sequenceId) {
-            parts.sequences.select(sequenceId);
-            return true;
-          }
+        /**
+         * A line draws its sequence's cones and opens that sequence's image
+         * nearest the click; a cone opens its image.
+         */
+        handlePick(pickId, { groundPoint } = {}) {
           if (pickId.startsWith(PICK_PREFIX.image)) {
             context.actions.openImage(pickId.slice(PICK_PREFIX.image.length));
             return true;
           }
-          return false;
+          const sequenceId = sequenceIdFromPick(pickId, PICK_PREFIX.sequence);
+          if (!sequenceId) return false;
+          parts.sequences.select(sequenceId);
+          const point = groundPoint?.();
+          // No ground under the click (the sky beyond a line): nothing to open.
+          if (point) context.actions.openNearest(point, sequenceId);
+          else context.actions.cancelNearest();
+          return true;
         },
 
         selectSequence: (sequenceId) => parts.sequences.select(sequenceId),
@@ -198,12 +209,14 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
         }),
 
         /**
-         * The nearest image that passes the imagery filter, or null: what
-         * show_street_level and sl= links open (clicks open a line, then a
-         * cone). The core aborts `signal` once a newer request overtakes it.
+         * The nearest image that passes the imagery filter, or null. After a
+         * click on a line, or for a Nearby line row, that line's sequence
+         * wins when one of its images is in the same answer. The core aborts
+         * `signal` once a newer request overtakes it.
          */
-        async nearestImage({ lat, lon }, { signal } = {}) {
+        async nearestImage({ lat, lon }, { signal, sequenceId = null } = {}) {
           const images = await source.nearestImages({ lat, lon }, { signal });
+          const filter = context.getFilter();
           // The API returns the images in the radius in no particular order.
           const metres = (record) => {
             const [lon2, lat2] = (record.computed_geometry || record.geometry)
@@ -211,10 +224,9 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
             const d = metresBetween({ lon, lat }, { lon: lon2, lat: lat2 });
             return Number.isFinite(d) ? d : Infinity;
           };
-          const filter = context.getFilter();
-          const hit = [...images]
+          const shown = [...images]
             .sort((a, b) => metres(a) - metres(b))
-            .find((record) =>
+            .filter((record) =>
               passesImageryFilter(
                 {
                   isPano: record.is_pano === true,
@@ -223,6 +235,14 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
                 filter,
               ),
             );
+          // One request either way: the line's own image comes from the
+          // same answer, else the nearest of any sequence.
+          const hit =
+            (sequenceId &&
+              shown.find(
+                (record) => String(record.sequence) === String(sequenceId),
+              )) ||
+            shown[0];
           return hit ? String(hit.id) : null;
         },
 

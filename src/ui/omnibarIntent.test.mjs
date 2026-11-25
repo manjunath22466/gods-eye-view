@@ -440,3 +440,15 @@ test('every place word is still a bundled place name', async () => {
         names.add(row[0].toLowerCase());
   for (const word of PLACE_WORDS) assert.ok(names.has(word), word);
 });
+
+test('the retired Street Level panel is routed by the action runner', () => {
+  const steps = (line) => parseOmnibar(line)?.steps || [];
+  for (const line of [
+    'open street level panel',
+    'show the street view panel',
+    'close the street level panel',
+  ]) {
+    const step = steps(line).find((s) => s.kind === 'panel');
+    assert.equal(step?.item, 'street-level-panel', line);
+  }
+});

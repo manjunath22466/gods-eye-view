@@ -2,9 +2,17 @@ import { createState } from './state.js';
 import { createMarker } from './marker.js';
 import { createCameraFraming } from './cameraFraming.js';
 import { createCredits } from './credits.js';
+import { creditFromMarkup } from '../../render/creditMarkup.js';
 import { createPickRouter } from './pickRouter.js';
 import { createSelection } from './selection.js';
-import { createViewerHost } from './viewerHost.js';
+import { createViewerHost, KEEP_OPEN_PHOTO } from './viewerHost.js';
+import {
+  createPhotoHistory,
+  nearPointId,
+  parseNearPointId,
+  parsePhotoId,
+  photoId,
+} from './photos.js';
 import { subscribePhotoViewers } from './photoViewers.js';
 import { filtersOf, requiresKeyIdFor, validateProviders } from './registry.js';
 import { normalizeFilter, resolveFilter, sameFilter } from './filter.js';
@@ -72,6 +80,7 @@ export function createStreetLevelLayer({
   parts.credits = createCredits();
   parts.marker = createMarker(context);
   parts.framing = createCameraFraming(context);
+  parts.photos = createPhotoHistory();
   parts.router = createPickRouter(() => state.providers.values(), {
     positionId: POSITION_PICK_ID,
   });
@@ -91,6 +100,10 @@ export function createStreetLevelLayer({
     isAvailable: (entry) => providerAvailable(entry),
   });
 
+  /** Who presents the layer row's filters (the UI), and the row's listener. */
+  let rowControlsPresenter = null;
+  let rowControlsListener = null;
+
   let notifyQueued = false;
   function notify() {
     if (notifyQueued) return;
@@ -105,7 +118,19 @@ export function createStreetLevelLayer({
           console.warn('[Data:StreetLevel] listener error:', error);
         }
       }
+      // The Data Layers row repaints its filters from the fresh state, but
+      // not for a photo's pose: dragging a panorama poses every frame.
+      const row = rowSignature(snapshot);
+      if (row === lastRowSignature) return;
+      lastRowSignature = row;
+      rowControlsListener?.();
     });
+  }
+  let lastRowSignature = '';
+  /** What the row shows: everything but the open photo's pose. */
+  function rowSignature(snapshot) {
+    const { street, ...rest } = snapshot;
+    return JSON.stringify([rest, street.open, street.loading, street.error]);
   }
   state.notify = notify;
 
@@ -122,16 +147,30 @@ export function createStreetLevelLayer({
         openImage: (imageId, options) =>
           openImage(entry.def.id, imageId, options),
         /** This provider's image nearest a point the user picked on the map. */
-        openNearest: (point) =>
+        openNearest: (point, sequenceId = null) =>
           layer.openNearest(point, {
             providerIds: [entry.def.id],
             frame: false,
+            sequenceId,
           }),
+        cancelNearest: () => {
+          releaseCardPhotoOwner(undefined, KEEP_OPEN_PHOTO);
+          abortNearest();
+          parts.viewerHost.cancelPending();
+          state.street.loading = false;
+          notify();
+        },
         /**
          * Show a provider error, or withdraw it (null). A withdrawal clears
          * only this provider's own error, never a newer one from elsewhere.
          */
-        reportError: (message) => {
+        reportError: (message, imageId = null) => {
+          if (
+            imageId &&
+            (entry.def.id !== state.street.providerId ||
+              imageId !== state.street.imageId)
+          )
+            return;
           if (message) {
             state.street.error = entry.reportedError = message;
           } else {
@@ -183,6 +222,8 @@ export function createStreetLevelLayer({
 
   /** Leaving a provider's map stack closes its image, viewer and credit. */
   function syncProviderAvailability() {
+    const loading = state.providers.get(cardPhotoRequest?.providerId);
+    if (loading && !providerAvailable(loading)) releaseCardPhotoOwner();
     const owner = state.providers.get(state.street.providerId);
     if (state.street.open && owner && !providerAvailable(owner))
       layer.closeViewer();
@@ -280,6 +321,7 @@ export function createStreetLevelLayer({
   const heldViewers = new Map();
 
   function deactivate(entry) {
+    if (cardPhotoRequest?.providerId === entry.def.id) releaseCardPhotoOwner();
     if (!heldViewers.has(entry.def.id)) parts.viewerHost.unmount(entry.def.id);
     entry.instance.deactivate();
     parts.credits.hide(state.viewer, entry.def);
@@ -287,6 +329,16 @@ export function createStreetLevelLayer({
 
   /** The nearest-image lookup in flight; any newer user action aborts it. */
   let nearestLookup = null;
+  // The Context card that asked for an image or a nearby lookup owns its
+  // cancellation until that request settles or a new route takes over.
+  let cardPhotoRequest = null;
+
+  function releaseCardPhotoOwner(signal, reason) {
+    if (!cardPhotoRequest || cardPhotoRequest.signal === signal) return;
+    const previous = cardPhotoRequest;
+    cardPhotoRequest = null;
+    previous.controller.abort(reason);
+  }
 
   function abortNearest() {
     nearestLookup?.abort();
@@ -295,6 +347,7 @@ export function createStreetLevelLayer({
 
   /** Close the image and deselect its sequence on the map. */
   function closeViewer() {
+    releaseCardPhotoOwner();
     abortNearest();
     parts.viewerHost.close();
     parts.clearSequences();
@@ -326,22 +379,31 @@ export function createStreetLevelLayer({
   }
 
   /** `frame: false` keeps the camera where it is (the user picked the spot). */
-  function openImage(
-    providerId,
-    imageId,
-    { frame = true, signal = null } = {},
-  ) {
-    if (signal?.aborted) return Promise.resolve(false);
-    abortNearest();
-    state.street.armed = null;
+  function openImage(providerId, imageId, options = {}) {
+    const { signal, request = true, requestId = null } = options;
     const entry = state.providers.get(providerId);
-    if (entry && !providerAvailable(entry)) {
+    if (!state.enabled || signal?.aborted || !entry?.on)
+      return Promise.resolve(false);
+    if (!request && requestId === null && (cardPhotoRequest || nearestLookup))
+      return Promise.resolve(false);
+    releaseCardPhotoOwner(signal);
+    if (request || requestId !== null) {
+      abortNearest();
+      state.street.armed = null;
+    }
+    if (!providerAvailable(entry)) {
       state.street.loading = false;
       state.street.error = unavailableReason(entry);
       notify();
       return Promise.resolve(false);
     }
-    return parts.viewerHost.open(providerId, imageId, { frame, signal });
+    return parts.viewerHost.open(providerId, imageId, {
+      ...options,
+      cardPhotoId:
+        signal && signal === cardPhotoRequest?.signal
+          ? cardPhotoRequest.id
+          : null,
+    });
   }
 
   function unavailableReason(entry) {
@@ -436,7 +498,7 @@ export function createStreetLevelLayer({
   const listedEntries = () =>
     [...state.providers.values()].filter((entry) => providerAvailable(entry));
 
-  function providerSnapshots() {
+  function providerSnapshots(includeRecordRevision = false) {
     return listedEntries().map((entry) => {
       const stats = entry.instance.coverageStats();
       return {
@@ -451,6 +513,7 @@ export function createStreetLevelLayer({
         requiresKeyId: entry.def.requiresKeyId || null,
         loading: stats.loading === true,
         count: stats.count || 0,
+        ...(includeRecordRevision && { drawnVersion: stats.drawnVersion ?? 0 }),
         hint: hintFor(entry, stats),
         error: stats.error || null,
         color: entry.def.colors.coverage,
@@ -504,6 +567,10 @@ export function createStreetLevelLayer({
     );
     if (stranded && !ui.providers.some((p) => p.on))
       ui.coverage.hint = unavailableReason(stranded);
+    ui.photoRequests = state.photoRequests;
+    ui.billedPhoto =
+      state.providers.get(street.providerId)?.def.billedPerImage === true;
+    ui.acceptedPhoto = parts.viewerHost.acceptedPhoto();
     return ui;
   }
 
@@ -588,11 +655,13 @@ export function createStreetLevelLayer({
 
     disable() {
       state.enabled = false;
+      releaseCardPhotoOwner();
       abortNearest();
       removeCameraListener?.();
       removeCameraListener = null;
       cancelGroundRetry();
       parts.viewerHost.unmount();
+      parts.photos.clear();
       for (const entry of state.providers.values()) entry.instance.deactivate();
       syncGroundClickReady();
       parts.credits.hideAll(state.viewer);
@@ -621,7 +690,7 @@ export function createStreetLevelLayer({
     getStats() {
       // The lifecycle polls this every second: summarise, don't snapshot.
       // English data: the layer panel translates these through translateKnown.
-      const snapshots = providerSnapshots();
+      const snapshots = providerSnapshots(true);
       const coverage = summarizeCoverage(snapshots);
       const keyLabel = keyStatusLabel(coverage);
       let loadingLabel = '';
@@ -631,6 +700,12 @@ export function createStreetLevelLayer({
       return {
         source: layer.source,
         count: coverage.count,
+        recordsRevision: [
+          parts.photos.revision,
+          ...snapshots
+            .filter((p) => p.on)
+            .map((p) => p.id + ':' + p.drawnVersion),
+        ].join('|'),
         loading: coverage.loading,
         keyRequired: coverage.keyRequired,
         keyAlternatives: keyAlternatives(snapshots),
@@ -701,8 +776,8 @@ export function createStreetLevelLayer({
     },
     getUIState,
     /** The DOM element provider viewers render into. */
-    attachViewerHost(element) {
-      parts.viewerHost.attach(element);
+    attachViewerHost(element, surface) {
+      parts.viewerHost.attach(element, surface);
     },
     /**
      * Receive every presentation of the photo viewer the providers whose
@@ -734,8 +809,12 @@ export function createStreetLevelLayer({
      *   point and keeps it until a photo opens;
      * - `replace: true` keeps an open photo (and EXPAND) up while it looks and
      *   closes it if nothing opens;
-     * - `proceed()` is asked before a found photo loads or an empty lookup
-     *   reports; false retires the request and leaves the panel as it was.
+     * - `proceed()` is asked before a found photo loads, after it loads and
+     *   before an empty lookup reports; false retires the request: before
+     *   loading it leaves the viewer as it was, after loading it closes the
+     *   photo before it is announced;
+     * - `sequenceId` asks providers that can for that sequence's photo first
+     *   (a Nearby line row).
      * Why nothing opened is in `street.nearestOutcome`: 'empty', 'sky' or
      * null (an error).
      */
@@ -750,6 +829,7 @@ export function createStreetLevelLayer({
         armed: useArmed = true,
         replace = false,
         proceed = null,
+        sequenceId = null,
       } = {},
     ) {
       if (callerSignal?.aborted) return false;
@@ -781,7 +861,9 @@ export function createStreetLevelLayer({
       if (!view && aim === 'screen-centre') {
         view = screenCentreGround();
         if (view === null) {
+          releaseCardPhotoOwner(callerSignal, KEEP_OPEN_PHOTO);
           abortNearest();
+          parts.viewerHost.cancelPending();
           closeReplaced();
           state.street.loading = false;
           state.street.error = AIM_AT_GROUND_MESSAGE;
@@ -793,7 +875,11 @@ export function createStreetLevelLayer({
       view ||= viewCentre(state.viewer);
       if (!Number.isFinite(view?.lat) || !Number.isFinite(view?.lon))
         return false;
+      releaseCardPhotoOwner(callerSignal, KEEP_OPEN_PHOTO);
       abortNearest();
+      parts.viewerHost.cancelPending();
+      // The lookup is the request; the photo it opens is not a second one.
+      const requestId = ++state.photoRequests;
       const lookup = new AbortController();
       nearestLookup = lookup;
       const { signal } = lookup;
@@ -824,9 +910,11 @@ export function createStreetLevelLayer({
         try {
           imageId = await entry.instance.nearestImage(
             { lat: view.lat, lon: view.lon },
-            radius === NEAREST_RADIUS_M
-              ? { signal }
-              : { signal, radiusM: radius },
+            {
+              signal,
+              ...(radius === NEAREST_RADIUS_M ? {} : { radiusM: radius }),
+              ...(sequenceId ? { sequenceId } : {}),
+            },
           );
         } catch (error) {
           if (callerSignal?.aborted) return retired();
@@ -845,11 +933,15 @@ export function createStreetLevelLayer({
         nearestLookup = null;
         callerSignal?.removeEventListener('abort', onCallerAbort);
         // A sequence playing in the replaced photo would step past this one.
-        if (replace && state.street.open) parts.viewerHost.stopPlayback();
-        // The caller's signal still counts while the viewer mounts and loads.
+        if (state.street.open) parts.viewerHost.stopPlayback();
+        // The caller's signal and its proceed() still count while the
+        // viewer mounts and loads.
         return openImage(entry.def.id, imageId, {
           frame,
           signal: callerSignal,
+          request: false,
+          requestId,
+          proceed,
         });
       }
       callerSignal?.removeEventListener('abort', onCallerAbort);
@@ -929,6 +1021,171 @@ export function createStreetLevelLayer({
     },
     setViewerRenderMode: (mode) => parts.viewerHost.setRenderMode(mode),
     resizeViewer: () => parts.viewerHost.resize(),
+
+    // ── Context: the open photo's card, and the others nearby ───────────
+    /** Remembered photos from providers that can currently open them. */
+    getAnalystRecords(maxCount) {
+      if (!state.enabled) return [];
+      return parts.photos.list(maxCount, ({ providerId }) => {
+        const entry = state.providers.get(providerId);
+        return entry?.on && providerAvailable(entry);
+      });
+    },
+    /**
+     * Eligible remembered photos, plus drawn lines within `radiusKm` for each
+     * enabled source. Context applies its radius to the combined records.
+     * A line's id is `near:<providerId>:<lat>,<lon>:<sequenceId>`,
+     * one per sequence; opening it opens that source's photo nearest the
+     * point (`openPhoto`).
+     * @param {{lat: number, lon: number}} point
+     * @param {number} radiusKm
+     * @param {?object} rect Optional viewport to clip each drawn line against.
+     * @returns {Array<object>}
+     */
+    getRecordsNear(point, radiusKm, rect = null) {
+      if (!state.enabled) return [];
+      const records = layer.getAnalystRecords();
+      for (const entry of listedEntries()) {
+        if (!entry.on || typeof entry.instance.coverageNear !== 'function')
+          continue;
+        for (const line of entry.instance.coverageNear(point, radiusKm, rect))
+          records.push({
+            id: nearPointId(entry.def.id, line),
+            name: entry.def.name || null,
+            lat: line.lat,
+            lon: line.lon,
+            providerId: entry.def.id,
+            provider: entry.def.name || null,
+            sequenceId: line.sequenceId,
+            pano: line.isPano,
+            capturedAt: line.capturedAt || null,
+          });
+      }
+      return records;
+    },
+    /** Inspector can list the visible portion of drawn coverage as well as photos. */
+    getViewRecords(maxCount, area) {
+      return area?.rect
+        ? layer
+            .getRecordsNear(area.center, Infinity, area.rect)
+            .slice(0, maxCount)
+        : layer.getAnalystRecords(maxCount);
+    },
+    /** The photo the viewer currently confirms as shown. */
+    settledPhotoId: () => parts.viewerHost.acceptedPhoto()?.id ?? null,
+    /** Whether a photo is still opening. */
+    photoOpening: () => state.street.opening === true,
+    /** A remembered photo by its id (`<providerId>:<imageId>`), or null. */
+    photo(id) {
+      return state.enabled ? parts.photos.get(id) : null;
+    },
+    /**
+     * A provider's on-map credit as plain text, for its pictures shown away
+     * from the globe (its card's still), or '' for no such provider.
+     */
+    providerCredit(providerId) {
+      const html = state.providers.get(providerId)?.def?.credit?.html;
+      return html ? creditFromMarkup(html).text : '';
+    },
+    /**
+     * Open a Nearby row: a remembered photo again, or a drawn line's photo
+     * nearest its point (`near:` id), from that line's sequence where the
+     * provider can tell. `frame: false` keeps the camera where it is.
+     * @returns {Promise<boolean|null>} Whether it opened; null when a newer
+     *   request took over first.
+     */
+    async openPhoto(id, { frame = false } = {}) {
+      if (!state.enabled) return false;
+      const near = parseNearPointId(id);
+      const parsed = near ? null : parsePhotoId(id);
+      if (!near && !parsed) return false;
+      const controller = new AbortController();
+      const { signal } = controller;
+      const providerId = (near ?? parsed).providerId;
+      const entry = state.providers.get(providerId);
+      if (!entry?.on || !providerAvailable(entry)) return false;
+      releaseCardPhotoOwner(signal, KEEP_OPEN_PHOTO);
+      if (!near && parts.viewerHost.acceptedPhoto()?.id === id) {
+        abortNearest();
+        parts.viewerHost.cancelPending();
+        if (parts.viewerHost.acceptedPhoto()?.id === id) {
+          Object.assign(state.street, { loading: false, error: null });
+          parts.viewerHost.reaffirm(id);
+          if (frame) parts.framing.frame(parts.framing.begin());
+          return true;
+        }
+      }
+      parts.viewerHost.stopPlayback();
+      const request = { id, providerId, controller, signal };
+      cardPhotoRequest = request;
+      try {
+        const opened = await (near
+          ? layer.openNearest(near.point, {
+              providerIds: [near.providerId],
+              frame,
+              armed: false,
+              signal,
+              sequenceId: near.sequenceId,
+            })
+          : openImage(parsed.providerId, parsed.imageId, {
+              frame,
+              signal,
+            }));
+        // Taken over by a newer request (another card, a map click): not a
+        // failure of this photo, whose card says nothing about it.
+        return signal.aborted && !opened ? null : opened;
+      } finally {
+        if (cardPhotoRequest === request) cardPhotoRequest = null;
+      }
+    },
+    /**
+     * Close the photo whose card went away, unless another request already
+     * took the viewer. On a card-to-card handoff, withdraw the previous
+     * request while it is loading and leave settled photos open.
+     * @returns {boolean} Whether the request or open photo was closed.
+     */
+    closePhoto(id, { pendingOnly = false } = {}) {
+      if (cardPhotoRequest?.id === id) {
+        releaseCardPhotoOwner(
+          undefined,
+          pendingOnly ? KEEP_OPEN_PHOTO : undefined,
+        );
+        if (!state.street.open) parts.clearSequences();
+        return true;
+      }
+      // A step or a map lookup may still be loading over the displayed photo.
+      if (pendingOnly || cardPhotoRequest) return false;
+      if (!id || parts.viewerHost.acceptedPhoto()?.id !== id) return false;
+      closeViewer();
+      return true;
+    },
+    /**
+     * Something else was picked: close the photo, whether it shows on its
+     * card, waits offscreen or is still loading, and withdraw every request
+     * in flight (a card's, a lookup, a line's image), so none opens later.
+     * @returns {boolean} Whether there was anything to close.
+     */
+    withdrawPhoto() {
+      const { open, loading, opening } = state.street;
+      if (!open && !loading && !opening && !cardPhotoRequest && !nearestLookup)
+        return false;
+      closeViewer();
+      return true;
+    },
+
+    // ── The Data Layers row: providers, panorama and SINCE filters ──────
+    /** The UI presents the row's controls from the layer's state. */
+    presentRowControls(presenter) {
+      rowControlsPresenter = typeof presenter === 'function' ? presenter : null;
+      lastRowSignature = '';
+      rowControlsListener?.();
+    },
+    getRowControls() {
+      return rowControlsPresenter?.() ?? null;
+    },
+    setRowControlsListener(listener) {
+      rowControlsListener = typeof listener === 'function' ? listener : null;
+    },
   };
   return layer;
 }

@@ -341,6 +341,32 @@ test('private text still finds things already on the map, locally', () => {
   );
 });
 
+test('typed photo results use the same translated title as the entity strip', () => {
+  const translateTitle = (item) =>
+    item.titleWords?.text === 'Street-level photo'
+      ? 'Photo au niveau de la rue'
+      : item.title;
+  const omnibar = createOmnibar({
+    layers: layers(),
+    entityTitle: translateTitle,
+  });
+  const identity = { layerId: 'street-level', id: 'panoramax:1' };
+  const { rows } = omnibar.rows('panoramax:1', {
+    entities: () => [
+      {
+        key: 'street-level:panoramax:1',
+        title: 'Street-level photo',
+        titleWords: { text: 'Street-level photo' },
+        layerName: 'Street Level',
+        identity,
+      },
+    ],
+  });
+  const photo = rows.find((row) => row.kind === 'entity');
+  assert.equal(photo.label, 'Photo au niveau de la rue');
+  assert.equal(photo.identity, identity);
+});
+
 test('a map item named like a place follows the place; a callsign leads', () => {
   const omnibar = createOmnibar({ layers: layers() });
   const entities = (text) =>

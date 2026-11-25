@@ -18,7 +18,6 @@ const SHARE_PANEL_STATE_SPECS = Object.freeze([
   { id: 'weather-panel' },
   { id: 'news-panel' },
   { id: 'recent-imagery-panel' },
-  { id: 'street-level-panel' },
   { id: 'radio-panel' },
   { id: 'scene-panel' },
   { id: 'global-context-panel' },
@@ -44,7 +43,6 @@ const COCKPIT_ENTRY_COLLAPSE_PANEL_IDS = Object.freeze([
   'weather-panel',
   'news-panel',
   'recent-imagery-panel',
-  'street-level-panel',
   'scene-panel',
   'utilities-panel',
   'pp-toggles',
@@ -459,9 +457,9 @@ export class PanelChrome {
     const nextCollapsed = Boolean(collapsed);
     const wasAutoCollapsed = Boolean(this._shownPanel(panelEl).auto);
     // One panel is open per desktop side: opening a side panel, whether the
-    // user asked or a feature revealed it (Street Level's viewer, a selected
-    // radio station), owns the whole accordion, including peers that were
-    // only presentation-collapsed during a saved-state restore.
+    // user asked or a feature revealed it (a selected radio station), owns
+    // the whole accordion, including peers that were only presentation-collapsed
+    // during a saved-state restore.
     const sideStack = [this._leftPanelStack, this._rightPanelStack].find(
       (stack) => stack && panelEl.parentElement === stack,
     );
@@ -508,6 +506,8 @@ export class PanelChrome {
       this._panelLayout._leftStackPreferredPanelId = null;
     }
     if (!restore && !nextCollapsed && rightOwnerPanel) {
+      if (explicit && !document.body?.classList.contains('mobile-shell'))
+        this._chromeStore.claimRightRail(this._chromeToken);
       this._panelLayout._rightStackPreferredPanelId = rightOwnerPanel.id;
     } else if (
       explicit &&

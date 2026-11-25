@@ -24,8 +24,14 @@ import { RecordingControls } from './recordingControls.js';
 import { readShellElements } from './shellElements.js';
 import { CockpitCoordinator } from './cockpitCoordinator.js';
 import { ContextControls } from './context.js';
+import { activeTab } from './contextLayerTabs.js';
+import { useBhoteKoshiPanelStore } from './stores/bhoteKoshiPanel.js';
 import { CctvControls } from './cctv.js';
 import { StreetLevelControls } from './streetLevelControls.js';
+import {
+  announceStreetLevelPhoto,
+  STREET_LEVEL_PHOTO_REQUEST_EVENT,
+} from './streetLevelEvents.js';
 import { createWildlifeSightingCard } from './wildlifeSightingCard.js';
 import { RadioControls } from './radio.js';
 import { LiveControls } from './liveControls.js';
@@ -76,6 +82,7 @@ import { useWorldOverlayActionsStore } from './stores/worldOverlayActions.js';
 import { useAwarenessDirectionStore } from './stores/awarenessDirection.js';
 import { useHudStore } from './stores/hud.js';
 import { useDisplayStore } from './stores/display.js';
+import { usePanelChromeStore } from './stores/panelChrome.js';
 import { useLocaleStore } from './stores/locale.js';
 import { useLocationStore } from './stores/location.js';
 import { useOmnibarStore } from './stores/omnibar.js';
@@ -250,7 +257,11 @@ export class StyleManager extends ShellFacade {
           readShown: cards.readViewContextShown,
         }),
       },
-      revealContext: () => this.revealPanel('global-context-panel'),
+      revealContext: () => {
+        activeTab.value = 'view';
+        this.revealPanel('global-context-panel');
+      },
+      exitContextSelectionView: (cover) => this.exitContextSelectionView(cover),
       supersedeDeferredNavigation: () => this.supersedeDeferredNavigation(),
       creditAirports,
     });
@@ -741,7 +752,7 @@ export class StyleManager extends ShellFacade {
     this._initRightPanelAdaptiveLayout();
     this._initRadioPanel();
     this._initCctvPanel();
-    this._initStreetLevelPanel();
+    this._initStreetLevelControls();
     this._initWildlifeSightingCard();
     this._initGlobalContextPanel();
     this._initSpaceMissionsPanel();
@@ -1255,31 +1266,37 @@ export class StyleManager extends ShellFacade {
     });
   }
 
-  /** Compose the Street Level panel controls from its layer and application actions. */
-  _initStreetLevelPanel() {
+  /**
+   * Compose Street Level's controls from its layer and application actions:
+   * the photo viewer on its card in Context and the filters on its Data
+   * Layers row.
+   */
+  _initStreetLevelControls() {
     const { streetLevelLayer } = this.services;
     this._streetLevelControls?.destroy();
     this._streetLevelControls = null;
-    // The photo viewer (KartaView, Panoramax), which the layer panels draw
-    // into the viewer host. A viewer left by an earlier shell must
-    // not outlive its layer.
+    // A still viewer left by an earlier shell must not outlive its layer.
     const streetLevelPhotoStore = useStreetLevelPhotoStore(applicationPinia());
     this._streetLevelPhotoUnsubscribe?.();
     this._streetLevelPhotoUnsubscribe = null;
     streetLevelPhotoStore.publish(null);
-    if (!this._streetLevelPanel || !streetLevelLayer) return;
-    this._streetLevelPhotoUnsubscribe =
-      streetLevelLayer.subscribePhotoViewer?.((view) =>
-        streetLevelPhotoStore.publish(view),
-      ) ?? null;
-    // Photo framing yields to newer navigation and releases tracking like
-    // any deferred flight.
-    streetLevelLayer.attachNavigation?.({
-      begin: (noun) => this._beginDeferredNavigation(noun),
-      reassert: (generation) => this._reassertNavigationHandoff(generation),
-    });
+    if (!streetLevelLayer) return;
+    if (this._streetLevelViewer) {
+      this._streetLevelPhotoUnsubscribe =
+        streetLevelLayer.subscribePhotoViewer?.((view) =>
+          streetLevelPhotoStore.publish(view),
+        ) ?? null;
+      streetLevelLayer.attachNavigation?.({
+        begin: (noun) => this._beginDeferredNavigation(noun),
+        reassert: (generation) => this._reassertNavigationHandoff(generation),
+      });
+    }
+    const pinia = applicationPinia();
+    const display = useDisplayStore(pinia);
+    const chrome = usePanelChromeStore(pinia);
+    const bhote = useBhoteKoshiPanelStore(pinia);
     this._streetLevelControls = new StreetLevelControls({
-      root: this._streetLevelPanel,
+      root: this._streetLevelViewer,
       layer: streetLevelLayer,
       actions: {
         isEnabled: () => this._dataManager?.isEnabled('street-level') === true,
@@ -1289,16 +1306,50 @@ export class StyleManager extends ShellFacade {
           }),
         setParams: (params, options) =>
           this._dataManager?.setLayerParams('street-level', params, options),
-        setPanelCollapsed: (collapsed, options) =>
-          this.setPanelCollapsed('street-level-panel', collapsed, options),
-        revealPanel: () => this.revealPanel('street-level-panel'),
+        // Tie the accepted photo to its pick so a newer selection can win.
+        contextSelectionCover: () => this.contextSelectionCover?.(),
+        photoRequested: (requestId, cover) =>
+          document.dispatchEvent(
+            new CustomEvent(STREET_LEVEL_PHOTO_REQUEST_EVENT, {
+              detail: { requestId, cover },
+            }),
+          ),
+        // A newer panel, tab or sheet choice owns the surface.
+        watchContextSurface: (changed) =>
+          watch(
+            [
+              () => chrome.panels['global-context-panel']?.collapsed,
+              () => chrome.rightRailOpenRevision,
+              () => display.phoneShell?.sheet,
+              () => bhote.visiblePanel?.owner,
+              activeTab,
+            ],
+            changed,
+            { flush: 'sync' },
+          ),
+        revealPaidPhoto: (cover) => {
+          if (!this.exitContextSelectionView(cover)) return false;
+          this.setPanelCollapsed('global-context-panel', false, {
+            persist: false,
+          });
+          this.revealPanel('global-context-panel');
+          activeTab.value = 'view';
+          return true;
+        },
+        isInspectorTab: () => activeTab.value === 'view',
+        isContextExpanded: () =>
+          chrome.panels['global-context-panel']?.collapsed === false,
+        showPhoto: (photo, { revealFromOpen } = {}) =>
+          announceStreetLevelPhoto(photo, { revealFromOpen }),
+        // A closing photo hides the viewer: focus goes to Context's own
+        // collapse button, not to <body>.
+        focusContext: () =>
+          document
+            .querySelector(
+              '#global-context-panel [data-collapse-target="global-context-panel"]',
+            )
+            ?.focus?.({ preventScroll: true }),
         showToast: (message) => this._showToast(message),
-        // Lets the panel open for a user, voice or tool switch-on, not a restore.
-        subscribeEnableRequests: (listener) =>
-          this._dataManager?.subscribeVisibilityRequests?.((change) => {
-            if (change?.layerId === 'street-level' && change.enabled)
-              listener(change.origin);
-          }) || null,
       },
     });
     this._streetLevelControls.connect();
@@ -1399,11 +1450,48 @@ export class StyleManager extends ShellFacade {
    * @returns {void}
    */
   revealPanel(panelId) {
-    const sheet = sheetForPanelId(panelId);
     if (!globalThis.matchMedia?.(MOBILE_SHELL_MEDIA_QUERY)?.matches) return;
+    const sheet = sheetForPanelId(panelId);
     if (sheet) this._mobileShell?.setSheet(sheet);
     // The sheet opens at its top; a panel lower in the rail is scrolled to.
     document.getElementById(panelId)?.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  contextSelectionCover() {
+    const clean = document.body.classList.contains('ui-clean-view');
+    return {
+      cleanView: clean ? (this._cleanViewRevision ?? 0) : null,
+      reconstruction:
+        useBhoteKoshiPanelStore(applicationPinia()).visiblePanel?.owner ?? null,
+    };
+  }
+
+  /** A deliberate item pick can leave Clean View or the reconstruction. */
+  exitContextSelectionView(expected) {
+    const body = document.body;
+    if (
+      [
+        'ui-embed',
+        'cockpit-mode',
+        'recording-mode',
+        'stories-mode',
+        'scene-playback-mode',
+      ].some((mode) => body.classList.contains(mode))
+    )
+      return false;
+    const bhote = useBhoteKoshiPanelStore(applicationPinia());
+    const { cleanView, reconstruction } = this.contextSelectionCover();
+    if (
+      expected &&
+      ((cleanView !== null && cleanView !== expected.cleanView) ||
+        (reconstruction && reconstruction !== expected.reconstruction))
+    )
+      return false;
+    const clean = cleanView !== null;
+    if (reconstruction && bhote.controls?.leaveView?.() !== true) return false;
+    if (clean) this.setCleanView(false);
+    if (clean || reconstruction) activeTab.value = 'view';
+    return true;
   }
 
   /**
@@ -1416,6 +1504,8 @@ export class StyleManager extends ShellFacade {
       typeof forceEnabled === 'boolean'
         ? forceEnabled
         : !document.body.classList.contains('ui-clean-view');
+    if (document.body.classList.contains('ui-clean-view') !== shouldEnable)
+      this._cleanViewRevision = (this._cleanViewRevision ?? 0) + 1;
     document.body.classList.toggle('ui-clean-view', shouldEnable);
     if (this._cleanViewBtn) {
       this._cleanViewBtn.classList.toggle('active', shouldEnable);

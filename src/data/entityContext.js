@@ -17,6 +17,7 @@ import {
 } from './contextGeometry.js';
 import { pointInPreparedArea, prepareArea } from './areaGeometry.js';
 import { msg } from '../i18n/marker.js';
+import { t } from '../i18n/index.js';
 import { AIRCRAFT_CLASS_LABELS } from './aircraftClass.js';
 import { aircraftEmergency } from './aircraftEmergency.js';
 import { fireDetectionKey } from './firmsLabels.js';
@@ -403,6 +404,37 @@ const RECORD_KINDS = Object.freeze({
 export function entityKind(layerId, record) {
   const own = record ? RECORD_KINDS[layerId]?.(record) : null;
   return own || KINDS[layerId] || { kind: msg('feature'), icon: 'location_on' };
+}
+
+/**
+ * The title an item goes by in its card, with `titleWords`
+ * for the UI to translate when that is the kind's own name: an item with
+ * only a database number goes by what it is (a "Street-level photo").
+ * `fallback` names it when it has no title at all and its kind has no name.
+ * @param {string} layerId
+ * @param {object} record
+ * @param {string} [fallback]
+ * @returns {{title: string, titleWords: ?{text: string}}}
+ */
+export function itemTitle(layerId, record, fallback = '') {
+  const kind = entityKind(layerId, record);
+  const own = recordTitle(record);
+  if (kind.name && (!own || own === text(record?.id)))
+    return { title: kind.name, titleWords: words(kind.name) };
+  return { title: own || fallback, titleWords: null };
+}
+
+function listTitle(layerId, record, fallback) {
+  return layerId === 'street-level'
+    ? itemTitle(layerId, record, fallback)
+    : { title: recordTitle(record) || fallback, titleWords: null };
+}
+
+// IDs stay searchable alongside the English and translated photo label.
+function photoSearchTitles(layerId, record) {
+  if (layerId !== 'street-level') return [];
+  const { title, titleWords } = itemTitle(layerId, record);
+  return titleWords ? [title, t(title)] : [];
 }
 
 /** Latitude and longitude of a record, whichever names it uses. */
@@ -852,7 +884,9 @@ function readLayerPoints(dataManager, layerId, module, options, summarize) {
       // A lazy snapshot can fail during iteration or retained-row conversion.
       if (points != null) return summarize({ source, points });
       if (options.viewRecords && typeof module?.getViewRecords === 'function')
-        return summarize({ points: module.getViewRecords(ALL_RECORDS) || [] });
+        return summarize({
+          points: module.getViewRecords(ALL_RECORDS, options.viewArea) || [],
+        });
     } catch (error) {
       if (!options.fallbackOnSnapshotError && !options.onSnapshotFallback)
         throw error;
@@ -864,6 +898,35 @@ function readLayerPoints(dataManager, layerId, module, options, summarize) {
   } catch (error) {
     if (options.throwOnReadError) throw error;
     return null;
+  }
+}
+
+/**
+ * The items a layer offers for an area around a point, not yet filtered by
+ * distance or sorted: those it hands out for the area when it keeps more
+ * than its analyst records (`getRecordsNear`, Street Level's photos and
+ * drawn lines), else its loaded items.
+ */
+function layerRecordsAround(dataManager, layerId, here, radiusKm) {
+  if (dataManager?.isEnabled && !dataManager.isEnabled(layerId)) return [];
+  const module = dataManager?.layers?.get?.(layerId)?.module;
+  return (
+    moduleRecordsNear(module, here, radiusKm) ??
+    layerRecords(dataManager, layerId)
+  );
+}
+
+/**
+ * The items a layer hands out for an area through `getRecordsNear`, those
+ * with a position; null when it has no such reader.
+ */
+function moduleRecordsNear(module, here, radiusKm) {
+  if (typeof module?.getRecordsNear !== 'function') return null;
+  try {
+    const records = module.getRecordsNear(here, radiusKm) || [];
+    return records.filter((record) => recordPosition(record));
+  } catch {
+    return [];
   }
 }
 
@@ -1295,7 +1358,8 @@ export function describeEntity(
           { ...identity, label: identity.label || recordTitle(record) },
           { exact },
         ) ?? record?.[CONTEXT_FEATURE]);
-  if (!record && !stored && !identity.label) return null;
+  const firmsIdentity = layerId === 'local-firms' && id;
+  if (!record && !stored && !identity.label && !firmsIdentity) return null;
 
   // An item drawn in parts (a cable laid in pieces) opened from one part,
   // as Nearby opens it at its nearest part, stays at that part.
@@ -1348,15 +1412,15 @@ export function describeEntity(
     );
     if (!same) facts.push(fact);
   }
-  // An item with only a database number goes by what it is.
-  const ownTitle = recordTitle(record);
-  const title =
-    (kind.name && (!ownTitle || ownTitle === text(record?.id))
-      ? kind.name
-      : ownTitle) ||
+  const identityTitle =
     text(stored?.label) ||
     text(stored?.properties?.name) ||
-    text(identity.label) ||
+    text(identity.label);
+  const title =
+    (record ? itemTitle(layerId, record).title : '') ||
+    (!record && firmsIdentity && (!identityTitle || identityTitle === id)
+      ? kind.name
+      : identityTitle) ||
     layerName(dataManager, layerId);
   const key = record ? recordKey(layerId, record) : `${layerId}:${id || title}`;
   const recordId = record ? key.slice(layerId.length + 1) : id;
@@ -1549,14 +1613,21 @@ function keepBest(best, limit, score, point, at) {
 
 function spatialRow(layerId, name, record, at, distanceKm) {
   const key = recordKey(layerId, record);
+  const id = key.slice(layerId.length + 1);
   const label = recordTitle(record);
+  // A pan can change the action's nearest point without changing the row.
+  const sequence =
+    layerId === 'street-level' &&
+    id.startsWith('near:') &&
+    record?.providerId &&
+    record?.sequenceId;
   return {
-    key,
-    title: label || name,
+    key: sequence ? `${layerId}:near:${record.providerId}:${sequence}` : key,
+    ...listTitle(layerId, record, name),
     distanceKm,
     identity: {
       layerId,
-      id: key.slice(layerId.length + 1),
+      id,
       label,
       lat: at.lat,
       lon: at.lon,
@@ -1597,7 +1668,12 @@ export function nearbyEntities(
   const here = { lat: card.lat, lon: card.lon };
   const nearest = (layerId, count) => {
     const best = [];
-    for (const record of layerRecords(dataManager, layerId)) {
+    for (const record of layerRecordsAround(
+      dataManager,
+      layerId,
+      here,
+      radiusKm,
+    )) {
       if (isExcludedNearRecord(layerId, record, card.key)) continue;
       const { at, km } = nearestPart(here, record, {
         radiusKm,
@@ -1681,7 +1757,7 @@ export function nearbyByKind(
     const best = [];
     for (const record of layerRecords(dataManager, layer.id)) {
       if (isExcludedNearRecord(layer.id, record, excludeKey)) continue;
-      if (needle && !matchesName && !recordMatches(record, needle)) continue;
+      if (needle && !matchesName && !recordMatches(record, needle, '', layer.id)) continue;
       const { at, km } = nearestPart(here, record, {
         radiusKm,
         refineKm: group ? Infinity : cutoffKm(best, keep),
@@ -1787,7 +1863,7 @@ export function nearbyForLayer(
           ? source.recordForPoint(point, Boolean(excludeKey))
           : point;
         if (isExcludedNearRecord(layerId, record, excludeKey)) continue;
-        if (source && matchRecord && !recordMatches(record, needle)) continue;
+        if (source && matchRecord && !recordMatches(record, needle, '', layerId)) continue;
         classified?.push(record);
       }
       count++;
@@ -1813,6 +1889,8 @@ export function nearbyForLayer(
       })),
     };
   }
+  const near = moduleRecordsNear(module, here, radiusKm);
+  if (near) return summarize({ points: near });
   return readLayerPoints(
     dataManager,
     layerId,
@@ -1847,26 +1925,29 @@ export function layerRecordsNear(
     return [];
   if (dataManager?.isEnabled && !dataManager.isEnabled(layerId)) return [];
   const module = dataManager?.layers?.get?.(layerId)?.module;
+  const near = moduleRecordsNear(module, here, radiusKm);
+  function summarize({ source, points }) {
+    const found = [];
+    const latitudeSpan = radiusKm / 110;
+    for (const point of points) {
+      if (source && Math.abs(point.lat - here.lat) > latitudeSpan) continue;
+      const km = distanceKm(here, source ? point : recordPosition(point));
+      if (km <= radiusKm)
+        found.push({
+          record: source ? source.recordForPoint(point, false) : point,
+          km,
+        });
+    }
+    return found.sort((a, b) => a.km - b.km);
+  }
+  if (near) return summarize({ points: near });
   return (
     readLayerPoints(
       dataManager,
       layerId,
       module,
       { fallbackOnSnapshotError: true, ...options },
-      ({ source, points }) => {
-        const found = [];
-        const latitudeSpan = radiusKm / 110;
-        for (const point of points) {
-          if (source && Math.abs(point.lat - here.lat) > latitudeSpan) continue;
-          const km = distanceKm(here, source ? point : recordPosition(point));
-          if (km <= radiusKm)
-            found.push({
-              record: source ? source.recordForPoint(point, false) : point,
-              km,
-            });
-        }
-        return found.sort((a, b) => a.km - b.km);
-      },
+      summarize,
     ) ?? []
   );
 }
@@ -2043,14 +2124,16 @@ function recordBreakdown(kind, records) {
  * @param {string} [layerLabel]
  * @returns {boolean}
  */
-export function recordMatches(record, needle, layerLabel = '') {
+export function recordMatches(record, needle, layerLabel = '', layerId) {
   if (!needle) return true;
   if (text(layerLabel).toLowerCase().includes(needle)) return true;
   for (const value of Object.values(record || {})) {
     if (typeof value === 'string' && value.toLowerCase().includes(needle))
       return true;
   }
-  return false;
+  return photoSearchTitles(layerId, record).some((title) =>
+    title.toLowerCase().includes(needle),
+  );
 }
 
 /**
@@ -2073,22 +2156,22 @@ export function searchEntities(
   const inWord = new RegExp(
     `(^|[^a-z0-9])${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
   );
+  const fields = [...SEARCH_FIELDS, ...KEY_FIELDS];
+  function scoreValue(candidate) {
+    const value = text(candidate).toLowerCase();
+    if (value === needle) return 3;
+    if (value.startsWith(needle)) return 2;
+    return needle.length >= 3 && inWord.test(value) ? 1 : 0;
+  }
   const found = [];
   for (const layer of enabledLayers(dataManager)) {
     for (const record of layerRecords(dataManager, layer.id)) {
       let score = 0;
-      for (const field of [...SEARCH_FIELDS, ...KEY_FIELDS]) {
-        const value = text(record[field]).toLowerCase();
-        if (!value) continue;
-        const hit =
-          value === needle
-            ? 3
-            : value.startsWith(needle)
-              ? 2
-              : needle.length >= 3 && inWord.test(value)
-                ? 1
-                : 0;
-        score = Math.max(score, hit);
+      for (const field of fields)
+        score = Math.max(score, scoreValue(record[field]));
+      if (layer.id === 'street-level') {
+        for (const title of photoSearchTitles(layer.id, record))
+          score = Math.max(score, scoreValue(title));
       }
       if (!score) continue;
       const at = recordPosition(record);
@@ -2099,7 +2182,7 @@ export function searchEntities(
         layerId: layer.id,
         layerName: layerName(dataManager, layer.id),
         icon: entityKind(layer.id).icon,
-        title: recordTitle(record) || layer.id,
+        ...listTitle(layer.id, record, layer.id),
         identity: {
           layerId: layer.id,
           id: recordKey(layer.id, record).slice(layer.id.length + 1),
@@ -2218,6 +2301,7 @@ export function viewSummaryForLayer(
     clipViewport = false,
     breakdown = false,
     includeEmpty = false,
+    includeDrawnCoverage = false,
     heightM,
     eye,
     corners,
@@ -2307,7 +2391,8 @@ export function viewSummaryForLayer(
         const record = hasPointReader
           ? source.recordForPoint(point, false)
           : point;
-        if (matchRecord && !recordMatches(record, needle)) continue;
+        if (matchRecord && !recordMatches(record, needle, '', layerId))
+          continue;
         classified?.push(record);
       }
       count++;
@@ -2341,6 +2426,7 @@ export function viewSummaryForLayer(
       // Globe can find a visible part even if the record has no main point.
       requirePosition: false,
       viewRecords: true,
+      viewArea: includeDrawnCoverage ? { center, rect } : undefined,
       throwOnReadError,
       fallbackOnSnapshotError,
       onSnapshotFallback,

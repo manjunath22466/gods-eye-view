@@ -280,13 +280,17 @@ reserved: a decoder ignores that entry, as for collapsed 0.
 | 2   | `data-panel`           | `d`             | collapsed           |
 | 3   | `cctv-panel`           | `v`             | collapsed           |
 | 4   | `recent-imagery-panel` | `i`             | expanded            |
-| 5   | `street-level-panel`   | `t`             | collapsed           |
+| 5   | `street-level-panel`   | `t`             | retired, ignored    |
 | 6   | `radio-panel`          | `r`             | collapsed           |
 | 7   | `scene-panel`          | `s`             | collapsed           |
 | 8   | `global-context-panel` | `g`             | collapsed           |
 | 9   | `pp-toggles`           | `p`             | collapsed           |
 | 10  | `param-slider-panel`   | `m`             | expanded            |
 | 11  | `space-missions-panel` | `n`             | collapsed           |
+
+A retired panel keeps its number and token so old links decode, but the app
+ignores its state on restore. Street-level photo cards open in Context and
+Street Level filters appear in Data Layers.
 
 ### Style parameters (field 27)
 

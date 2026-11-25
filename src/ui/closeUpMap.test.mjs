@@ -285,7 +285,10 @@ test('the credit is shown in full at any width: no clamp, cap, clip or hover nee
 });
 
 test('the credit is a strip across the map’s foot, on the caption’s backdrop, its type no smaller', () => {
-  const credit = css.match(/(?:^|\})\s*\.map-credit\s*\{([^}]*)\}/)?.[1] || '';
+  const credit =
+    rulesFor(/\.map-credit\b/).find(({ selector }) =>
+      selector.split(',').some((part) => part.trim() === '.map-credit'),
+    )?.body || '';
   const label = css.match(/\.close-up-map__label\s*\{([^}]*)\}/)?.[1] || '';
   const backdrop = /background:\s*(rgba\(5, 8, 11, 0\.7\))/;
   assert.match(label, backdrop);

@@ -186,9 +186,6 @@ body.mobile-shell[data-mobile-sheet='layers'] #left-panel-stack > #scene-panel,
 body.mobile-shell[data-mobile-sheet='cameras']
   #right-context-rail
   > #cctv-panel,
-body.mobile-shell[data-mobile-sheet='cameras']
-  #right-context-rail
-  > #street-level-panel,
 body.mobile-shell[data-mobile-sheet='context']
   #right-context-rail
   > #global-context-panel,
@@ -515,14 +512,46 @@ body.mobile-shell #entity-card > .entity-card__head {
    too much for the thumbnail, which would clip them (and leave More info
    focusable out of sight). It keeps the full width at its own height, with
    the name above it. */
-body.mobile-shell #entity-card > .entity-hero[data-hero='camera'] {
+/* A street-level photo's top image holds the viewer, or its still with the
+   loading or failure state, Retry and the credit: the same as a camera. */
+body.mobile-shell
+  #entity-card
+  > .entity-hero:is(
+    [data-hero='camera'],
+    [data-hero='street'],
+    [data-hero='place-street']
+  ) {
   grid-column: 1 / -1;
   height: auto;
   overflow: visible;
 }
 
 body.mobile-shell
-  #entity-card:has(> .entity-hero[data-hero='camera'])
+  #entity-card
+  > [data-hero='place-street']
+  .entity-hero__place-street {
+  position: relative;
+  width: 100%;
+}
+
+body.mobile-shell [data-hero='place-street'] .entity-hero__place-street img {
+  height: 8rem;
+}
+
+body.mobile-shell [data-hero='place-street'] .entity-hero__place-street small {
+  position: static;
+  display: block;
+  max-width: none;
+}
+
+body.mobile-shell
+  #entity-card:has(
+    > .entity-hero:is(
+        [data-hero='camera'],
+        [data-hero='street'],
+        [data-hero='place-street']
+      )
+  )
   > .entity-card__head {
   grid-column: 1 / -1;
 }

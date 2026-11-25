@@ -1,8 +1,14 @@
 import { ref, shallowRef, watch } from 'vue';
 import { resolvePickedContext } from '../data/pickedContext.js';
+import { isStreetViewerExpanded } from './streetLevelViewerPlacement.js';
 import { CCTV_SELECTED_EVENT } from './cctvEvents.js';
-import { MOBILE_SHEET_ATTR } from './mobileSheets.js';
 import { ESCAPE_OWNING_DIALOGS } from './contextEvents.js';
+import {
+  STREET_LEVEL_LAYER,
+  STREET_LEVEL_PHOTO_EVENT,
+  STREET_LEVEL_PHOTO_REQUEST_EVENT,
+  streetLevelCardKey,
+} from './streetLevelEvents.js';
 import { onScreen } from '../data/locate.js';
 import { clickCard } from '../data/pickRegistry.js';
 import {
@@ -27,6 +33,11 @@ import { useOmnibarStore } from './stores/omnibar.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
 import { useSceneStore } from './stores/scenes.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
+import {
+  MOBILE_SHEET_ATTR,
+  isContextRailCovered,
+  isContextSurfaceVisible,
+} from './mobileSheets.js';
 import { useVoiceStore } from './stores/voice.js';
 import { inspectorHasLayers } from './layerRowState.js';
 import { createViewWeather } from './viewWeather.js';
@@ -83,6 +94,7 @@ export function installEntityContext({
   inspector,
   navigateToSelection,
   revealContext,
+  exitContextSelectionView,
   supersedeDeferredNavigation,
   creditAirports,
 }) {
@@ -96,6 +108,7 @@ export function installEntityContext({
   const isOpen = () =>
     chrome.panels['global-context-panel']?.collapsed === false;
   const doc = globalThis.document;
+  const contextShown = () => isOpen() && isContextSurfaceVisible(doc?.body);
   let disposed = false;
   // The renderer's camera; looked up on use, as a renderer can be bound
   // after Context is installed.
@@ -115,10 +128,12 @@ export function installEntityContext({
    * where its Next and Previous are).
    */
   function openPanel({ reveal = true } = {}) {
+    if (reveal && exitContextSelectionView?.() === false) return;
     const button = doc?.querySelector(
       '.ui-rail--right .ui-rail__item[data-rail-item="global-context-panel"]',
     );
-    if (button && button.getAttribute('aria-pressed') !== 'true')
+    // The store updates before the rail's aria-pressed value renders.
+    if (!isOpen() && button && button.getAttribute('aria-pressed') !== 'true')
       button.click();
     if (reveal) revealContext?.();
   }
@@ -724,6 +739,9 @@ export function installEntityContext({
       dataManager: getDataManager(),
     });
     if (identity) {
+      // Street Level owns the pick. Open its card when it has a photo, not
+      // from the raw line or cone id while the viewer is still loading.
+      if (identity.layerId === STREET_LEVEL_LAYER) return;
       // These layers start following on their own click; following again
       // from here would fight them (the flights layer reads a second track
       // of the same plane as a click on empty map and lets go).
@@ -763,6 +781,91 @@ export function installEntityContext({
   };
   doc?.addEventListener(CCTV_SELECTED_EVENT, onCameraPicked);
 
+  // An accepted photo pick reveals its card. Viewer steps advance their
+  // existing card without changing the visible panel or phone sheet.
+  let photoRequest = null;
+  // The generation of the bridge's own last photo card.
+  let photoCardGeneration = null;
+  const onStreetPhotoRequest = ({ detail }) => {
+    photoRequest = {
+      id: detail.requestId,
+      cover: detail.cover,
+      generation: store.selectionGeneration(),
+      ownsPick: store.claimDeferredPick(),
+    };
+  };
+  const onStreetPhoto = ({ detail }) => {
+    const id = detail?.id;
+    if (!id || inCockpit()) return;
+    const requestId = detail.requestId;
+    const requestGeneration =
+      requestId != null &&
+      photoRequest?.id === requestId &&
+      photoRequest.ownsPick()
+        ? photoRequest.generation
+        : null;
+    const key = streetLevelCardKey(id);
+    const identity = {
+      layerId: STREET_LEVEL_LAYER,
+      id: String(id),
+      lat: detail.lat,
+      lon: detail.lon,
+    };
+    // The card shows on the Inspector tab, not behind Properties.
+    const showInspector = () =>
+      globalThis.dispatchEvent?.(new Event('gev:context-show-view'));
+    // The person selected a different surface while a row OPEN was pending.
+    if (detail.revealFromOpen === false) return;
+    // A voice request to show Street Level names the photo already open:
+    // its card comes up while Context is on screen.
+    if (detail.explicit === true) {
+      if (contextShown()) {
+        showInspector();
+        if (
+          store.card?.key !== key &&
+          store.select(identity, { reveal: false })
+        )
+          photoCardGeneration = store.selectionGeneration();
+      }
+      return;
+    }
+    const now = store.selectionGeneration();
+    if (requestId == null) {
+      if (store.card?.key === key) {
+        if (isContextSurfaceVisible(doc?.body)) photoCardGeneration = now;
+      } else if (
+        store.card?.layerId === STREET_LEVEL_LAYER &&
+        photoCardGeneration === now
+      ) {
+        store.advance(identity);
+      }
+      return;
+    }
+    if (
+      requestGeneration != null &&
+      detail.cardPhotoId &&
+      store.card?.key === streetLevelCardKey(detail.cardPhotoId)
+    ) {
+      if (store.card.key === key || store.advance(identity))
+        photoCardGeneration = now;
+      return;
+    }
+    if (requestGeneration !== now) return;
+    if (
+      isContextRailCovered(doc?.body) &&
+      exitContextSelectionView?.(photoRequest.cover) !== true
+    )
+      return;
+    const reveal = !contextShown();
+    if (store.card?.key === key) {
+      if (reveal) openPanel();
+    } else if (!store.select(identity, { reveal })) return;
+    showInspector();
+    photoCardGeneration = store.selectionGeneration();
+  };
+  doc?.addEventListener(STREET_LEVEL_PHOTO_REQUEST_EVENT, onStreetPhotoRequest);
+  doc?.addEventListener(STREET_LEVEL_PHOTO_EVENT, onStreetPhoto);
+
   // Layers that select through the context store (GeoJSON sites, fires,
   // installations) announce it; their selection opens the card too.
   const onSelected = ({ detail: record }) => {
@@ -798,7 +901,7 @@ export function installEntityContext({
   const onKey = (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing)
       return;
-    if (!store.card || inCockpit() || scenes.panel?.running) return;
+    if (!store.card || inCockpit() || scenes.panel?.running || isStreetViewerExpanded()) return;
     const target = event.target;
     if (target?.closest?.('[data-owns-escape], dialog, [role="dialog"]'))
       return;
@@ -836,6 +939,11 @@ export function installEntityContext({
     clearTimeout(followCheck);
     globalThis.removeEventListener?.('gev:entity-selected', onSelected);
     doc?.removeEventListener?.(CCTV_SELECTED_EVENT, onCameraPicked);
+    doc?.removeEventListener?.(STREET_LEVEL_PHOTO_EVENT, onStreetPhoto);
+    doc?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_REQUEST_EVENT,
+      onStreetPhotoRequest,
+    );
     doc?.removeEventListener?.('keydown', onKey);
     store.connect(null);
   };
