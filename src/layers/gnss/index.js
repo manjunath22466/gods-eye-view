@@ -32,6 +32,15 @@ const LEVEL_LABELS = Object.freeze({
   medium: msg('Low-accuracy score 2–10%'),
   high: msg('Low-accuracy score > 10%'),
 });
+/** The same bands in short, beside the score's name (LEVEL_MEASURE). */
+const LEVEL_SHORT = Object.freeze({
+  low: msg('< 2%'),
+  medium: msg('2–10%'),
+  high: msg('> 10%'),
+});
+const LEVEL_MEASURE = msg('Low-accuracy score');
+/** Worst first. */
+const LEVEL_RANK = Object.freeze({ high: 2, medium: 1, low: 0 });
 
 /** The middle of a degree rectangle, across the antimeridian too. */
 function degreesCentre(rect) {
@@ -407,8 +416,9 @@ export function createGnssIntegrityLayer({
     },
 
     /**
-     * The navigation-accuracy score band and raw report counts for the
-     * already-binned cell under a point. Null while off or unsampled.
+     * The navigation-accuracy score band (its legend label, level and
+     * colour) and raw report counts for the already-binned cell under a
+     * point. Null while off or unsampled.
      */
     getValueAt(lat, lon) {
       if (!_enabled || !_cells.length) return null;
@@ -431,6 +441,87 @@ export function createGnssIntegrityLayer({
           { degraded: formatNumber(cell.degraded) },
         ),
         at: cell.observedAt,
+        // The legend band and its colour, so a reading can match the map,
+        // and the band in short beside the score's name.
+        level: cell.level,
+        color: GNSS_LEVEL_COLORS[cell.level],
+        short: t(LEVEL_SHORT[cell.level]),
+        measure: t(LEVEL_MEASURE),
+      };
+    },
+
+    /**
+     * The sampled areas with the least accurate navigation, worst first (by
+     * band, then score, then aircraft reporting low accuracy): `{id, lat,
+     * lon, level, color, short, degraded, aircraft}`, `lat`/`lon` the cell
+     * centre. Empty while off.
+     */
+    getWorstAreas(limit = 3) {
+      if (!_enabled) return [];
+      const cap = Math.max(0, Math.floor(Number(limit) || 0));
+      // Only areas worse than the best band: a list of good areas under a
+      // "least accurate" heading says nothing.
+      return _cells
+        .filter((cell) => LEVEL_RANK[cell.level] > 0)
+        .sort(
+          (a, b) =>
+            LEVEL_RANK[b.level] - LEVEL_RANK[a.level] ||
+            b.percentDegraded - a.percentDegraded ||
+            b.degraded - a.degraded ||
+            a.id.localeCompare(b.id),
+        )
+        .slice(0, cap)
+        .map((cell) => ({
+          id: cell.id,
+          lat: cell.lat,
+          lon: cell.lon,
+          level: cell.level,
+          color: GNSS_LEVEL_COLORS[cell.level],
+          short: t(LEVEL_SHORT[cell.level]),
+          degraded: cell.degraded,
+          aircraft: cell.aircraft,
+        }));
+    },
+
+    /**
+     * What Context shows of the layer at globe view: the areas sampled, by
+     * band, the worst of them, and that they are a regional sample. Null
+     * while off.
+     */
+    getContextSummary(limit = 3) {
+      if (!_enabled) return null;
+      const worst = layer.getWorstAreas(limit);
+      return {
+        ...(_lastUpdate !== null && {
+          headline: tn(_cells.length, '{n} area', '{n} areas', {
+            n: formatNumber(_cells.length),
+          }),
+        }),
+        bands: ['low', 'medium', 'high'].map((level) => ({
+          id: level,
+          label: LEVEL_SHORT[level],
+          color: GNSS_LEVEL_COLORS[level],
+          count: _cells.filter((cell) => cell.level === level).length,
+        })),
+        // Without areas worse than the best band, the layer's own name heads it.
+        ...(worst.length
+          ? { itemsLabel: t('Least accurate sampled areas') }
+          : {}),
+        items: worst.map((area) => ({
+          key: `gnss-integrity:${area.id}`,
+          lead: area.short,
+          level: area.level,
+          color: area.color,
+          text: tn(
+            area.aircraft,
+            '{degraded} of {count} aircraft',
+            '{degraded} of {count} aircraft',
+            { degraded: formatNumber(area.degraded) },
+          ),
+          lat: area.lat,
+          lon: area.lon,
+        })),
+        note: t('Sampled around views you visited'),
       };
     },
 

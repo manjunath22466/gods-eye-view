@@ -14,6 +14,22 @@ export function contextAgeText(ms) {
 
 const pad = (n) => String(n).padStart(2, '0');
 
+/**
+ * A length of time as "{h} h {m} min" (or "{n} min" under an hour), rounded
+ * to the minute first, so it never reads "1 h 60 min", and in the page's
+ * own digits.
+ * @param {number} minutes
+ * @returns {string}
+ */
+export function durationText(minutes) {
+  const total = Math.max(0, Math.round(minutes));
+  if (total < 60) return t('{n} min', { n: formatNumber(total) });
+  return t('{h} h {m} min', {
+    h: formatNumber(Math.floor(total / 60)),
+    m: formatNumber(total % 60),
+  });
+}
+
 /** "HH:MM" in UTC. */
 export function utcClock(now = Date.now()) {
   const at = new Date(now);
@@ -99,4 +115,9 @@ export function dayLengthMinutes(
   if (cosH >= 1) return 0;
   if (cosH <= -1) return 1440;
   return Math.round(((2 * Math.acos(cosH)) / RAD / 15) * 60);
+}
+
+/** The sunlit spherical cap rotates without changing its share of Earth. */
+export function daylightShare() {
+  return (1 - SUNRISE_ALTITUDE_SINE) / 2;
 }

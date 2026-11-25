@@ -1,11 +1,27 @@
 import { t } from '../i18n/index.js';
 
 /**
+ * Feed text (a callsign, a vessel's name) as the model reads it: one line,
+ * control characters replaced by spaces, and the bidi and zero-width format
+ * characters that could reorder or hide what it says dropped.
+ */
+const itemText = (value, maxLength) =>
+  String(value ?? '')
+    .replace(/[\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength)
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .trim();
+
+/**
  * Draft-only attachments, held on the voice control presenter. Providers
  * receive text only when the person sends.
  */
 export function bindChatAttachments({ ui, dataManager, onChange, setStatus }) {
   const items = new Map();
+  const queued = new Map();
   let reading = false;
   let locked = false;
   let disposed = false;
@@ -37,6 +53,34 @@ export function bindChatAttachments({ ui, dataManager, onChange, setStatus }) {
     publish();
     onChange();
   }
+  function attachItem(item, { focus = true } = {}) {
+    try {
+      add(`item:${item.key}`, {
+        kind: 'map-item',
+        name: itemText(item.name, 120) || itemText(item.key, 120),
+        itemKind: itemText(item.itemKind, 60),
+        layer: itemText(item.layer, 80),
+        ...(Number.isFinite(item.lat) && Number.isFinite(item.lon)
+          ? item.obscured === true
+            ? {
+                approximateCellCenter: {
+                  lat: Number(item.lat.toFixed(3)),
+                  lon: Number(item.lon.toFixed(3)),
+                  cellSizeDegrees: 0.2,
+                },
+              }
+            : {
+                lat: Number(item.lat.toFixed(4)),
+                lon: Number(item.lon.toFixed(4)),
+              }
+          : {}),
+      });
+      close();
+      if (focus) void ui.focus(['chatInput']);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
   const offs = [
     ui.on('chat-attach-toggle', () => {
       if (locked) return;
@@ -65,6 +109,13 @@ export function bindChatAttachments({ ui, dataManager, onChange, setStatus }) {
       } catch (error) {
         setStatus(error.message);
       }
+    }),
+    // The card's Ask icon: the picked item, attached to the draft so the
+    // person asks their own question about it. Nothing is sent yet.
+    ui.on('chat-item', (item) => {
+      if (!item?.key) return;
+      if (locked) queued.set(item.key, item);
+      else attachItem(item);
     }),
     // Escape closes the menu and returns to its Attach button.
     ui.on('chat-attach-keydown', (event) => {
@@ -125,6 +176,11 @@ export function bindChatAttachments({ ui, dataManager, onChange, setStatus }) {
       if (locked === Boolean(value)) return;
       locked = Boolean(value);
       publish(locked ? { attachMenuOpen: false } : {});
+      if (!locked) {
+        const waiting = [...queued.values()];
+        queued.clear();
+        for (const item of waiting) attachItem(item, { focus: false });
+      }
     },
     get reading() {
       return reading;
@@ -143,6 +199,7 @@ export function bindChatAttachments({ ui, dataManager, onChange, setStatus }) {
     },
     destroy() {
       disposed = true;
+      queued.clear();
       for (const off of offs) off();
     },
   };

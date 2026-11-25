@@ -26,7 +26,7 @@ export const useCctvStore = defineStore('gev-cctv', () => {
 
   /** The preview: requested and shown frame, loading and error state. */
   const frame = shallowRef(null);
-  /** Camera IDs with a mounted card or an open bigger view. */
+  /** Camera IDs with a visible card preview or an open bigger view. */
   const previewCards = shallowRef([]);
   const previewPopups = shallowRef([]);
   /** Whether the live video surface replaces the still frame. */

@@ -205,7 +205,8 @@ export function createQueries({
    * @returns {{id: string|null, vesselId: string|null, mmsi: string|null,
    *   name: string|null,
    *   lat: number|null, lon: number|null, speedKts: number|null,
-   *   courseDeg: number|null, shipType: string|null, destination: string|null,
+   *   courseDeg: number|null, shipType: string|null, virtual: boolean,
+   *   length: number|null, beam: number|null, destination: string|null,
    *   navStatus: null}}
    */
 
@@ -230,6 +231,9 @@ export function createQueries({
       speedKts: num(record?.speed),
       courseDeg: num(record?.course),
       shipType: text(record?.type),
+      virtual: record?.virtual === true,
+      length: num(record?.length),
+      beam: num(record?.beam),
       destination: text(record?.destination),
       navStatus: null,
     };

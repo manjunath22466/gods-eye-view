@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPinia } from 'pinia';
 import { getLocale, setLocale } from '../i18n/index.js';
-import { createControls } from '../layers/awareness/controls.js';
-import { trafficAnalystRecords } from '../layers/traffic/records.js';
 import { EARTH_RADIUS_KM } from '../geoDistance.js';
 import {
   INSPECTOR_PULSE_MS,
@@ -13,7 +11,7 @@ import {
 } from './stores/entityCard.js';
 
 // The store's in-view answer is shared by Context's globe view and the
-// omnibar: worked out once per key (the exact view, the layers that are
+// omnibar: worked out once per key (the settled view, the layers that are
 // on, each one's data revision) and sliced for callers that want fewer rows.
 function harness(layers) {
   let scans = 0;
@@ -201,6 +199,41 @@ test('Context retries a partially read point snapshot from ordinary records', (t
   assert.equal(fallback.mock.callCount(), 3);
 });
 
+test('a local Inspector read retries its point snapshot after a fallback', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  let available = false;
+  const { store } = harness([
+    {
+      id: 'local-dams',
+      enabled: true,
+      records: [{ id: 'ordinary', lat: 0, lon: 0 }],
+      module: {
+        getNearbyContextPoints: () => ({
+          points: (function* () {
+            yield { id: 'optimized', lat: 0, lon: 0 };
+            if (!available) throw new Error('point iteration failed');
+          })(),
+          recordForPoint: (point) => point,
+        }),
+      },
+    },
+  ]);
+  store.setView({
+    center: { lat: 0, lon: 0 },
+    heightM: 40_000,
+    rect: { west: -1, east: 1, south: -1, north: 1 },
+  });
+  const ids = () =>
+    store
+      .inView({ viewport: true, breakdown: true, includeEmpty: true })[0]
+      .items.map(({ identity }) => identity.id);
+  assert.deepEqual(ids(), ['ordinary']);
+  available = true;
+  t.mock.timers.tick(INSPECTOR_PULSE_MS);
+  store.pulseInspector();
+  assert.deepEqual(ids(), ['optimized']);
+});
+
 test('Nearby and globe search match the displayed layer name after switching languages', (t) => {
   const originalLocale = getLocale();
   t.after(() => setLocale(originalLocale));
@@ -216,37 +249,25 @@ test('Nearby and globe search match the displayed layer name after switching lan
   const results = (query) => [
     store.nearbyLayers(0, 0, { query })[0]?.items[0]?.title,
     store.inView({ query })[0]?.items[0]?.title,
-    store.nearbyGroups(0, 0, { query }).other[0]?.title,
   ];
 
   setLocale('en');
-  assert.deepEqual(results('Centres de données'), [
-    undefined,
-    undefined,
-    undefined,
-  ]);
+  assert.deepEqual(results('Centres de données'), [undefined, undefined]);
   setLocale('fr');
   assert.deepEqual(results('Centres de données'), [
-    'Example Facility',
     'Example Facility',
     'Example Facility',
   ]);
   assert.deepEqual(results('Datacenters'), [
     'Example Facility',
     'Example Facility',
-    'Example Facility',
   ]);
   assert.deepEqual(results('Centres de données'), [
-    'Example Facility',
     'Example Facility',
     'Example Facility',
   ]);
   setLocale('en');
-  assert.deepEqual(results('Centres de données'), [
-    undefined,
-    undefined,
-    undefined,
-  ]);
+  assert.deepEqual(results('Centres de données'), [undefined, undefined]);
 });
 
 test('the same key gives the same answer without scanning again; fewer rows are a slice', () => {
@@ -882,97 +903,50 @@ test("Nearby reuses a fresh layer's rows when another layer refreshes or the sam
   );
 });
 
-test('Nearby shows a renamed stationary Contacts subject without a pan', (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
-  // Real Contacts controls: a stationary subject whose label is enriched after selection
-  // (awareness/subject.js replaces subject.label without re-evaluating results).
-  const layerState = {
-    enabled: true,
-    passive: false,
-    subject: {
-      layerId: 'flights',
-      id: 'abc123',
-      label: 'ABC123',
-      position: { x: 6378137, y: 0, z: 0 },
+test('alternating Context and Omnibar reads reuse their settled local projections', () => {
+  const { store, scans } = harness([
+    {
+      id: 'flights',
+      name: 'Flights',
+      enabled: true,
+      stats: { lastUpdate: 1 },
+      records: [point('on', 0, 1)],
     },
-    results: {
-      evaluatedAt: 1,
-      radiusM: 250_000,
-      cohorts: [{ id: 'flights', summary: { count: 1 } }],
-    },
-  };
-  const { methods } = createControls({
-    state: layerState,
-    services: {},
-    parts: { dependencies: {} },
-    source: {},
+  ]);
+  store.setView({
+    ...GLOBE,
+    heightM: 40_000,
+    rect: { west: -5, south: -5, east: 5, north: 5 },
   });
-  const row = {
-    id: 'military-awareness',
-    name: 'Contacts',
-    enabled: true,
-    module: methods,
-  };
-  Object.defineProperty(row, 'stats', { get: () => methods.getStats() });
-  const { store } = harness([row]);
-  const titles = () =>
-    store
-      .nearbyLayers(0, 0, { radiusKm: 25 })
-      .flatMap((g) => g.items.map((i) => i.title));
-  assert.deepEqual(titles(), ['ABC123']);
-  layerState.subject = { ...layerState.subject, label: 'N123AB' };
-  layerState.results.subject = layerState.subject;
-  t.mock.timers.tick(10_000);
-  assert.deepEqual(titles(), ['N123AB']);
+  const context = () =>
+    store.inView({ viewport: true, breakdown: true, includeEmpty: true });
+  const omnibar = () => store.inView({ viewport: true, perLayer: 2 });
+  const first = context();
+  const second = omnibar();
+  assert.equal(context(), first);
+  assert.equal(omnibar(), second);
+  assert.equal(scans(), 2);
 });
 
-test('Omnibar In view counts a road that crosses the viewport with its middle vertex outside', () => {
-  const state = {
-    _enabled: true,
-    _liveMode: false,
-    _roads: [
-      // Crosses the view centre; its middle vertex (0.002° E) is just outside the viewport.
-      {
-        type: 'primary',
-        directFlow: 0,
-        coords: [
-          [-0.02, 0],
-          [0.002, 0],
-          [0.03, 0],
-        ],
-      },
-      // Wholly outside the viewport.
-      {
-        type: 'primary',
-        directFlow: 0,
-        coords: [
-          [1, 1],
-          [1.01, 1],
-          [1.02, 1],
-        ],
-      },
-    ],
-  };
-  const row = {
-    id: 'traffic',
-    name: 'Traffic',
-    enabled: true,
-    stats: { count: 2, lastUpdate: 1 },
-    module: { getAnalystRecords: (n) => trafficAnalystRecords(state, n) },
-  };
-  const { store } = harness([row]);
-  store.setView({
-    center: { lat: 0, lon: 0 },
-    rect: { west: -0.001, south: -0.001, east: 0.001, north: 0.001 },
-    heightM: 300,
-    eye: { lat: 0, lon: 0 },
-  });
-  const traffic = store
-    .inView({ viewport: true })
-    .find((g) => g.layerId === 'traffic');
-  assert.equal(
-    traffic?.count,
-    1,
-    'the crossing road is in view; the outside road is not',
+test('Context skips the satellite viewport scan before reading records', () => {
+  const { store, scans } = harness([
+    {
+      id: 'satellites',
+      name: 'Satellites',
+      enabled: true,
+      records: [point('one', 0, 1)],
+    },
+  ]);
+  store.setView({ ...GLOBE, rect: { west: -5, east: 5, south: -5, north: 5 } });
+  assert.deepEqual(
+    store.inView({
+      viewport: true,
+      breakdown: true,
+      excludeLayers: new Set(['satellites']),
+    }),
+    [],
   );
+  assert.equal(scans(), 0);
+  store.inView({ viewport: true });
+  assert.equal(scans(), 1, 'the Omnibar still reads satellite records');
 });

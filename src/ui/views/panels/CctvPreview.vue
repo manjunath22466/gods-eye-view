@@ -14,6 +14,7 @@ import UiIcon from '../../kit/UiIcon.vue';
 const props = defineProps({
   /** The camera's id (the card identity's id). */
   cameraId: { type: String, default: '' },
+  shown: { type: Boolean, default: true },
 });
 
 const cctv = useCctvStore();
@@ -24,6 +25,7 @@ const { panels } = storeToRefs(chrome);
 const matchesActive = computed(() => !props.cameraId || view.value?.activeCameraId === props.cameraId);
 const same = computed(() => matchesActive.value && (!props.cameraId || frame.value?.cameraId === props.cameraId));
 const src = computed(() => (same.value ? frame.value?.src || (!live.value && frame.value?.currentSrc) || '' : ''));
+const credit = computed(() => (same.value ? view.value?.activeCredit || '' : ''));
 const badge = computed(() => {
   if (!matchesActive.value) return '';
   return live.value ? (src.value ? t('SNAPSHOT') : '') : sourceBadge.value?.label;
@@ -50,8 +52,9 @@ const facts = computed(() => {
     .map((p) => p.trim())
     .filter(Boolean);
   const pick = (re) => parts.find((p) => re.test(p))?.replace(/^(HDG|FOV|RANGE)\s*/, '') || '';
+  const heading = pick(/^HDG/);
   return [
-    { label: t('Heading'), value: pick(/^HDG/) },
+    { label: t('Heading'), value: heading && view.value?.activeHeadingEstimated ? t('~{n}', { n: heading }) : heading },
     { label: t('Field of view'), value: pick(/^FOV/) },
     { label: t('Range'), value: pick(/^RANGE/) },
     { label: t('Operator'), value: parts.find((p) => /DOT|Transportation|Works|City|County/i.test(p)) || '' },
@@ -59,23 +62,30 @@ const facts = computed(() => {
 });
 
 // The bigger view: a popup over the map with the same frame, closed by its
-// ×, Esc or a click outside.
+// ×, Esc or a click outside. While it is open its Esc is its own (it is
+// marked data-owns-escape): caught on the way down at the document, before
+// Context, the map or a panel can act on it, and stopped there, so one Esc
+// closes the popup and does nothing else.
 const big = ref(false);
 const onKey = (e) => {
-  if (e.key === 'Escape') big.value = false;
+  if (e.key !== 'Escape' || e.isComposing) return;
+  e.preventDefault();
+  e.stopPropagation();
+  big.value = false;
 };
 // The cleanup also runs when the card unmounts, even if `big` turned false in
 // the same tick and the watcher never saw it.
 watch([big, () => props.cameraId], ([open, cameraId], _, onCleanup) => {
   if (!open) return;
   cctv.showPreviewPopup(cameraId, true);
-  document.addEventListener('keydown', onKey);
+  document.addEventListener('keydown', onKey, true);
   onCleanup(() => {
     cctv.showPreviewPopup(cameraId, false);
-    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', onKey, true);
   });
 });
-watch(() => props.cameraId, (cameraId, _, onCleanup) => {
+watch(() => props.shown ? props.cameraId : '', (cameraId, _, onCleanup) => {
+  if (!cameraId) return;
   cctv.showPreviewCard(cameraId, true);
   onCleanup(() => cctv.showPreviewCard(cameraId, false));
 }, { immediate: true });
@@ -97,7 +107,7 @@ function openPanel() {
       </UiButton>
     </div>
     <Teleport to="body">
-      <div v-if="big" class="cctv-popup" role="dialog" :aria-label="name || t('Camera view')" @click.self="big = false">
+      <div v-if="big" class="cctv-popup" role="dialog" data-owns-escape :aria-label="name || t('Camera view')" @click.self="big = false">
         <figure class="cctv-popup__card">
           <header class="cctv-popup__head">
             <UiIcon name="videocam" :size="null" />
@@ -106,6 +116,7 @@ function openPanel() {
             <UiCloseButton class="cctv-popup__close" glyph="icon" :label="t('Close')" @click="big = false" />
           </header>
           <img v-if="src" :src="src" :alt="name || t('Camera frame')" />
+          <small v-if="credit" class="cctv-popup__credit">{{ credit }}</small>
           <figcaption v-if="unavailable && !src">{{ t('FRAME · UNAVAILABLE') }}</figcaption>
           <figcaption v-else-if="facts.length">
             <span v-for="fact in facts" :key="fact.label">{{ fact.label }} <b>{{ fact.value }}</b></span>

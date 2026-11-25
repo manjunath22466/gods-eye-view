@@ -294,6 +294,14 @@ export function createPresentation({
         hoverId: layerState._hoverCardId,
       },
       activeCameraId: activeId,
+      // True while the active camera is the layer's own opening pick (the
+      // one nearest the view, moved again after settled moves) rather than
+      // one someone chose, and during a timed Auto-hop step: Context opens
+      // no card for either.
+      openingCamera: Boolean(
+        activeId &&
+        (layerState._openingCameraProvisional || layerState._quietActivation),
+      ),
       activeCameraReselection: layerState._activeCameraReselection,
       activeCamera: active ? getPublicCameraState(active, activeId) : null,
       cameraIndex: cameraIndex(),

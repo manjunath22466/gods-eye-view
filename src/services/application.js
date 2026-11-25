@@ -50,11 +50,32 @@ export function configureApplicationServices(services) {
   };
 }
 
+/** The owner of snapshots read through the configured count service. */
+export function getLayerCountsServiceBinding() {
+  return slots.layerCounts.binding;
+}
+
 /** Bound the configured source even when its adapter ignores abort. */
-export function getConfiguredLayerCounts({ signal } = {}) {
+export function getConfiguredLayerCounts({ signal, onTimeout } = {}) {
   return requestWithDeadline(
-    (boundedSignal) =>
-      applicationServices.layerCounts.getCounts({ signal: boundedSignal }),
+    (boundedSignal) => {
+      if (onTimeout) {
+        boundedSignal.addEventListener(
+          'abort',
+          () => {
+            if (
+              !signal?.aborted &&
+              boundedSignal.reason?.name === 'TimeoutError'
+            )
+              onTimeout();
+          },
+          { once: true },
+        );
+      }
+      return applicationServices.layerCounts.getCounts({
+        signal: boundedSignal,
+      });
+    },
     { signal, timeoutMs: LAYER_COUNTS_TIMEOUT_MS },
   );
 }

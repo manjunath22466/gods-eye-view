@@ -473,3 +473,90 @@ body.mobile-shell.ui-clean-view #command-dock,
 body.mobile-shell.cockpit-mode #command-dock {
   bottom: calc(var(--mobile-bottom-inset) + 10px);
 }
+
+/* Context on a phone: a shorter sheet, so the globe keeps more of
+   the screen; a picked item's top image shrinks to a thumbnail beside its
+   name, so the name, buttons and key numbers show without scrolling. Nearby
+   and More details follow when the sheet is scrolled. */
+body.mobile-shell[data-mobile-sheet='context'] #right-context-rail {
+  max-height: min(var(--mobile-sheet-max-height), 48vh);
+}
+
+@supports (height: 1dvh) {
+  body.mobile-shell[data-mobile-sheet='context'] #right-context-rail {
+    max-height: min(var(--mobile-sheet-max-height), 48dvh);
+  }
+}
+
+body.mobile-shell #entity-card {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  column-gap: 0.7rem;
+  align-items: start;
+}
+
+body.mobile-shell #entity-card > * {
+  grid-column: 1 / -1;
+}
+
+body.mobile-shell #entity-card > .entity-hero {
+  grid-column: 1;
+  height: 4.25rem;
+  min-height: 0;
+  margin: 0;
+}
+
+body.mobile-shell #entity-card > .entity-card__head {
+  grid-column: 2;
+  margin-top: 0;
+}
+
+/* A camera's top image is its feed with its facts and More info under it:
+   too much for the thumbnail, which would clip them (and leave More info
+   focusable out of sight). It keeps the full width at its own height, with
+   the name above it. */
+body.mobile-shell #entity-card > .entity-hero[data-hero='camera'] {
+  grid-column: 1 / -1;
+  height: auto;
+  overflow: visible;
+}
+
+body.mobile-shell
+  #entity-card:has(> .entity-hero[data-hero='camera'])
+  > .entity-card__head {
+  grid-column: 1 / -1;
+}
+
+body.mobile-shell
+  #entity-card
+  > .entity-hero
+  :is(
+    .entity-card__preview-switch,
+    .preview-hud,
+    .satellite-ground__label,
+    .flight-cockpit__label,
+    .flight-cockpit__tape,
+    .close-up-map__label,
+    .close-up-map__icon
+  ) {
+  display: none;
+}
+
+/* The phone's small hero still credits every map source in full: smaller
+   type across its whole width, at the very foot (the preview switch is
+   hidden here). */
+body.mobile-shell #entity-card > .entity-hero .map-foot {
+  bottom: 0;
+}
+
+body.mobile-shell #entity-card > .entity-hero .map-credit {
+  padding: 1px 4px 2px;
+  font-size: 0.4rem;
+  line-height: 1.2;
+}
+
+body.mobile-shell #entity-card > .entity-hero .flight-cockpit__credit {
+  bottom: 2px;
+  inset-inline: 4px;
+  text-align: start;
+}

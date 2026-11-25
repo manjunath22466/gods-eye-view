@@ -302,10 +302,10 @@ export function createVoiceControl({
      * `preview-change`, `timeout-select`, `timeout-input`, `card-dismiss`,
      * `voice-back`, `voice-minimize`, `layout-dock`; the chat's
      * `chat-button`, `chat-close`, `chat-minimize`, `chat-restore`,
-     * `chat-back`, `chat-input`, `chat-keydown`, `chat-submit`, `chat-stop`,
+     * `chat-back`, `chat-input`, `chat-keydown`, `chat-submit`, `chat-ask`, `chat-stop`,
      * `chat-prompt`, `chat-suggestion`, `chat-quick-change`,
      * `chat-attach-toggle`, `chat-layer`, `chat-file-button`, `chat-files`,
-     * `chat-attachment-remove`; and `locale` after a locale change, for an
+     * `chat-attachment-remove`, `chat-item`; and `locale` after a locale change, for an
      * owner's own words.
      * @returns {() => void} Removes the listener.
      */

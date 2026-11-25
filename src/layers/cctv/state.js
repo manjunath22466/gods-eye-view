@@ -45,6 +45,9 @@ export function createState({ services }) {
   // the view, so a share flight that lands after enable still opens nearby.
 
   layerState._openingCameraProvisional = false;
+  // True only while a timed Auto-hop step activates its camera (see
+  // maybeAutoHop): that notification is nobody's pick.
+  layerState._quietActivation = false;
 
   // An explicit empty-space deselect keeps AUTO HOP configured but prevents its
   // timer from silently choosing a replacement. A later explicit activation or

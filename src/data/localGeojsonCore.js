@@ -427,11 +427,12 @@ const RADIANS = Math.PI / 180;
  * none. A feature drawn in several parts (a MultiPolygon, or a dam mapped as
  * its outline and again as its crest lines under one id) is one feature.
  * @param {object} feature
- * @returns {string|object}
+ * @returns {string|number|object}
  */
 function localFeatureKey(feature) {
   const { id } = feature;
-  return id == null ? feature : String(id);
+  if (id == null) return feature;
+  return Number.isFinite(id) ? id : String(id);
 }
 
 /**
@@ -1101,7 +1102,7 @@ export function createLocalGeoJsonLayer(
     record.key =
       typeof key === 'object'
         ? _drawn.anonymous.keys.get(feature)
-        : `geojson:id:${key}`;
+        : `geojson:${typeof key === 'number' ? 'number' : 'id'}:${key}`;
     Object.defineProperty(record, CONTEXT_FEATURE, {
       value: { layerName: name, source, properties },
     });
