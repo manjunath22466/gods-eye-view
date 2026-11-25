@@ -112,6 +112,7 @@ function fixture(
   const context = { mode: contextMode, changing };
   const coordinator = new CockpitCoordinator({
     viewer,
+    cockpitStore: store,
     services: {
       flightsLayer: { getTrackedInfo: trackedFrom('flights') },
       militaryFlightsLayer: { getTrackedInfo: trackedFrom('military') },
@@ -211,6 +212,25 @@ function fixture(
     pinia,
   };
 }
+
+test('direct coordinator destruction revokes card actions before controller disposal', (t) => {
+  const { coordinator, cockpit, store } = fixture(t);
+  const enter = t.mock.method(cockpit, 'enter', () => true);
+  const toggle = t.mock.method(cockpit, 'toggleTrackedTr3b', () => true);
+  const identity = { layerId: 'flights', id: CIVIL.icao24 };
+  assert.equal(store.act('enter', identity), true);
+  assert.equal(store.act('toggleTr3b'), true);
+  const dispose = cockpit.dispose.bind(cockpit);
+  t.mock.method(cockpit, 'dispose', () => {
+    assert.equal(store.act('enter', identity), undefined);
+    assert.equal(store.act('toggleTr3b'), undefined);
+    dispose();
+  });
+
+  coordinator.destroy();
+  assert.equal(enter.mock.callCount(), 1);
+  assert.equal(toggle.mock.callCount(), 1);
+});
 
 /** A selected vessel as the AIS layer gives it to the bridge view. */
 const VESSEL = Object.freeze({

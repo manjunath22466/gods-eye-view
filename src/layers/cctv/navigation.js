@@ -16,6 +16,13 @@ export function createNavigation({
   parts,
   source,
 }) {
+  let previewedCameraId = null;
+  function setPreviewedCamera(cameraId) {
+    if (previewedCameraId === cameraId) return;
+    if (previewedCameraId) layerState._lastHopAt = Date.now();
+    previewedCameraId = cameraId;
+  }
+
   /**
    * Nearest catalog camera to a WGS84 point.
    * @param {number} lat Latitude in degrees.
@@ -69,13 +76,22 @@ export function createNavigation({
     );
   }
 
+  /** Activate a camera without opening its Context card. */
+  function quietly(activate) {
+    layerState._quietActivation = true;
+    try {
+      activate();
+    } finally {
+      layerState._quietActivation = false;
+    }
+  }
+
   /**
    * After a settled move, moves the opening camera to the one nearest the
    * view, until someone chooses a camera. A shared view's flight lands after
    * enable() picked from the startup view.
    * @returns {boolean} True when the active camera changed.
    */
-
   function reopenNearestCamera() {
     if (!layerState._openingCameraProvisional || !layerState._enabled)
       return false;
@@ -216,6 +232,7 @@ export function createNavigation({
     if (
       !layerState._autoHop ||
       layerState._autoHopSuspended ||
+      (previewedCameraId && previewedCameraId === layerState._activeCameraId) ||
       !layerState._enabled ||
       layerState._records.length < 2
     )
@@ -232,7 +249,7 @@ export function createNavigation({
         // Use setActiveCamera so the full activation path runs (obstruction
         // probe, projection runtime, geometry rewrite) — previously bypassed
         // with a bare assignment
-        parts.selection.setActiveCamera(nearest);
+        quietly(() => parts.selection.setActiveCamera(nearest));
         layerState._lastHopAt = nowMs;
         return;
       }
@@ -245,7 +262,9 @@ export function createNavigation({
       1,
       layerState._records.length,
     );
-    parts.selection.setActiveCamera(layerState._records[nextIdx].camera.id);
+    quietly(() =>
+      parts.selection.setActiveCamera(layerState._records[nextIdx].camera.id),
+    );
     layerState._lastHopAt = nowMs;
   }
 
@@ -276,6 +295,8 @@ export function createNavigation({
     zoomToCell,
     focusCamera,
     maybeAutoHop,
+    setPreviewedCamera,
+    quietly,
     cctvCycleIndex,
   };
 }

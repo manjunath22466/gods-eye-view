@@ -4,6 +4,7 @@ import {
   AIR_QUALITY_BANDS,
   AIR_QUALITY_PROVIDERS,
   AIR_QUALITY_UNKNOWN_COLOR,
+  airQualityCovers,
   OBSERVATION_MAX_AGE_MS,
   STALE_AFTER_MS,
   airQualityColor,
@@ -74,6 +75,35 @@ test('bands map from a value on a named provider scale', () => {
 test('the provider states its coverage plainly', () => {
   assert.match(AIR_QUALITY_PROVIDERS.eccc.coverage, /Canada only/);
   assert.equal(AIR_QUALITY_PROVIDERS.eccc.scale, 'AQHI');
+});
+
+test('the coverage area holds Canada and leaves out its neighbours', () => {
+  const inside = {
+    Toronto: [43.65, -79.38],
+    Windsor: [42.3, -83.03],
+    Vancouver: [49.28, -123.12],
+    Victoria: [48.42, -123.37],
+    Whitehorse: [60.72, -135.05],
+    Iqaluit: [63.75, -68.52],
+    Halifax: [44.65, -63.57],
+    "St. John's": [47.56, -52.71],
+    Montreal: [45.5, -73.57],
+    Alert: [82.5, -62.35],
+  };
+  const outside = {
+    Chicago: [41.88, -87.63],
+    Austin: [30.27, -97.74],
+    Seattle: [47.61, -122.33],
+    Rochester: [43.16, -77.61],
+    Anchorage: [61.22, -149.9],
+    Nuuk: [64.18, -51.72],
+    London: [51.51, -0.13],
+  };
+  for (const [name, [lat, lon]] of Object.entries(inside))
+    assert.equal(airQualityCovers(lat, lon), true, name);
+  for (const [name, [lat, lon]] of Object.entries(outside))
+    assert.equal(airQualityCovers(lat, lon), false, name);
+  assert.equal(airQualityCovers(Number.NaN, -79.38), false);
 });
 
 test("values above ten collapse to the scale's open-ended label", () => {

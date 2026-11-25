@@ -1,0 +1,369 @@
+<script setup>
+import { computed, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, reactive, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
+import { t } from '../../../i18n/index.js';
+import { sayWords, useEntityCardStore } from '../../stores/entityCard.js';
+import { useDisplayStore } from '../../stores/display.js';
+import { useCockpitStore } from '../../stores/cockpit.js';
+import AircraftModelHero from './AircraftModelHero.vue';
+import CctvPreview from './CctvPreview.vue';
+import { onTileMap } from '../../mapTiles.js';
+import CloseUpMap from './CloseUpMap.vue';
+import FlightCockpitView from './FlightCockpitView.vue';
+import UiButton from '../../kit/UiButton.vue';
+import UiIcon from '../../kit/UiIcon.vue';
+import RouteGlobe from './RouteGlobe.vue';
+import SatelliteGroundView from './SatelliteGroundView.vue';
+import { fleetModelSet, fleetModelSetLoading } from '../../../data/fleetModels.js';
+import {
+  HERO_AUTOPLAY_MS,
+  HERO_READY_WAIT_MS,
+  heroKindOf,
+  heroModelReady,
+  heroViews,
+  nextHeroView,
+  shownHeroView,
+} from '../../entityHeroViews.js';
+
+const props = defineProps({
+  card: { type: Object, default: null },
+  title: { type: String, default: '' },
+  positionWithheld: Boolean,
+  /** A satellite's swath width, drawn on its ground view. */
+  swathKm: { type: Number, default: null },
+});
+const card = computed(() => props.card);
+const cards = useEntityCardStore();
+
+// What the turning model's callout says: what can be worked out about the
+// flight (its phase, flight level, Mach, what its squawk means, how fresh its
+// signal is).
+const callouts = computed(() =>
+  (card.value?.insights || []).map((item) => ({ label: t(item.label), value: sayWords(item.words, item.value) })),
+);
+
+// The hero tile at the top of every card. A flight shows its photo, its route
+// on a small globe, its 3D model, the view from its cockpit and a close-up
+// map; anything else drawn with a 3D model (a vessel, a train) shows its
+// photo, its model and the map; a satellite, the ground beneath it; a camera,
+// its latest frame; anything else on the map, a close-up satellite map of
+// where it is (entityHeroViews.js).
+// The views take turns, first to last and round again, each for
+// HERO_AUTOPLAY_MS once it has drawn; picking one, or Pause, stops the turns.
+// The globe, model and cockpit view are the renderer's (`store.previews()`).
+// Items without a precise position, including obscured wildlife sightings,
+// use the icon and kind placeholder when they lack imagery. A view is made the first time it
+// shows and then stays mounted, so switching back shows it at once.
+const routeFailed = ref(false);
+const routeKnown = computed(() => Boolean(card.value?.route?.fromAt && card.value?.route?.toAt) && !routeFailed.value);
+const modelFailed = ref(false);
+const cockpitFailed = ref(false);
+const hasPosition = computed(() => !props.positionWithheld && !card.value?.obscured && Number.isFinite(card.value?.lat) && Number.isFinite(card.value?.lon));
+const mapPosition = computed(() => hasPosition.value && onTileMap(card.value.lat));
+const cockpitKnown = computed(
+  () => card.value?.kind === 'aircraft' && hasPosition.value && !cockpitFailed.value,
+);
+// A model shows for any item drawn with a fleet model (card.modelSubject)
+// whose bytes the set holds, or while the set is still loading; it is read
+// again as the card refreshes.
+const modelKnown = computed(
+  () => !modelFailed.value && heroModelReady(card.value?.modelSubject, { set: fleetModelSet(), loading: fleetModelSetLoading() }),
+);
+// The view picked, or reached by the turns; null shows the first.
+const chosen = ref(null);
+// The photo the item's layer looked up (Planespotters for a tracked
+// airliner, Open Vessel Photos for a selected vessel), with its credit.
+const failedPhoto = ref('');
+const photo = computed(() => {
+  const found = card.value?.photo;
+  if (!found?.src || found.src === failedPhoto.value) return null;
+  const { photographer, licence } = found;
+  const credit = licence
+    ? photographer
+      ? t('Photo: {photographer} · {licence}', { photographer, licence })
+      : t('Photo · {licence}', { licence })
+    : photographer
+      ? t('Photo © {photographer}', { photographer })
+      : '';
+  return { ...found, credit };
+});
+const photoAvailable = computed(() => Boolean(photo.value));
+const onPhotoError = (event) => (failedPhoto.value = event.currentTarget.getAttribute('src'));
+/** Set by a switch asked for within one item: the next change of view holds the last one. */
+let holdNext = false;
+const views = computed(() =>
+  heroKind.value === 'flight' || heroKind.value === 'model'
+    ? heroViews({
+        photo: photoAvailable.value,
+        route: heroKind.value === 'flight' && routeKnown.value,
+        model: modelKnown.value,
+        cockpit: heroKind.value === 'flight' && cockpitKnown.value,
+        position: mapPosition.value,
+      })
+    : [],
+);
+const activeFlightPreview = computed(() => shownHeroView(views.value, chosen.value));
+// The views shown so far for this item; only these are mounted.
+const made = reactive(new Set());
+
+const heroKind = computed(() =>
+  heroKindOf({
+    kind: card.value?.kind,
+    layerId: card.value?.layerId,
+    photo: photoAvailable.value,
+    route: routeKnown.value,
+    model: modelKnown.value,
+    position: hasPosition.value,
+    mapped: mapPosition.value,
+  }),
+);
+
+// Switching views goes straight to the next one: the view that was showing
+// stays behind the next one during the crossfade.
+const behind = ref(null);
+const waiting = ref(false);
+let revealTimer = 0;
+let behindTimer = 0;
+function reveal() {
+  clearTimeout(revealTimer);
+  waiting.value = false;
+  clearTimeout(behindTimer);
+  behindTimer = setTimeout(() => (behind.value = null), 260);
+}
+// Only a switch asked for within one item (a pick of a view, or the views'
+// own turns) holds the last view; a new pick starts clean.
+watch(activeFlightPreview, (now, was) => {
+  clearTimeout(revealTimer);
+  clearTimeout(behindTimer);
+  const asked = holdNext;
+  holdNext = false;
+  if (!now || !was || now === was || !asked) {
+    behind.value = null;
+    waiting.value = false;
+    return;
+  }
+  behind.value = was;
+  waiting.value = true;
+  if (drawn.has(now)) reveal();
+  else revealTimer = setTimeout(reveal, now === 'cockpit' ? 2500 : 350);
+});
+const layerClass = (name) => ({
+  'is-shown': activeFlightPreview.value === name || behind.value === name,
+  'is-behind': behind.value === name && activeFlightPreview.value !== name,
+  'is-waiting': activeFlightPreview.value === name && waiting.value,
+});
+// Only the view on show takes the keyboard: the one fading out under it, the
+// one still drawing over it and those kept mounted out of sight are inert,
+// so their links (a photo's, a map's credits) are not reached by Tab.
+const layerInert = (name) => (activeFlightPreview.value !== name || waiting.value ? true : undefined);
+
+// Keyboard focus inside the view on show (its photo link, its map credits, the
+// corner icon) holds the turns. If a preview update removes a focused
+// control or makes it inert, recovery goes to the selected switch or tile.
+const focusHeld = ref(false);
+const inView = (node) => Boolean(node?.closest?.('.entity-hero__layer, .entity-hero__corner'));
+const onFocusIn = (event) => (focusHeld.value = inView(event.target));
+const onFocusOut = (event) => (focusHeld.value = inView(event.relatedTarget));
+let heldFocus = null;
+onBeforeUpdate(() => {
+  const hero = heroElement.value;
+  const active = hero?.ownerDocument.activeElement;
+  heldFocus = hero?.contains(active) ? active : null;
+});
+onUpdated(() => {
+  const previous = heldFocus;
+  heldFocus = null;
+  const hero = heroElement.value;
+  if (!previous || !hero) return;
+  const doc = hero.ownerDocument;
+  const active = doc.activeElement;
+  if (active && active !== doc.body && !(active === previous && active.closest('[inert]'))) return;
+
+  focusHeld.value = false;
+  const selected = hero.querySelector('.entity-card__preview-switch [aria-pressed="true"]');
+  selected?.focus();
+  if (!selected || doc.activeElement !== selected) hero.focus();
+});
+function onDrawn(view, ready = true) {
+  if (!ready) {
+    drawn.delete(view);
+    return;
+  }
+  drawn.add(view);
+  if (activeFlightPreview.value === view && waiting.value) reveal();
+}
+
+// The TR-3B Easter egg: a small icon in the corner of the 3D model view,
+// for a followed aircraft only (it swaps the followed craft, cockpit.js).
+const cockpitStore = useCockpitStore();
+const { presence: cockpit } = storeToRefs(cockpitStore);
+const tr3b = computed(() =>
+  heroKind.value === 'flight' && activeFlightPreview.value === 'model' && cards.isFollowing() ? cockpit.value?.tr3b ?? null : null,
+);
+const toggleTr3b = () => cockpitStore.act('toggleTr3b');
+
+// Each turn starts with the current image or renderer frame. A view that
+// never draws hands over after HERO_READY_WAIT_MS.
+const drawn = reactive(new Set());
+const onPhotoLoad = () => drawn.add('photo');
+watch(
+  () => photo.value?.src,
+  () => drawn.delete('photo'),
+);
+// Every card holds its first view until Play. The same control starts the
+// model's rotation and the timer that advances through the views; on a
+// satellite's card, it starts the ground view's rings and HUD.
+const playing = ref(false);
+const display = useDisplayStore();
+watch(() => display.phoneShell?.enabled, (phone) => {
+  if (!phone) return;
+  playing.value = false;
+  chosen.value = null;
+});
+const motionQuery = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
+const reducedMotion = ref(Boolean(motionQuery?.matches));
+const onMotionChange = (event) => {
+  reducedMotion.value = Boolean(event.matches);
+  if (event.matches) playing.value = false;
+};
+const turns = computed(() => views.value.length > 1);
+const currentDrawn = computed(() => drawn.has(activeFlightPreview.value));
+// Picking a view shows it at once and stops the turns there.
+function choosePreview(which) {
+  holdNext = true;
+  chosen.value = which;
+  playing.value = false;
+}
+// With reduced motion on, nothing plays: an aircraft's views do not take
+// turns and a satellite's ground view stays still, so Play is unavailable
+// for both rather than showing Pause over a still picture.
+const togglePlaying = () => {
+  if (reducedMotion.value) return;
+  playing.value = !playing.value;
+};
+
+// No turns while the tile is off screen or the page is hidden.
+const heroElement = ref(null);
+const contextViewShown = inject('contextViewShown', true);
+const onScreen = ref(true);
+const pageShown = ref(globalThis.document?.visibilityState !== 'hidden');
+// A satellite's ground view takes its still either way; its rings and HUD
+// move only while playing and seen, never with reduced motion.
+const groundMoving = computed(() => playing.value && onScreen.value && pageShown.value && !reducedMotion.value);
+const onVisibility = () => (pageShown.value = globalThis.document?.visibilityState !== 'hidden');
+let observer = null;
+watch(heroElement, (element) => {
+  observer?.disconnect();
+  observer = null;
+  onScreen.value = true;
+  if (!element || typeof globalThis.IntersectionObserver !== 'function') return;
+  observer = new globalThis.IntersectionObserver((entries) => {
+    const last = entries[entries.length - 1];
+    if (last) onScreen.value = last.isIntersecting;
+  });
+  observer.observe(element);
+});
+onMounted(() => {
+  globalThis.document?.addEventListener('visibilitychange', onVisibility);
+  motionQuery?.addEventListener?.('change', onMotionChange);
+});
+
+watch(activeFlightPreview, (view) => view && made.add(view), { immediate: true });
+watch(
+  () => card.value?.key,
+  () => {
+    holdNext = false;
+    behind.value = null;
+    waiting.value = false;
+    chosen.value = null;
+    playing.value = false;
+    routeFailed.value = false;
+    modelFailed.value = false;
+    cockpitFailed.value = false;
+    focusHeld.value = false;
+    made.clear();
+    drawn.clear();
+    if (activeFlightPreview.value) made.add(activeFlightPreview.value);
+  },
+);
+
+// One timer: the view showing hands over HERO_AUTOPLAY_MS after it has
+// drawn. It is set again whenever the view, its drawing, the turns or the
+// tile's visibility change, and for a new item.
+let turnTimer = 0;
+function nextTurn() {
+  turnTimer = 0;
+  const next = nextHeroView(views.value, activeFlightPreview.value);
+  if (!next || next === activeFlightPreview.value) return;
+  holdNext = true;
+  chosen.value = next;
+}
+watch(
+  [playing, turns, activeFlightPreview, currentDrawn, onScreen, pageShown, focusHeld, () => card.value?.key],
+  () => {
+    clearTimeout(turnTimer);
+    turnTimer = 0;
+    if (!playing.value || !turns.value || !onScreen.value || !pageShown.value || focusHeld.value) return;
+    turnTimer = setTimeout(nextTurn, currentDrawn.value ? HERO_AUTOPLAY_MS : HERO_READY_WAIT_MS);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  clearTimeout(turnTimer);
+  clearTimeout(revealTimer);
+  clearTimeout(behindTimer);
+  observer?.disconnect();
+  globalThis.document?.removeEventListener('visibilitychange', onVisibility);
+  motionQuery?.removeEventListener?.('change', onMotionChange);
+});
+</script>
+
+<template>
+  <div v-if="heroKind !== 'none' || $slots.placeholder" ref="heroElement" class="entity-hero" :data-hero="heroKind" tabindex="-1" @focusin="onFocusIn" @focusout="onFocusOut">
+    <template v-if="heroKind === 'flight' || heroKind === 'model'">
+      <a
+        v-if="photoAvailable && made.has('photo')"
+        :key="photo.src"
+        class="entity-hero__layer entity-hero__photo"
+        :class="layerClass('photo')"
+        :inert="layerInert('photo')"
+        :href="photo.link || undefined"
+        target="_blank"
+        rel="noopener"
+      >
+        <img :src="photo.src" :alt="t('Photo of {name}', { name: title })" v-on="{ error: onPhotoError, load: onPhotoLoad }" />
+        <small v-if="photo.credit">{{ photo.credit }}</small>
+      </a>
+      <RouteGlobe v-if="views.includes('route') && made.has('route')" :key="`route-${card.key}`" class="entity-hero__layer" :class="layerClass('route')" :inert="layerInert('route')" :shown="activeFlightPreview === 'route' && onScreen && pageShown" :active="activeFlightPreview === 'route' && playing && onScreen && pageShown" :from="card.route.fromAt" :to="card.route.toAt" :at="{ lat: card.lat, lon: card.lon }" @ready="onDrawn('route')" @failed="routeFailed = true" />
+      <AircraftModelHero v-if="modelKnown && made.has('model')" :key="card.key" class="entity-hero__layer" :class="layerClass('model')" :inert="layerInert('model')" :active="activeFlightPreview === 'model' && playing && onScreen && pageShown" :subject="card.modelSubject" :heading="card.heading || 0" :callouts="callouts" @pending="drawn.delete('model')" @ready="onDrawn('model')" @failed="modelFailed = true" />
+      <FlightCockpitView v-if="views.includes('cockpit') && made.has('cockpit')" :key="`cockpit-${card.key}`" class="entity-hero__layer" :class="layerClass('cockpit')" :inert="layerInert('cockpit')" :shown="activeFlightPreview === 'cockpit' && onScreen && pageShown" :active="activeFlightPreview === 'cockpit' && playing && onScreen && pageShown" :lat="card.lat" :lon="card.lon" :altitude-m="card.altitudeM" :heading="card.heading" :speed-mps="card.speedMps" @failed="cockpitFailed = true" @ready="onDrawn('cockpit')" />
+      <CloseUpMap v-if="views.includes('map') && made.has('map')" :key="`map-${card.key}`" class="entity-hero__layer" :class="layerClass('map')" :inert="layerInert('map')" :active="activeFlightPreview === 'map' && onScreen && pageShown" :lat="card.lat" :lon="card.lon" :icon="card.icon" :card="card" @drawn="onDrawn('map', $event)" />
+      <div v-if="turns || views.includes('model')" class="entity-card__preview-switch" role="group" :aria-label="t('Preview')">
+        <UiButton v-if="views.includes('photo')" :pressed="activeFlightPreview === 'photo'" pressed-class="active" :label="t('Photos')" @click="choosePreview('photo')"><UiIcon name="photo_camera" :size="null" /></UiButton>
+        <UiButton v-if="views.includes('route')" :pressed="activeFlightPreview === 'route'" pressed-class="active" :label="t('Route')" @click="choosePreview('route')"><UiIcon name="timeline" :size="null" /></UiButton>
+        <UiButton v-if="views.includes('model')" :pressed="activeFlightPreview === 'model'" pressed-class="active" :title="t('3D model')" @click="choosePreview('model')">{{ t('3D') }}</UiButton>
+        <UiButton v-if="views.includes('cockpit')" :pressed="activeFlightPreview === 'cockpit'" pressed-class="active" :label="t('Cockpit view')" @click="choosePreview('cockpit')"><UiIcon name="visibility" :size="null" /></UiButton>
+        <UiButton v-if="views.includes('map')" :pressed="activeFlightPreview === 'map'" pressed-class="active" :label="t('Map')" @click="choosePreview('map')"><UiIcon name="map" :size="null" /></UiButton>
+        <UiButton class="entity-card__preview-play" :disabled="reducedMotion" :label="playing ? t('Pause preview') : t('Play preview')" @click="togglePlaying"><UiIcon :name="playing ? 'pause' : 'play_arrow'" :size="null" /></UiButton>
+      </div>
+    </template>
+    <a v-else-if="heroKind === 'photo'" :key="photo.src" class="entity-hero__layer entity-hero__photo is-shown" :href="photo.link || undefined" target="_blank" rel="noopener">
+      <img :src="photo.src" :alt="t('Photo of {name}', { name: title })" v-on="{ error: onPhotoError }" />
+      <small v-if="photo.credit">{{ photo.credit }}</small>
+    </a>
+    <template v-else-if="heroKind === 'satellite'">
+      <SatelliteGroundView :key="`ground-${card.key}`" class="entity-hero__layer is-shown" :active="contextViewShown && onScreen && pageShown" :moving="groundMoving" :lat="card.lat" :lon="card.lon" :swath-km="swathKm" />
+      <div class="entity-card__preview-switch" role="group" :aria-label="t('Preview')">
+        <UiButton class="entity-card__preview-play" :disabled="reducedMotion" :label="playing ? t('Pause preview') : t('Play preview')" @click="togglePlaying"><UiIcon :name="playing ? 'pause' : 'play_arrow'" :size="null" /></UiButton>
+      </div>
+    </template>
+    <CctvPreview v-else-if="heroKind === 'camera'" :camera-id="card.identity?.id || ''" :shown="contextViewShown && onScreen && pageShown" />
+    <CloseUpMap v-else-if="heroKind === 'map'" :key="`map-${card.key}`" class="entity-hero__layer is-shown" :active="onScreen && pageShown" :lat="card.lat" :lon="card.lon" :icon="card.icon" :card="card" />
+    <slot v-else name="placeholder" />
+    <!-- Small icons in the top corner of the image, never in the button row. -->
+    <div v-if="tr3b" class="entity-hero__corner">
+      <UiButton class="entity-hero__corner-button entity-hero__ufo" :pressed="!!tr3b.converted" pressed-class="is-on" :label="t('Reclassify the followed aircraft as TR-3B')" :title="tr3b.converted ? t('Restore real aircraft') : t('Reclassify as TR-3B')" @click="toggleTr3b">🛸</UiButton>
+    </div>
+  </div>
+  <slot />
+</template>

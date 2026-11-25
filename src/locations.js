@@ -352,6 +352,7 @@ export async function searchAndFlyTo(viewer, query, options = {}) {
     types = recovered.types || [];
     viewport = placesViewportToBounds(recovered.viewport) || viewport;
   } else if (!result) return null;
+  if (options.resolveOnly) return { label, latitude: lat, longitude: lng };
 
   const requestedRange = finitePositive(options.range);
   const duration = finitePositive(options.duration) || 3.0;

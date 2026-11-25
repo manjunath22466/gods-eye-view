@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { t } from '../../i18n/index.js';
 import RailPanel from '../rail/RailPanel.vue';
@@ -181,14 +181,15 @@ const pageVisible = ref(globalThis.document?.visibilityState !== 'hidden');
 function updatePageVisibility() {
   pageVisible.value = globalThis.document?.visibilityState !== 'hidden';
 }
+// A reply can arrive before the observer or visibility event updates Vue.
+const readInspectorVisibility = () =>
+  !isRailCovered() && globalThis.document?.visibilityState !== 'hidden';
 // Only an open panel reads what is picked and in view; closed, it does no work.
 const contextOpen = computed(() => chromePanels.value['global-context-panel']?.collapsed === false);
 const inspectorMount = ref(null);
 const viewContextPresent = computed(() => !entityCard.value);
-const inspectorShown = computed(() =>
-  inspectorMount.value !== null &&
+const contextViewShown = computed(() =>
   contextOpen.value &&
-  viewContextPresent.value &&
   activeTab.value === 'view' &&
   pageVisible.value &&
   !railCovered.value &&
@@ -196,11 +197,13 @@ const inspectorShown = computed(() =>
   (!phoneShell.value?.enabled || phoneShell.value.sheet === 'context') &&
   !cockpit.value?.active,
 );
+provide('contextViewShown', contextViewShown);
+const inspectorShown = computed(() =>
+  inspectorMount.value !== null && viewContextPresent.value && contextViewShown.value,
+);
 const inspectorTab = ref(null);
 let keyboardOrigin = null;
-// A keyboard selection puts focus on the card's close button. Closing the
-// card returns focus to its row or the Inspector unless another card opened
-// or focus moved outside Context.
+// Keep keyboard focus with the selected card, then return it to the originating row.
 async function focusKeyboardSelection(rowKey) {
   const cardKey = entityCard.value?.key;
   await nextTick();
@@ -223,7 +226,7 @@ watch(() => entityCard.value?.key, async (key, previous) => {
 });
 watch(
   [inspectorShown, inspectorMount],
-  ([shown, mountId]) => entityCards.setViewContextShown(shown, mountId),
+  ([shown, mountId]) => entityCards.setViewContextShown(shown, mountId, readInspectorVisibility),
   { immediate: true, flush: 'sync' },
 );
 watch(
@@ -306,9 +309,8 @@ watch(
           <AwarenessPanel v-if="!contactsMatchCard" />
         </section>
         <div v-if="contextOpen" v-show="activeTab === 'view'" id="context-tab-view" ref="inspectorTab" role="tabpanel" aria-labelledby="context-tab-btn-view" :class="{ 'context-searching': contextSearchOpen && contextSearchText.trim() }">
-          <EntityCard :with-contacts="contactsMatchCard">
-            <AwarenessPanel v-if="contactsMatchCard" compact />
-          </EntityCard>
+          <EntityCard :with-contacts="contactsMatchCard" />
+          <AwarenessPanel v-if="contactsMatchCard" compact />
           <ViewContext v-if="viewContextPresent" @vue:mounted="inspectorMount = Symbol()" @vue:before-unmount="inspectorMount = null" @keyboard-selection="focusKeyboardSelection" />
         </div>
         </div>

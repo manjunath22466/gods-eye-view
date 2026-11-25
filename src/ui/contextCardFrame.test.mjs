@@ -5,6 +5,10 @@ import { createPinia } from 'pinia';
 import { createApp, h, nextTick, ref } from 'vue';
 import { CctvControls } from './cctvControls.js';
 import { useCctvStore } from './stores/cctv.js';
+import ContextView from './views/ContextView.vue';
+import { activeTab } from './contextLayerTabs.js';
+import { useEntityCardStore } from './stores/entityCard.js';
+import { usePanelChromeStore } from './stores/panelChrome.js';
 import CctvPanel from './views/panels/CctvPanel.vue';
 import CctvPreview from './views/panels/CctvPreview.vue';
 
@@ -40,7 +44,7 @@ function liveState(id = 'a') {
   return state;
 }
 
-function fixture(t, { card = true } = {}) {
+function fixture(t, { card = true, cctv = {} } = {}) {
   document.body.replaceChildren();
   const host = document.body.appendChild(document.createElement('div'));
   const cardHost = document.body.appendChild(document.createElement('div'));
@@ -67,7 +71,7 @@ function fixture(t, { card = true } = {}) {
       _cctvFrame: document.getElementById('cctv-frame'),
       _cctvFrameWrap: document.getElementById('cctv-frame-wrap'),
     },
-    cctv: {},
+    cctv,
     actions: {
       isEnabled: () => true,
       setPanelCollapsed() {},
@@ -82,6 +86,7 @@ function fixture(t, { card = true } = {}) {
   });
   return {
     controls,
+    pinia,
     cardHost,
     mountCard,
     unmountCard,
@@ -90,6 +95,94 @@ function fixture(t, { card = true } = {}) {
     panelEl: document.getElementById('cctv-panel'),
   };
 }
+
+test('only a visible matching Context preview holds the active camera', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async () => new Response('', { status: 503 }),
+  );
+  const requests = mockImages(t);
+  let held;
+  const { controls, pinia, cardHost } = fixture(t, {
+    card: false,
+    cctv: {
+      setPreviewedCamera: (id) => {
+        held = id;
+      },
+    },
+  });
+  const chrome = usePanelChromeStore(pinia);
+  const chromeOwner = chrome.connect({});
+  chrome.publish(chromeOwner, 'global-context-panel', { collapsed: false });
+  const cards = useEntityCardStore(pinia);
+  const context = createApp(ContextView).use(pinia);
+  context.mount(cardHost);
+  const flush = async () => {
+    await nextTick();
+    await settle();
+    await nextTick();
+  };
+  t.after(() => {
+    cards.clear();
+    context.unmount();
+    chrome.detach(chromeOwner);
+    document.body.classList.remove('ui-clean-view', 'mobile-shell');
+    document.body.removeAttribute('data-mobile-sheet');
+    activeTab.value = 'view';
+  });
+  cards.select({
+    layerId: 'cctv',
+    id: 'a',
+    label: 'Camera A',
+    lat: 30,
+    lon: -97,
+  });
+  controls._renderCctvState(stillState('a.jpg'));
+  await flush();
+  assert.equal(held, 'a');
+  requests[0].onload();
+  await flush();
+  activeTab.value = 'props';
+  await flush();
+  assert.equal(held, null, 'Properties covers the mounted card');
+  activeTab.value = 'view';
+  await flush();
+  assert.equal(held, 'a');
+  document.body.classList.add('ui-clean-view');
+  await flush();
+  assert.equal(held, null);
+  document.body.classList.remove('ui-clean-view');
+  await flush();
+  cardHost.querySelector('.cctv-preview__expand').click();
+  await flush();
+  activeTab.value = 'props';
+  document.body.classList.add('mobile-shell');
+  document.body.setAttribute('data-mobile-sheet', 'cameras');
+  await flush();
+  assert.equal(held, 'a', 'the enlarged preview still owns its camera');
+  const hidden = t.mock.getter(document, 'hidden', () => true);
+  document.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(held, null, 'the popup cannot hold the camera in a hidden tab');
+  hidden.mock.restore();
+  document.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(held, 'a');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  await flush();
+  assert.equal(held, null);
+  activeTab.value = 'view';
+  await flush();
+  assert.equal(held, null, 'another phone sheet covers the card');
+  document.body.setAttribute('data-mobile-sheet', 'context');
+  await flush();
+  assert.equal(held, 'a');
+  controls._renderCctvState(stillState('b.jpg', 'b'));
+  assert.equal(held, null, 'the preview cannot hold another active camera');
+  controls._renderCctvState(stillState('a.jpg'));
+  chrome.publish(chromeOwner, 'global-context-panel', { collapsed: true });
+  await flush();
+  assert.equal(held, null);
+});
 
 function mockImages(t) {
   const prior = globalThis.Image;
@@ -105,12 +198,49 @@ function mockImages(t) {
   return requests;
 }
 
+test("an estimated bearing reads as estimated in the camera card's facts", async (t) => {
+  const requests = mockImages(t);
+  const { controls, cardHost } = fixture(t);
+  const state = stillState('a.jpg');
+  state.activeCamera.headingEstimated = true;
+  controls._renderCctvState(state);
+  requests[0].onload();
+  await nextTick();
+  assert.match(
+    cardHost.querySelector('.cctv-preview__facts').textContent,
+    /Heading\s*~/,
+  );
+});
+
+test("the bigger view names a partner camera's owner", async (t) => {
+  const requests = mockImages(t);
+  const { controls, cardHost } = fixture(t);
+  const a = stillState('a.jpg');
+  a.activeCamera.credit = 'Ajuntament de Barcelona';
+  controls._renderCctvState(a);
+  requests[0].onload();
+  await nextTick();
+  cardHost.querySelector('.cctv-preview__expand').click();
+  await nextTick();
+  const popup = document.querySelector('.cctv-popup');
+  assert.equal(
+    popup.querySelector('.cctv-popup__credit')?.textContent,
+    a.activeCamera.credit,
+  );
+  const b = stillState('b.jpg', 'b');
+  b.activeCamera.credit = 'Another owner';
+  controls._renderCctvState(b);
+  await nextTick();
+  assert.equal(popup.querySelector('.cctv-popup__credit'), null);
+});
+
 test('desktop: the Context card keeps refreshing while the accordion folds CCTV', async (t) => {
   const requests = mockImages(t);
-  const { controls, cardHost, panelEl } = fixture(t);
+  const { controls, cardHost, panelEl, store } = fixture(t);
   panelEl.classList.remove('collapsed');
   controls._renderCctvState(stillState('a1.jpg'));
   assert.equal(requests.length, 1);
+  assert.equal(store.frame.settledAt, null);
   requests[0].onload();
   await settle();
   await nextTick();
@@ -120,6 +250,8 @@ test('desktop: the Context card keeps refreshing while the accordion folds CCTV'
   await settle();
   controls._renderCctvState(stillState('a2.jpg'));
   assert.equal(requests.length, 2);
+  const firstTime = store.frame.settledAt;
+  assert.ok(Number.isFinite(firstTime));
   assert.equal(requests[1].src, 'a2.jpg');
   requests[1].onload();
   controls._renderCctvState(stillState('a3.jpg'));

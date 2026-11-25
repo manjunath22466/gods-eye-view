@@ -25,6 +25,13 @@ test('every credit carries a unique key and some markup to render', () => {
   }
 });
 
+test('main attribution credits Open-Meteo for Context and Cockpit weather', () => {
+  const credit = DATA_CREDITS.find((entry) => entry.key === 'open-meteo');
+  assert.match(credit.html, /Context and Cockpit/);
+  assert.match(credit.html, /href="https:\/\/open-meteo\.com\/en\/licence"/);
+  assert.match(credit.html, /CC BY 4\.0/);
+});
+
 test('adsbdb is credited and carries its published route-data restriction', () => {
   const credit = DATA_CREDITS.find((entry) => entry.key === 'adsbdb');
   assert.ok(

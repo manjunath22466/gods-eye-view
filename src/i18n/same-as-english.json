@@ -58,7 +58,9 @@
     "{speed} {direction}",
     "3D",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "2–10%"
   ],
   "de": [
     "1090 MHz",
@@ -304,7 +306,11 @@
     "{seconds} s",
     "Mode",
     "UTC",
-    "Radius"
+    "Radius",
+    "FL{n}",
+    "Position",
+    "Codes",
+    "Feed"
   ],
   "es": [
     "1 min/s",
@@ -481,6 +487,7 @@
     "Inspector",
     "{n} m",
     "{n} km",
+    "Error",
     "Squawk",
     "MMSI",
     "ICAO24",
@@ -501,7 +508,11 @@
     "{utc} UTC",
     "Manual",
     "{seconds} s",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "fr": [
     "1 min/s",
@@ -763,7 +774,11 @@
     "{seconds} s",
     "contact",
     "train",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "Position",
+    "Codes",
+    "{n} stations"
   ],
   "it": [
     "1 min/s",
@@ -999,7 +1014,12 @@
     "KT",
     "{utc} UTC",
     "{seconds} s",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "2–10%",
+    "< 2%",
+    "> 10%",
+    "{n} areas"
   ],
   "ja": [
     "1090 MHz",
@@ -1084,7 +1104,11 @@
     "{n} mm",
     "3D",
     "KT",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "pt": [
     "1 min/s",
@@ -1282,7 +1306,12 @@
     "{utc} UTC",
     "Manual",
     "{seconds} s",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "Feed",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "ru": [
     "1900–1945",
@@ -1329,7 +1358,11 @@
     "{kind} {name}",
     "3D",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "sv": [
     "STATION",
@@ -1524,7 +1557,10 @@
     "KT",
     "{utc} UTC",
     "{seconds} s",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "Position",
+    "{n} stations"
   ],
   "uk": [
     "1900–1945",
@@ -1565,7 +1601,11 @@
     "{kind} {name}",
     "3D",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "zh-CN": [
     "1090 MHz",
@@ -1651,7 +1691,11 @@
     "{n}%",
     "{n} hPa",
     "3D",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "zh-Hant": [
     "1090 MHz",
@@ -1737,7 +1781,11 @@
     "{n}%",
     "{n} hPa",
     "3D",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "< 2%",
+    "2–10%",
+    "> 10%"
   ],
   "he": [
     "{speed} kn",
@@ -1856,6 +1904,8 @@
     "3D",
     "KT",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "2–10%"
   ]
 }

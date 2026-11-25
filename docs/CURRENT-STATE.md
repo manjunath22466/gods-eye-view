@@ -959,21 +959,99 @@ the More sheet with the dock's Visual Presets, as before.
 
 ## Context panel — November 16, 2026
 
-Context leads with one card for whatever is picked. A click on anything a
-layer can identify (`src/ui/entityContextBridge.js`, through
-`src/data/pickedContext.js`) opens its card (`src/ui/stores/entityCard.js`,
-`src/ui/views/panels/EntityCard.vue`): the item's facts from its record, a
-route with progress for a flight, an altitude graph, the weather and local
-time where it is, and the flights, vessels, hazards and warnings
-within the radius the panel sets (25 to 1,000 km). Aircraft, satellites and
-vessels are followed as they are picked; the card says Following only while
-the camera follows the card's own item, and closing the card lets go.
-Aircraft and satellites offer Enter Cockpit and Enter orbital view; transit
-vehicles show their motion and fleet. A camera's card shows its latest still
-when available, while live video plays in the CCTV panel. Clicking the
-projected image, a view ray or the far-plane outline opens that camera's card.
-A loaded camera's name and position are also available when the card opens
-from its icon.
+Context leads with one card for whatever is picked.
+A click on anything a layer can identify (`src/ui/entityContextBridge.js`,
+through `src/data/pickedContext.js`) opens its card
+(`src/ui/stores/entityCard.js`, `src/ui/views/panels/EntityCard.vue`). Every
+card is the same card, in one order: its top image
+(`src/ui/views/panels/EntityPreview.vue`), its name with one small line on
+where the data comes from and how old it is ("adsb.lol · 4 s ago"), the
+buttons, up to four live figures, how it is changing, Nearby, and More
+details, folded. The top image is never an icon while the item has a
+position: an item without a photo (an aircraft without photo, route or model
+included) gets a close-up satellite map (`CloseUpMap.vue`). Switching a
+flight's top image keeps the last view under the new one until it has drawn
+(the cockpit view says when its tiles are in), so it never goes black. The
+buttons are three at most: the item's own first-person view leads where it
+can be entered (Enter Cockpit for an aircraft, Orbital view for a satellite
+that can be ridden, Bridge view for a vessel, Cab view for a train or a bus).
+For a vessel, train or bus the Cockpit candidate must match the card's
+layer and item (`presence.entryLayerId` and `presence.entryId`); an
+aircraft or satellite is tracked first and then entered. Follow or Fly to comes next. Fly to selects the displayed vessel or transit vehicle and focuses
+a train through its layer when available. A saved camera or train location
+still works if its layer has no matching record. Static items have no
+first-person view. A small chat icon opens Chat with the item attached to
+the draft (`chat-item`, `src/voice/chatAttachments.js`), nothing sent. The
+TR-3B swap is a small icon in the corner of a followed aircraft's 3D model
+view. An aircraft's figures are altitude, speed and heading (its vertical
+rate stays a fact under More details);
+with a verified route it gets one route and altitude view (`RouteProfile.vue`:
+share flown, flight level and time left), otherwise its altitude trace.
+Airports named in Context open the same card as the airport row in search
+(`AirportLink.vue`, the store's `openAirport`): an aircraft's
+route ends and its origin → destination line, and the airport an airport
+card's arrivals come from and its departures go to; a place's "near" link
+(`PlaceLine.vue`) opens it the same way. Keyboard focus moves to the new
+card's Back (else its title), and Back returns it to the link it came from.
+For a code that also names a country, such as AUS, Enter runs place search
+and the airport is listed immediately below the place row. A pending Enter
+while the airport index loads gives way to a newer explicit pick.
+Every airport card credits OurAirports. A
+code is a button only once the bundled airports pack knows it, plain text
+otherwise; nothing is asked of any service. An airport opened from another
+card shows "Back to …" at the top of its details, which reopens that card;
+one card only, dropped when anything else is picked.
+An airport card's figures and its "Flights at …" lists read only what Live
+Flights has loaded within 50 km (`airportTraffic`, `src/ui/placeCard.js`;
+nothing is looked up). A flight goes by its route when it has a verified one
+(bound for the airport: Arriving; from it: Departing). One without a route
+is judged by how it moves when it is within 30 km and below 10,000 ft above
+the field, or on the ground within 5 km: descending at 1.5 m/s (about
+300 ft/min) or more, or on the ground and slowing (its ground speed kept from
+read to read, `groundSpeedTrend`), is arriving; climbing as fast and heading
+away (or within 3 km of the airport) is departing; anything else stays under
+Other flights. Once any flight is judged so, the figure is marked as an
+estimate ("~12", its reason on hover); with none found while flights there
+report no altitude or climb or descent, it is "—" with that reason, never 0.
+A plain count, 0 included, is exact: every flight there has a route, or
+none is near enough. With Live Flights off both figures are "—" and the card
+offers to turn it on in Data Layers.
+Small charts show how an item changes (`ItemCharts.vue`: satellite fire hits
+by the hour and their fire power, quakes nearby by magnitude, a vessel's
+speed). Conditions here, just above Nearby, gives each field layer that is
+on (GNSS integrity, wind, air quality, recent imagery) its reading at the
+item's own position, worded as the Inspector's value tiles
+(`src/ui/fieldReading.js`): a value in one of the layer's legend bands
+(GNSS integrity, air quality) sits in a pill of that band's map colour beside
+its words, "No reading here" for none, the feed state for a failed read, and
+no group with no field layer on; it reads loaded layers
+on the card's existing poll, with no request of its own. Nearby
+(`SpotConditions.vue`) lists the layers that are on within
+the Context radius, with a slider directly above the list and the item's own
+layer first. A satellite lists what is
+inside its swath instead (`src/ui/satelliteSwath.js`: its imaging sensor's
+widest swath from the bundled sensor pack, else the ground it sees above
+45° elevation), drawn to scale on its ground view. Under it, the natural hazards
+near the item (`hazardsNear` in `src/ui/spotConditions.js`): earthquakes,
+tropical storms and wildfire perimeters within the Context radius (also on a
+satellite's card, whose Nearby keeps to its swath), from their
+public feeds also while those layers are off, and satellite fire hits only
+while the FIRMS layer is on (no `/api/firms` request otherwise). The feeds
+are global snapshots kept 5 minutes whichever spot asks, so a pick fetches
+each at most once every 5 minutes. Earthquakes go from the browser to USGS
+(USGS sees the reader's IP address); storms and perimeters go through the
+app server's cached `/api/cyclones` and `/api/fire-perimeters`. No keys or
+paid quota are used; the same five-minute cache guards the card's scheduled
+re-reads. FIRMS is read live at each request and row, so a fire hit is never
+asked for or shown with FIRMS off. The hazards are read again once the item
+has moved more than 1 km (25 km for a moving item), after a short settle.
+The feeds behind the rows are credited under them (USGS, NOAA NHC, NIFC
+WFIGS, NASA FIRMS). Picking a hazard turns its layer on and flies there. More details holds facts
+only: the record's fields, a satellite's launch, type and sensor, a camera's
+feed and whichever of its figures the row leaves out, the weather and local time for
+something that stays put (`LocalConditions.vue`), its position and data
+source.
+Clicking the projected camera image, a coverage ray or the far-plane outline opens the owning camera card.
 
 With nothing selected, the Inspector shows the place under the center of the
 screen, or coordinates when there is no nearby bundled city. A new point
@@ -982,63 +1060,98 @@ confirmed zone shows local time and UTC. Globe view and failed zone reads
 show UTC. Local weather uses the same reading. It shows conditions,
 temperature, feels-like, wind, cloud, visibility and precipitation, with an
 Open-Meteo credit and the age of older readings. A stalled read times out
-after 15 seconds. A failed reading is retried after one minute.
+after 15 seconds. A failed reading can retry after one minute while visible.
+A successful reading renews after 11 minutes of visible Inspector time.
 
-The Inspector and selected cards share a radius of 25 to 1,000 km (default 250
-km). The browser saves the choice and uses it to filter loaded items. A saved
-2,500 km choice reads as 1,000 km. Nearby groups results by enabled layer and
-sorts each group by distance. An empty group disappears while its count
-remains. Unavailable counts show the feed state. Field readings appear under
-“At the centre of the view” and include observation age for Air Quality and
-GNSS. Air Quality also lists nearby stations. Overlay tiles show their map and
-feed state. News reports stay in the News panel. For GeoJSON lines such as dam
-crests, distance uses the nearest mapped part of the line. Cable distance uses
-samples along each line, so a cable can fall just outside the radius near a
-boundary even when its line passes inside.
+With nothing selected, **In view** counts loaded items in the viewport at
+every zoom. Clicking open ground returns to this view. Each enabled item layer
+lists its nearest visible records first, measured from the view center.
+At globe height each block shows up to three rows. Searching can show up to
+12 matches per layer while the headline keeps the visible count.
+Classification bars summarize the counted items. Empty lists disappear while
+their tiles keep the count or show why a reading is unavailable.
 
-At globe height, a layer's block shows what it has loaded at the feed's scope,
-with feed state and a breakdown where available. A satellite class bar
-identifies how many satellites it represents when that differs from the loaded
-count. Each block can show the three visible items nearest the view center.
-Context search returns up to 12 matches per layer and keeps the loaded total.
-The Omnibar's in-view results use the viewport. The Bhote Koshi reconstruction
-panel owns its evidence controls while open. The independent locator lists
-places from its active presentation.
+Satellites use the radius around the view center to include overhead objects.
+Selecting an item uses that same radius for **Nearby**, centered on the item.
+The browser saves the radius from 25 to 1,000 km (default 250 km) and reads
+a saved 2,500 km choice as 1,000 km. GeoJSON line distance uses the nearest
+mapped part. Cable distance uses samples along the line and can miss a
+segment near the radius boundary.
+
+Standalone field tiles appear under “At the centre of the view”. Air Quality
+can combine its point reading with the station count and also lists station
+rows. Air Quality and GNSS include observation age when available. Overlay
+tiles show their map and feed state. News reports stay in the News panel.
+The Omnibar uses viewport bounds for its in-view results.
+The Bhote Koshi reconstruction panel owns its evidence controls while open.
+The independent locator lists places from its active presentation.
 
 With all layers off, the open Inspector shows [last-known worldwide
 counts](#nothing-on-count-tiles), then local weather and daylight or globe
-UTC, followed by camera height. It offers up to three Suggested layers, or a
-Data Layers action. On a phone either action opens Layers. Opening Suggested
-Layers focuses the Suggested chip in the Data Layers finder. With layers on,
-suggestions appear below Nearby and the action reads “Open Data Layers”.
-Expanded Context uses the full-height side column.
+UTC and daylight, followed by camera height. At local zoom it includes ground
+elevation when a terrain reading is available. It offers up to three Suggested
+layers or a Data Layers action. On a phone either opens Layers. Opening
+Suggested focuses its chip in the Data Layers finder. With layers on,
+suggestions appear below Nearby and the general action reads “Open Data
+Layers”. Expanded Context uses the full-height side column.
 
 Weather and count work pauses when the Inspector is covered or hidden,
 including when the page is hidden. Returning to the same point retains
 its successful reading. A due retry waits until the Inspector can read
 again.
 
-The Contacts mode and the Radio strip stay in the panel's main tab, below the
-card. When Contacts follows the aircraft the card shows, its list sits inside
-the card. Turning Radio on opens Context. Context summarizes the Space
-Missions roster in one tile. Turning it on opens the separate Space Missions
-panel. The Properties tab holds the Labels and 3D aircraft settings from
-Visual while a layer they act on is on.
+The Contacts mode and the Radio strip stay in the panel's main tab. When
+Contacts follows the aircraft shown in the card, its compact list follows the
+card, and the card’s Nearby lists flights and vessels within range. Turning
+Radio on opens Context. Context summarizes the Space Missions roster in one
+tile, and turning it on opens the separate Space Missions panel. The
+Properties tab holds the Labels and 3D aircraft settings from Visual while a
+layer they act on is on.
 
-Context does its reading while its panel is open. Selected cards use the
-regional brief for weather; earthquakes, tropical storms and
-fire perimeters come from the same feeds as their layers, cached for five
-minutes; satellite fire hits only while the FIRMS layer is on.
+Context does its reading while its panel is open. Stationary cards use the
+host’s exact-point weather reader, with the regional brief as a fallback.
+Closing the card cancels that request. For a wildlife sighting whose position
+is unconfirmed, the card suspends automatic position-based previews and
+conditions. Earthquakes, tropical storms and fire perimeters come from the
+same feeds as their layers and are cached for five minutes. Satellite fire
+hits are read only while FIRMS is on.
 
 The card's top tile previews what is picked. A flight shows its
 Planespotters photo once the flights layer has looked one up for the plane
 it tracks, its route on a small globe (origin to destination, flown part
 solid, the plane on it), its fleet model turning with callouts of what can
 be worked out about the flight, and the view ahead from its cockpit with
-speed and altitude tapes; the model and the cockpit view take turns. A
+speed and altitude tapes, then a close-up map. The icon row over the image
+picks a view; the views it offers take turns in its order, about 6 s each
+(`HERO_AUTOPLAY_MS` in `src/ui/entityHeroViews.js`), round to the first again.
+A view's 6 s count only once it has drawn: the photo and the map once their
+images load, the cockpit view once its tiles are in, the model once the fleet
+set has loaded (a view that never says so hands over after 15 s). The last
+button says Play preview or Pause preview. Picking a view shows it and
+pauses. The turns wait while keyboard focus is in the displayed view or its
+corner control. Every item starts on its photo, else its model,
+else its first view, paused. Play starts model rotation and the timer for the
+next view; Pause stops both. A newly enabled reduced-motion preference also
+pauses the preview; removing that preference does not restart it.
+A single model view, and a satellite's ground view, still offer Play/Pause;
+other single views have none. With reduced motion on, Play is unavailable.
+On a phone the switch is hidden and the top image stays on its first view.
+View timers, model rotation and the route globe stop while the preview is
+paused, off screen or the page is hidden (`EntityPreview.vue`); a new pick
+scrolls the panel back to the top. A satellite's ground view is taken again
+as the craft moves on (once it has gone a quarter of its swath, at most every
+30 s), so it shows the ground beneath it now. A
 vessel shows its Open Vessel Photos photo, a satellite the ground beneath it
-from Esri World Imagery with its altitude and speed graphed. The globe, model
-and cockpit view are drawn by the renderer through its `cardPreviews`
+from Esri World Imagery with Esri's place names over it
+(`SatelliteGroundView.vue`). The ground view stands back so the swath, drawn
+to scale as a faint 1 px circle, takes about 45% of the image's width
+(`groundFrame` in `src/ui/satelliteSwath.js` picks the tile zoom from the
+swath and the view's width, and scales tiles and circle together); a swath
+too wide to frame even at the widest zoom takes more. Its credit names every
+source in full on a dark strip at its foot, and its top image has a height of
+its own. Like the other previews it starts paused: its rings and readouts move
+only after Play, and never with reduced motion on. Its orbit class and
+inclination are separate figure tiles. The globe, model and cockpit view are drawn by the renderer through its `cardPreviews`
 application hook (`src/render/cesium/cardPreviews.js`), each in a small scene
 of its own that frees its graphics context as it closes; the model comes from
 the fleet set loaded at startup, so opening a card fetches no model.
@@ -1064,9 +1177,11 @@ layers are excluded. The browser caps the response at 16 KiB and waits up to
 10 seconds.
 
 The browser requests counts when entering the nothing-on view. Another entry
-can refresh them after a 30-minute cooldown. Closing the Inspector cancels a
-pending request and restores its previous cooldown. A timeout keeps the
-cooldown.
+can refresh them after a 30-minute cooldown, or after the wait named by a
+valid `Retry-After` on a 429 response. Closing the Inspector cancels a pending
+request and restores its previous cooldown. A timeout keeps the cooldown.
+Replacing the configured count source discards cached results and retry state
+from the old source.
 
 A complete cache response updates the worldwide counts. If a layer reports a
 count without an observation time, the Inspector keeps its previous dated count
@@ -2201,7 +2316,10 @@ still waits for an in-flight request and the provider's minimum interval.
 The panel's still and live video run only while the tab is visible and the
 panel is open (on phones, the Cameras sheet). The still also loads while
 Context shows the camera's card (on phones, the Context sheet) or its bigger
-view is open.
+view is open. Both visible previews hold timed Auto-hop on the current
+camera. Manual steps stay available and the next timed hop waits a full
+interval after the preview is hidden. The card identifies the feed without
+treating the time a still loads as its capture time.
 
 Traffic owns its rendered-surface observer only while enabled, removes it on disable/destroy, and rebuilds no cached heights on frames where the surface identity is unchanged. Its dots and heat-lines are two renderer draw sets, it animates on the frame port's preRender, and it follows the camera through the camera port at its own 5% threshold rather than the shared `percentageChanged` ledger. The surface identity is the globe port's `surfaceVersion()` and tile readiness its `isSettled('surface')`, so the layer no longer reaches Cesium. Heat-lines are always asked for draped: where the Cesium renderer cannot drape (no depth textures) its draw port draws them (and every other draped line) over the surface, in their colour where the surface hides them and hidden past the horizon, recolouring a line in place when only its colour changes, rather than the layer dropping them.
 
@@ -3033,13 +3151,14 @@ satellite instead. Entry needs only the Satellites layer
 (`orbitEntryAllowed` in `src/contextModePolicy.js`); Contacts and every other
 layer may be off. A Context mode change in flight blocks entry until it
 settles. Debris (rocket bodies, fragments and dead satellites; see the
-satellite class toggles) can be tracked but never entered: no ORBIT entry is
-offered and double-click refuses it. A tracked aircraft still takes
+satellite class toggles) can be tracked but never entered: no orbital entry
+is offered, its Context card leads with Follow instead of Orbital view, and
+double-click refuses it. A tracked aircraft still takes
 entry first, and a tracked satellite
 takes it before a selected vessel. Double-clicking the tracked satellite
-enters it, and the entry button reads
-ORBIT with a satellite icon in Contacts (`#cockpit-entry`) and under the Intel
-HUD readout (`#cockpit-entry-readout`). Voice (`control_cockpit`) stays
+enters it, as does the Context card's Orbital view button, and the entry
+button reads ORBIT with a satellite icon in Contacts (`#cockpit-entry`) and
+under the Intel HUD readout (`#cockpit-entry-readout`). Voice (`control_cockpit`) stays
 aircraft-only; its state reports an orbital view in use as a `satellite`
 subject. `gev:cockpit-mode-changed` carries layer `satellites` and the NORAD
 id.
@@ -9074,7 +9193,7 @@ at the view center as unknown.
 
 ### TR-3B conversion Easter egg (August 2026)
 
-- With a contact tracked, CONTEXT ▸ CONTACTS shows a small 🛸 chip beside COCKPIT (`#tr3b-toggle`, gated by `CockpitView.syncTr3bToggle()` on a tracked contact — not on the cockpit entry policy). Pressing it converts that contact into a TR-3B and pressing it again restores the real aircraft. State lives in `src/data/tr3bRegistry.js`: a session-scoped module-level `Set` keyed by ICAO 24-bit address, shared across both flight layers the same way `militaryRegistry.js` is, so a conversion holds through a civil↔military handoff. It is deliberately NOT persisted (no localStorage, no share-link param, no schema change) and layer teardown deliberately leaves it intact — only a page reload clears conversions.
+- With a contact tracked, CONTEXT ▸ CONTACTS shows a small 🛸 chip beside COCKPIT (`#tr3b-toggle`), and with an aircraft followed, its Context card shows a small 🛸 icon in the corner of its 3D model view (`.entity-hero__ufo`, never in the button row; shown while Cockpit publishes `presence.tr3b` from `syncTr3bToggle()` for the tracked aircraft — not on the cockpit entry policy). The model control routes through the app’s Cockpit store to the coordinator. Pressing it converts that contact into a TR-3B and pressing it again restores the real aircraft. State lives in `src/data/tr3bRegistry.js`: a session-scoped module-level `Set` keyed by ICAO 24-bit address, shared across both flight layers the same way `militaryRegistry.js` is, so a conversion holds through a civil↔military handoff. It is deliberately NOT persisted (no localStorage, no share-link param, no schema change) and layer teardown deliberately leaves it intact — only a page reload clears conversions.
 - The sprite is two hidden kinds (`tr3b`, `tr3bHot`) in `src/data/aircraftIcons.js`, authored in the same 96×96 nose-up pipeline as the eight class silhouettes, so the triangle points along the display course through the existing screen-projected rotation path with `alignedAxis` still `ZERO`. They are unreachable from `classifyAircraft()`. Variant selection rides the existing `irBoost` layer param, so under NVG/FLIR/surveillance the hull stays cold and the four emitters render hot; a style switch re-images only converted contacts, never the rest of the fleet.
 - Both layers resolve every `aircraftIcon()` call through a local `_iconKind()` shim (identity for unconverted contacts), so no refresh path — poll reconciler, two-tier raster swap, presentation pass, tracked entity — can revert a conversion.
 - The class label follows the conversion across every surface that reports one: tracked card, cockpit/`getTrackedInfo`, Contacts, and the analyst record's `aircraftClass` (`tr3b`, the style-independent id, so a query answers the same in FLIR as in Normal). Callsign, flight level, speed, and route stay live-feed truth.

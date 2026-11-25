@@ -93,3 +93,19 @@
   color: #ff7e7e;
   border-color: #ff7e7e;
 }
+
+/* Tool buttons: outlined rounded rectangles with uppercase mono labels, cyan
+ * when on, primary or pressed (the look of the CCTV panel's controls).
+ * Context's cards share these tokens. The idle text is brighter than
+ * --text-secondary so its small capitals keep their contrast on the dark
+ * panels. */
+:root {
+  --gev-tool-radius: 8px;
+  --gev-tool-border: rgba(255, 255, 255, 0.16);
+  --gev-tool-fill: rgba(255, 255, 255, 0.04);
+  --gev-tool-text: rgba(232, 234, 237, 0.74);
+  --gev-tool-on: var(--accent);
+  --gev-tool-on-fill: rgba(0, 212, 255, 0.12);
+  --gev-tool-font-size: 9.5px;
+  --gev-tool-tracking: 1.2px;
+}

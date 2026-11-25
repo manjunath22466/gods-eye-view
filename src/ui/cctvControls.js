@@ -56,6 +56,7 @@ export class CctvControls {
     this._cctvSummaryTypingTimer = null;
     this._lastCctvSummaryText = '';
     this._lastSeenCctvActiveId = null;
+    this._lastSeenCctvEnabled = false;
     this._wasCctvEnabled = false;
     this._cctvChipHideTimer = null;
     this._cctvChipWasBusy = false;
@@ -169,6 +170,7 @@ export class CctvControls {
     this._cctvVideoSurface?.stop();
     this._videoVisibilityObserver?.disconnect();
     this._offPreviews?.();
+    this.cctv.setPreviewedCamera?.(null);
     this._actionGeneration++;
     this.listeners.abort();
     this._cctvUnsubscribe?.();

@@ -170,3 +170,25 @@ test('each further target of a step gets its own ring after the callout', async 
   assert.deepEqual(subs(), [sub]);
   assert.equal(sub.style.opacity, '0');
 });
+
+// One Esc does one thing: with a camera's enlarged view open (a dialog that
+// keeps its own Esc), Esc closes that and the walk goes on.
+test('Esc is left to an open dialog that owns it; the next Esc ends the walk', async (t) => {
+  fixture(t);
+  startGuide([{ text: () => 'Look' }]);
+  await settle();
+  const popup = document.body.appendChild(document.createElement('div'));
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('data-owns-escape', '');
+  const esc = () =>
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+  esc();
+  await settle();
+  assert.ok($('.gev-guide'), 'the walk is still on');
+  popup.remove();
+  esc();
+  await settle();
+  assert.equal($('.gev-guide'), null);
+});

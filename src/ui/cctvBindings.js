@@ -1,3 +1,4 @@
+import { announceCameraReselection } from './cctvEvents.js';
 import { t } from '../i18n/index.js';
 
 export function _initCctvPanel() {
@@ -19,8 +20,13 @@ export function _initCctvPanel() {
       (activeId && activeId !== this._cctvState?.activeCameraId)
     )
       return;
+    const previous = this._cctvState?.activeCameraId;
     this.actions.runExplicitFocus(
-      () => this.cctv.focusNearest({ focus: false }),
+      () => {
+        const id = this.cctv.focusNearest({ focus: false });
+        announceCameraReselection(id, previous);
+        return id;
+      },
       (cameraId) => this.cctv.focusCamera(cameraId, 1.8),
     );
   });

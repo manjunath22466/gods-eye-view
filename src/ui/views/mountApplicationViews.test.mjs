@@ -17,6 +17,7 @@ import { ShareLinkManager } from '../../sharelink.js';
 import { LocationSearch } from '../location.js';
 import { useEntityCardStore } from '../stores/entityCard.js';
 import { LAYER_COUNTS_REFETCH_MS } from '../layerCounts.js';
+import { useCockpitStore } from '../stores/cockpit.js';
 import { applicationPinia } from '../vueRuntime.js';
 import { mountApplicationViews } from './index.js';
 
@@ -99,7 +100,7 @@ async function countInspector(t, requestServices, constructControls) {
   const viewer = { scene: {} };
   const input = fakeInput(viewer);
   const noop = () => {};
-  const { port, setPose, emit } = fakeCameraPort({
+  const { port, setPose, setViewRectangle, emit } = fakeCameraPort({
     pose: { height: 20_000_000 },
   });
   const flyToBounds = t.mock.fn(noop);
@@ -223,11 +224,62 @@ async function countInspector(t, requestServices, constructControls) {
     },
     async point(lat, lon, height = 40_000) {
       setPose({ lat, lon, height });
+      setViewRectangle({
+        west: lon - 2,
+        east: lon + 2,
+        south: lat - 2,
+        north: lat + 2,
+      });
       emit('moveEnd');
       await nextTick();
     },
   };
 }
+
+test('Cockpit card actions detach before the stock shell awaits Context restoration', async (t) => {
+  const { styleManager, stop } = await countInspector(t);
+  const cockpit = useCockpitStore(applicationPinia());
+  const controller = styleManager._cockpitCoordinator.cockpitView;
+  const enter = t.mock.method(controller, 'enter', () => true);
+  const toggle = t.mock.method(controller, 'toggleTrackedTr3b', () => true);
+  const identity = { layerId: 'flights', id: 'abc123' };
+  assert.equal(cockpit.act('enter', identity), true);
+  assert.equal(cockpit.act('toggleTr3b'), true);
+  assert.deepEqual(enter.mock.calls[0].arguments, [{ subject: identity }]);
+  assert.equal(toggle.mock.callCount(), 1);
+
+  const restoring = Promise.withResolvers();
+  const restored = Promise.withResolvers();
+  t.mock.method(styleManager._contextControls, 'restoreForDisposal', () => {
+    restoring.resolve();
+    return restored.promise;
+  });
+  const stopped = stop();
+  let replacement;
+  try {
+    await Promise.race([
+      restoring.promise,
+      stopped.then(() => assert.fail('the real shell must await restoration')),
+    ]);
+    assert.equal(cockpit.act('enter', identity), undefined);
+    assert.equal(cockpit.act('toggleTr3b'), undefined);
+    assert.equal(enter.mock.callCount(), 1);
+    assert.equal(toggle.mock.callCount(), 1);
+
+    replacement = cockpit.connect({
+      enter: (subject) => subject,
+      toggleTr3b: () => 'new toggle',
+    });
+    restored.resolve();
+    await stopped;
+    assert.equal(cockpit.act('enter', identity), identity);
+    assert.equal(cockpit.act('toggleTr3b'), 'new toggle');
+  } finally {
+    restored.resolve();
+    if (replacement) cockpit.detach(replacement);
+    await stopped;
+  }
+});
 
 test('mounted Context updates Nearby and In View when the shell replaces its data manager', async (t) => {
   t.mock.method(
@@ -370,21 +422,73 @@ test('stock Context uses the configured layer counts through either public shell
   );
 });
 
-test('stock controls use host weather in both the Inspector and the card', async (t) => {
+test('remounting Context keeps counts only for the same configured source', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async () => new Response(null, { status: 503 }),
+  );
+  const countResponse = (count) => ({
+    counts: [{ layerId: 'satellites', count, at: Date.now() }],
+  });
+  const mount = async () => {
+    const inspector = await countInspector(t);
+    attachSatellites(inspector.styleManager);
+    await inspector.show();
+    return inspector;
+  };
+  const sourceA = t.mock.fn(async () => countResponse(7));
+  const releaseA = configureApplicationServices({
+    layerCounts: { getCounts: sourceA },
+  });
+  t.after(releaseA);
+  const first = await mount();
+  assert.equal(first.count(), '7');
+  await first.stop();
+
+  const sameSource = await mount();
+  assert.equal(sameSource.count(), '7');
+  assert.equal(sourceA.mock.callCount(), 1);
+  await sameSource.stop();
+  releaseA();
+
+  t.mock.timers.tick(60_000);
+  const pending = Promise.withResolvers();
+  const sourceB = t.mock.fn(() => pending.promise);
+  t.after(
+    configureApplicationServices({ layerCounts: { getCounts: sourceB } }),
+  );
+  const replacement = await mount();
+  assert.deepEqual(
+    { count: replacement.count(), requests: sourceB.mock.callCount() },
+    { count: undefined, requests: 1 },
+    'the replacement starts its own read with no previous count',
+  );
+
+  pending.resolve(countResponse(42));
+  await new Promise((resolve) => setImmediate(resolve));
+  await nextTick();
+  assert.equal(replacement.count(), '42');
+});
+
+test('stock controls use host weather in the Inspector and in stationary card details', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const fetchStub = t.mock.method(
     globalThis,
     'fetch',
     async () => new Response(null, { status: 503 }),
   );
-  const conditions = (temperatureC) => ({
-    weather: { temperatureC, weatherCode: 0 },
+  const conditions = (temperatureC, source) => ({
+    weather: { temperatureC, weatherCode: 0, source },
   });
   const pending = Promise.withResolvers();
   const weather = {
     getConditions: t.mock.fn(async (lat) => {
       if (lat === 47.5) return conditions(15);
       if (lat === 47.6) return pending.promise;
+      if (lat === 47.5) return conditions(15);
+      if (lat === 47.51) return conditions(16, 'open-meteo');
       return lat === 47.7 ? conditions(24) : null;
     }),
   };
@@ -411,26 +515,40 @@ test('stock controls use host weather in both the Inspector and the card', async
   assert.equal(signal.aborted, false);
 
   const cards = useEntityCardStore(applicationPinia());
-  assert.ok(
-    cards.select({
-      layerId: 'local-dams',
-      id: 'host-site',
-      label: 'Host site',
-      lat: 47.5,
-      lon: -122.4,
-    }),
-  );
+  const selectSite = (lat) =>
+    assert.ok(
+      cards.select({
+        layerId: 'local-dams',
+        id: String(lat),
+        label: 'Host site',
+        lat,
+        lon: -122.4,
+      }),
+    );
+  selectSite(47.5);
   await nextTick();
   assert.equal(signal.aborted, true);
   pending.resolve(conditions(31));
   await advance(350);
-  assert.match(
-    inspector.host.querySelector('.spot-conditions').textContent,
-    /15°C/,
+  const details = () => inspector.host.querySelector('.entity-card__more');
+  assert.match(details().textContent, /15 °C/);
+  assert.equal(
+    details().querySelector(
+      '.entity-card__weather-credit, [title="Open-Meteo"]',
+    ),
+    null,
   );
   assert.deepEqual(
     weather.getConditions.mock.calls[1].arguments.slice(0, 2),
     [47.5, -122.4],
+  );
+
+  selectSite(47.51);
+  await advance(350);
+  assert.match(details().textContent, /16 °C/);
+  assert.equal(
+    details().querySelector('.entity-card__weather-credit')?.href,
+    'https://open-meteo.com/',
   );
 
   await inspector.point(47.7, -122.3);
@@ -462,7 +580,7 @@ test('stock controls use host weather in both the Inspector and the card', async
   await advance(400);
   assert.match(facts(standalone), /9 °C/);
   assert.equal(scoped.mock.callCount(), 1);
-  assert.equal(weather.getConditions.mock.callCount(), 4);
+  assert.equal(weather.getConditions.mock.callCount(), 5);
   assert.ok(
     !fetchStub.mock.calls.some(({ arguments: [url] }) =>
       String(url).startsWith('/api/weather-effects'),

@@ -4,14 +4,22 @@ import { readResponseJsonCapped } from '../sources/httpBody.js';
 
 const LAYER_COUNTS_MAX_BYTES = 16 * 1024;
 
+function requireOk(response, label) {
+  if (!response.ok)
+    throw new Error(`${label} unavailable (${response.status})`);
+  return response.data;
+}
+
 /** Parse bounded retry information from a service response. */
-function retryAfterMs(value) {
+function retryAfterMs(value, now = Date.now()) {
   if (value == null || String(value).trim() === '') return null;
   const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0)
-    return Math.ceil(seconds * 1000);
+  if (Number.isFinite(seconds)) {
+    const ms = Math.ceil(seconds * 1000);
+    return seconds >= 0 && Number.isFinite(ms) ? ms : null;
+  }
   const at = Date.parse(String(value));
-  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
 }
 
 /** Construct independent request services for compatible application protocols. */
@@ -70,11 +78,6 @@ export function createApplicationRequestServices({
     )
       throw new TypeError('Valid coordinates are required');
     return `${endpoint}?${new URLSearchParams({ latitude: latitude.toFixed(5), longitude: longitude.toFixed(5) })}`;
-  }
-  function requireOk(response, label) {
-    if (!response.ok)
-      throw new Error(`${label} unavailable (${response.status})`);
-    return response.data;
   }
   // Remember valid capability decisions for the page, so an
   // unconfigured server is never asked (and never answers with an error).
@@ -210,6 +213,16 @@ export function createApplicationRequestServices({
           headers: { Accept: 'application/json' },
           maxJsonBytes: LAYER_COUNTS_MAX_BYTES,
         });
+        if (response.status === 429) {
+          const serverNow = Date.parse(response.headers?.get?.('Date'));
+          const delay = retryAfterMs(
+            response.headers?.get?.('Retry-After'),
+            Number.isFinite(serverNow) ? serverNow : Date.now(),
+          );
+          const error = new Error('Layer counts unavailable (429)');
+          error.retryAfterMs = delay;
+          throw error;
+        }
         return requireOk(response, 'Layer counts');
       },
     },

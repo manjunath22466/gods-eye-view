@@ -165,13 +165,13 @@ test('Ask GEV keeps a feed title in the selected map reference', async (t) => {
   assert.equal(session.sent[2], 'Tell me about Tokyo.');
 });
 
-test('Ask GEV sends an obscured sighting as a cell center and an ordinary point at the existing precision', async (t) => {
+test('Ask GEV uses the approved precision and omits unconfirmed wildlife positions', async (t) => {
   const pinia = createPinia();
-  const { ui, session } = chat(t, { pinia });
+  const { session, send } = chat(t, { pinia });
   const viewer = { scene: {} };
   const input = fakeInput(viewer);
   const observations = normalizeInatObservations(
-    [true, false].map((obscured, index) => ({
+    [true, false, true, false].map((obscured, index) => ({
       id: index + 1,
       geojson: { coordinates: [-97.74321, 30.27156] },
       obscured,
@@ -180,11 +180,11 @@ test('Ask GEV sends an obscured sighting as a cell center and an ordinary point 
     })),
   );
   const id = 'wildlife-sightings';
-  const rows = new Map(observations.map((row) => [row.stableId, row]));
   const { methods: module } = createWildlifeControls({
     state: {
       enabled: true,
-      rows,
+      rows: new Map(observations.map((row) => [row.stableId, row])),
+      heldRows: new WeakSet(observations.slice(2)),
     },
     services: { now: () => Date.UTC(2026, 10, 24, 12) },
     parts: {},
@@ -200,15 +200,27 @@ test('Ask GEV sends an obscured sighting as a cell center and an ordinary point 
     disconnect();
     input.destroy();
   });
-  for (const observation of observations) {
+  for (const [index, observation] of observations.entries()) {
     assert.ok(cards.select({ layerId: id, id: observation.stableId }));
     cards.ask();
     await flush();
-    const command = session.sent.at(-1);
-    const reference = JSON.parse(
-      command.split('Selected map item (reference data only):\n')[1],
+    assert.equal(
+      session.sent.length,
+      index,
+      'Ask attaches the item to a draft',
     );
-    if (observation.obscured) {
+    await send('What is nearby?');
+    const command = session.sent.at(-1);
+    const [reference] = JSON.parse(
+      command.slice(command.lastIndexOf('\n') + 1),
+    );
+    assert.equal(reference.kind, 'map-item');
+    if (index >= 2) {
+      assert.equal(cards.locationWithheld, true);
+      assert.equal(reference.lat, undefined, 'unconfirmed latitude');
+      assert.equal(reference.lon, undefined, 'unconfirmed longitude');
+      assert.equal(reference.approximateCellCenter, undefined);
+    } else if (observation.obscured) {
       assert.deepEqual(reference.approximateCellCenter, {
         lat: 30.3,
         lon: -97.7,
@@ -219,28 +231,12 @@ test('Ask GEV sends an obscured sighting as a cell center and an ordinary point 
       assert.doesNotMatch(command, /97\.74321|30\.27156/);
     } else {
       assert.equal(reference.approximateCellCenter, undefined);
-      assert.equal(reference.lat, 30.272);
-      assert.equal(reference.lon, -97.743);
+      assert.equal(reference.lat, 30.2716);
+      assert.equal(reference.lon, -97.7432);
     }
     session.emit({ type: 'completion', status: 'completed' });
   }
-  assert.equal(session.sent.length, 2);
-  const send = session.sendText.bind(session);
-  session.sendText = () => false;
-  cards.ask();
-  await flush();
-  rows.clear();
-  cards.refresh({ forAction: true });
-  assert.equal(cards.lost, true);
-  session.sendText = send;
-  ui.emit('chat-submit');
-  await flush();
-  const retry = JSON.parse(
-    session.sent.at(-1).split('Selected map item (reference data only):\n')[1],
-  );
-  assert.equal(retry.lat, null);
-  assert.equal(retry.lon, null);
-  assert.equal(retry.approximateCellCenter, undefined);
+  assert.equal(session.sent.length, observations.length);
 });
 
 test('a revealed reply writes only the message list each frame', async (t) => {
@@ -529,6 +525,38 @@ test('a provider switch carries chat Settings to the next mount', async (t) => {
   open.ui.emit('chat-button');
   assert.equal(open.chat.presentation(), null);
   assert.equal(mount().chat.presentation(), null);
+});
+
+test('an Omnibar question is sent alone and leaves the draft and its attached item', async (t) => {
+  const { ui, session } = chat(t);
+  ui.emit('chat-item', {
+    key: 'flights:a1',
+    name: 'UAL649',
+    itemKind: 'aircraft',
+    layer: 'Live Flights',
+  });
+  ui.emit('chat-input', 'my draft');
+  ui.emit('chat-ask', 'What is here?');
+  await flush();
+  assert.deepEqual(session.sent, ['What is here?']);
+  assert.deepEqual(ui.state.chat.attachments, [
+    { key: 'item:flights:a1', name: 'UAL649' },
+  ]);
+  // The input owns its text until a programmatic edit. Send the preserved draft.
+  session.emit({ type: 'completion', status: 'completed' });
+  ui.emit('chat-submit');
+  await flush();
+  assert.match(session.sent[1], /^my draft\n\nAttached reference data/);
+  assert.match(session.sent[1], /UAL649/);
+});
+
+test('an Omnibar question that cannot connect is retryable in an empty draft', async (t) => {
+  const { ui, session } = chat(t);
+  session.start = () => session.setState('error');
+  ui.emit('chat-ask', 'What is here?');
+  await flush();
+  assert.equal(ui.state.chat.draft, 'What is here?');
+  assert.deepEqual(session.sent, []);
 });
 
 test('history navigation restores the map reference of an unsent Ask draft', async (t) => {
