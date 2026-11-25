@@ -296,6 +296,11 @@ export function createNewsLayer({
   const local = () => filters.section === 'local';
   // Local takes the map over only while there is a "near here" to show.
   const localMode = () => local() && inView.active;
+  // The reports pinned on the map now: what the row counts.
+  const reportsOnMap = () =>
+    (localMode() ? localReports(NEWS_MAP_LIMIT) : mapReports).filter(
+      (r) => r.pins.length && onMap(r),
+    );
   const onMap = (report) =>
     visibleOnMap(
       report,
@@ -1418,6 +1423,44 @@ export function createNewsLayer({
     clickOff = null;
   }
 
+  /** The reports Prev and Next step through: those the News list shows. */
+  function newsStepList() {
+    const at = now();
+    return local()
+      ? localReports(NEWS_LOCAL_LIMIT)
+      : feed.items.filter((r) => passesFilters(r, filters, at, windowMs));
+  }
+  function stepReport(direction) {
+    const list = newsStepList();
+    if (!list.length) return;
+    const index = list.findIndex((r) => r.id === selectedId);
+    const next =
+      index < 0
+        ? direction > 0
+          ? 0
+          : list.length - 1
+        : (index + direction + list.length) % list.length;
+    layer.setParams({ reportId: list[next].id, focus: true });
+  }
+  function newsStepChips() {
+    return [
+      {
+        id: 'previous-report',
+        label: t('Previous report'),
+        icon: 'chevron_left',
+        action: true,
+        onClick: () => stepReport(-1),
+      },
+      {
+        id: 'next-report',
+        label: t('Next report'),
+        icon: 'chevron_right',
+        action: true,
+        onClick: () => stepReport(1),
+      },
+    ];
+  }
+
   function feedView() {
     const at = now();
     const report = selected();
@@ -1447,6 +1490,10 @@ export function createNewsLayer({
         color: level.color,
       })),
       items: listed.map((r) => feedCardView(r, at)),
+      // The reports pinned on the map now, as getStats().count gives them:
+      // the list's tab and Context's News tile both show this number, so
+      // they agree whatever page of the feed is loaded.
+      mapCount: reportsOnMap().length,
       inView: {
         active: inView.active,
         loading: inView.loading || inView.areaLoading,
@@ -1724,7 +1771,9 @@ export function createNewsLayer({
     },
     getRowControls() {
       return {
-        chips: [],
+        // ‹ Prev · Next › step through the reports the News list shows (the
+        // local ones while the view is local) and open each one's card.
+        chips: enabled && newsStepList().length ? newsStepChips() : [],
         legend: [],
         info: t(
           'Last 24 h of news. Each report links to its publisher; places and categories are read from the text and data automatically and can be wrong. Side labels, where shown, describe the source, not whether a report is true.',
@@ -1739,9 +1788,7 @@ export function createNewsLayer({
     },
     getStats() {
       return {
-        count: (localMode() ? localReports(NEWS_MAP_LIMIT) : mapReports).filter(
-          (r) => r.pins.length && onMap(r),
-        ).length,
+        count: reportsOnMap().length,
         lastUpdate,
         loading,
         error,

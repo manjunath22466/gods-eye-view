@@ -1,6 +1,7 @@
 /**
- * Recent Imagery readout for the right rail (`#recent-imagery-panel`). The
- * body is a fixed stack in which no block changes height and no control
+ * Recent Imagery readout for the right rail (`#recent-imagery-panel`). It
+ * also reports through `onPresence` while the layer is on, so Context shows
+ * the layer's list tab only then. The body is a fixed stack in which no block changes height and no control
  * moves, whatever the state: box actions, a notice line, the strip of day
  * cards and its hint line, the selection bar (mode, the two slot rows),
  * opacity, SWAP and export, then a collapsed DETAILS card for every note and
@@ -19,6 +20,7 @@ import {
 } from '../i18n/index.js';
 import { createImagerySplit, globeSplitTarget } from './imagerySplit.js';
 import RecentImageryReadout from './recentImagery/RecentImageryReadout.vue';
+import { setContextListPresence } from './contextLists.js';
 import {
   PRODUCTS,
   hhmm,
@@ -160,6 +162,13 @@ function cloudText(candidate) {
     : t('{min}–{max}% cloud', { min, max });
 }
 
+/** The tab's count: the days found in the box, none before a search ends. */
+function dayCount(snapshot) {
+  return snapshot.box && !snapshot.searching
+    ? snapshot.candidates.length
+    : null;
+}
+
 function countText(snapshot) {
   if (!snapshot.box) return t('NO BOX');
   if (snapshot.searching) return t('SEARCHING');
@@ -203,7 +212,7 @@ function revealCard(scroller, card) {
 
 /**
  * Mount the readout into the panel body.
- * @param {{ container: HTMLElement, layer: object, viewer?: object, tool?: object, createSplit?: Function, fetchImpl?: typeof fetch, createObjectUrl?: Function, revokeObjectUrl?: Function, requestRender?: Function }} deps
+ * @param {{ container: HTMLElement, layer: object, viewer?: object, tool?: object, createSplit?: Function, fetchImpl?: typeof fetch, createObjectUrl?: Function, revokeObjectUrl?: Function, requestRender?: Function, onPresence?: (state: ?{count: ?number}) => void }} deps
  * @returns {{ root: HTMLElement, exportImage: (slot?: 'a' | 'b') => Promise<boolean>, destroy: () => void } | null}
  */
 export function createRecentImageryPanel({
@@ -216,6 +225,7 @@ export function createRecentImageryPanel({
   createObjectUrl = (blob) => URL.createObjectURL(blob),
   revokeObjectUrl = (url) => URL.revokeObjectURL(url),
   requestRender = () => findFrame(viewer)?.requestRender('recent-imagery'),
+  onPresence = (state) => setContextListPresence('recent-imagery', state),
 } = {}) {
   const document = container?.ownerDocument;
   if (!document?.createElement || !layer) return null;
@@ -252,6 +262,7 @@ export function createRecentImageryPanel({
         view: buildView(),
         modes: MODE_LABELS,
         onOpenDetails,
+        onDrawArea,
         onSetMode: (mode) => layer.setMode(mode),
       }),
       container,
@@ -278,6 +289,13 @@ export function createRecentImageryPanel({
   }
 
   // ---- box actions ------------------------------------------------------
+  /** The strip's draw action: start the box tool, as SELECT BOX does. */
+  function onDrawArea() {
+    if (destroyed || !tool || tool.isActive()) return;
+    exportError = null;
+    tool.start();
+  }
+
   function actionsView() {
     return [
       {
@@ -410,12 +428,20 @@ export function createRecentImageryPanel({
     // A day that leaves the strip loses its image with its card.
     const keys = new Set(candidates.map((candidate) => candidate.key));
     for (const key of imaged) if (!keys.has(key)) imaged.delete(key);
+    // With no box the strip offers the box tool itself; while it draws, the
+    // strip says how.
+    const draw = !candidates.length && !snapshot.box && !snapshot.toolActive;
     return {
       cards: candidates.map(cardView),
+      draw: draw
+        ? { label: t('Draw an area to see recent passes ›'), disabled: !tool }
+        : null,
       empty: candidates.length
         ? ''
         : !snapshot.box
-          ? t('No box')
+          ? draw
+            ? ''
+            : t('Drag a box on the map (Esc cancels)')
           : snapshot.searching
             ? t('Searching')
             : snapshot.hiddenCount
@@ -689,6 +715,14 @@ export function createRecentImageryPanel({
       },
       exports: exportsView(),
       details: detailsView(),
+      // A preview or the box tool to undo: Esc is the readout's, not
+      // Context's (which would clear its pick with the same key press).
+      ownsEscape: Boolean(
+        snapshot.preview.key ||
+        snapshot.preview.pending ||
+        snapshot.toolActive ||
+        tool?.isActive(),
+      ),
     };
   }
 
@@ -765,12 +799,25 @@ export function createRecentImageryPanel({
       panel.querySelector?.(`[data-collapse-target="${PANEL_ID}"]`)?.click();
   }
 
+  // Context's list tab: with no box there is nothing to count, and the tab
+  // says why.
+  function renderPresence() {
+    onPresence(
+      !snapshot.enabled
+        ? null
+        : snapshot.box
+          ? { count: dayCount(snapshot) }
+          : { count: null, reason: t('no area') },
+    );
+  }
+
   function render() {
     if (destroyed) return;
     // The strip a full render showed: thumbnails for it take the short path.
     stripKeys = snapshot.candidates.map((candidate) => candidate.key).join('|');
     preserveScroll(() => {
       renderPanel();
+      renderPresence();
       paint();
       renderSplit();
       reportVisibleRange();
@@ -887,10 +934,14 @@ export function createRecentImageryPanel({
   });
 
   listen(strip, 'keydown', (event) => {
+    // Keys on the strip's draw action are the button's own.
+    if (event.target !== strip) return;
     const total = snapshot.candidates.length;
     const index = snapshot.focusIndex || 0;
     const focus = snapshot.candidates[index];
     if (event.key === 'Escape') {
+      // An outer handler (Context, on the way down) took this Esc already.
+      if (event.defaultPrevented) return;
       event.preventDefault();
       escape();
       return;
@@ -923,7 +974,11 @@ export function createRecentImageryPanel({
   });
 
   listen(root, 'keydown', (event) => {
-    if (event.key === 'Escape' && event.target !== strip) {
+    if (
+      event.key === 'Escape' &&
+      event.target !== strip &&
+      !event.defaultPrevented
+    ) {
       if (
         snapshot.preview.key ||
         snapshot.preview.pending ||
@@ -983,6 +1038,7 @@ export function createRecentImageryPanel({
       renderVue(null, container);
       if (count) count.textContent = '';
       if (panel) panel.hidden = true;
+      onPresence(null);
     },
   };
 }

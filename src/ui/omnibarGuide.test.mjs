@@ -3,7 +3,8 @@ import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp, h, onMounted } from 'vue';
-import { startGuide } from './omnibarGuide.js';
+import { layerSettingsGuide, startGuide } from './omnibarGuide.js';
+import { CAMERA_SETTINGS_EVENT } from './contextEvents.js';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const $ = (selector) => document.querySelector(selector);
@@ -191,4 +192,30 @@ test('Esc is left to an open dialog that owns it; the next Esc ends the walk', a
   esc();
   await settle();
   assert.equal($('.gev-guide'), null);
+});
+
+test("the cameras' walk ends on Context's Camera settings tab, while a camera card is open", () => {
+  document.body.replaceChildren();
+  const shown = [];
+  const onShow = () => shown.push('camera-settings');
+  document.addEventListener(CAMERA_SETTINGS_EVENT, onShow);
+  const step = () =>
+    layerSettingsGuide({ id: 'cctv', shown: 'Cameras' }).find((each) =>
+      /Camera settings/.test(each.text?.() || ''),
+    );
+  assert.ok(step(), 'a Camera settings step');
+  assert.equal(step().skip(), true, 'skipped with no camera card open');
+  const tab = document.body.appendChild(document.createElement('button'));
+  tab.id = 'context-tab-camera';
+  assert.equal(step().skip(), false);
+  assert.deepEqual(step().targets(), [tab]);
+  step().prepare();
+  assert.deepEqual(shown, ['camera-settings'], 'it shows the tab');
+  document.removeEventListener(CAMERA_SETTINGS_EVENT, onShow);
+  assert.equal(
+    layerSettingsGuide({ id: 'flights', shown: 'Live Flights' }).some((each) =>
+      /Camera settings/.test(each.text?.() || ''),
+    ),
+    false,
+  );
 });

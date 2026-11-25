@@ -1,5 +1,6 @@
 import { h, render as renderVue } from 'vue';
 import NewsFeed from './news/NewsFeed.vue';
+import { setContextListPresence } from './contextLists.js';
 
 const LAYER_ID = 'news';
 const LOAD_MORE_MARGIN_PX = 160;
@@ -12,11 +13,17 @@ const set = (node, key, value) => {
 /**
  * The News rail panel (`#news-panel`): it renders the `feed` view the news
  * layer publishes through its row controls, shows itself only while the
- * layer is on, and acts only through setLayerParams. Near the bottom of its
- * scroller it asks for the next older page, once per page; other filters or a
- * failed read let it ask again.
+ * layer is on, reports through `onPresence` while the layer is on (so
+ * Context shows the list's tab and its count only then), and acts only
+ * through setLayerParams. Near the bottom of its scroller it asks for the
+ * next older page, once per page; other filters or a failed read let it ask
+ * again.
  */
-export function createNewsPanel({ container, setLayerParams = () => {} } = {}) {
+export function createNewsPanel({
+  container,
+  setLayerParams = () => {},
+  onPresence = (state) => setContextListPresence(LAYER_ID, state),
+} = {}) {
   const document = container?.ownerDocument;
   if (!document?.createElement) return null;
   const panel = container.closest?.('#news-panel');
@@ -48,6 +55,11 @@ export function createNewsPanel({ container, setLayerParams = () => {} } = {}) {
       )
         panel.querySelector('[data-collapse-target="news-panel"]')?.click();
     }
+    // Context's list tab counts the reports the map shows (the layer's
+    // `mapCount`, which is its getStats().count), so the tab and Context's
+    // News tile agree. The feed's loaded pages would not: it holds as many
+    // as were scrolled.
+    onPresence(view ? { count: view.mapCount ?? null } : null);
   }
 
   const onScroll = () => {
@@ -84,6 +96,7 @@ export function createNewsPanel({ container, setLayerParams = () => {} } = {}) {
       renderVue(null, container);
       if (panel) set(panel, 'hidden', true);
       if (count) set(count, 'textContent', '0');
+      onPresence(null);
     },
   };
 }

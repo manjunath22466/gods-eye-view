@@ -186,6 +186,17 @@
   letter-spacing: 1px;
   text-transform: uppercase;
 }
+.recent-imagery-readout .ri-draw-area {
+  flex: 0 1 auto;
+  align-self: center;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 22px;
+  padding: 4px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .recent-imagery-readout .ri-card {
   position: relative;
   flex: 0 0 94px;

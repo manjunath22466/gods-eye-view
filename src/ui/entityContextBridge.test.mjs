@@ -20,6 +20,7 @@ import { useCockpitStore } from './stores/cockpit.js';
 import { useEntityCardStore } from './stores/entityCard.js';
 import { useLayerCountsStore } from './stores/layerCounts.js';
 import { useOmnibarStore } from './stores/omnibar.js';
+import { useDockedStore } from './stores/docked.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
 import { useSceneStore } from './stores/scenes.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
@@ -678,7 +679,7 @@ test('card Fly to uses the item selection owner and camera ownership policy', (t
       ['rail', 'item-B'],
       ['transit', 'item-B'],
     ],
-    'a Nearby card selects its own item before a ride is offered',
+    'a Nearby/pinned card selects its own item before a ride is offered',
   );
   assert.equal(flown.length, 2, 'rail already focuses through its layer');
   manager.layers.get('rail').module.focusTrain = () => false;
@@ -689,8 +690,19 @@ test('card Fly to uses the item selection owner and camera ownership policy', (t
     3,
     'a missing train still flies to its saved position',
   );
-  assert.equal(store.open({ layerId: 'ais-live-vessels', id: 'item-B' }), true);
+  assert.equal(
+    store.open(
+      { layerId: 'ais-live-vessels', id: 'item-B' },
+      { fromPin: true },
+    ),
+    true,
+  );
   assert.equal(store.card.identity.id, 'item-B');
+  assert.equal(
+    store.fromPin,
+    true,
+    'the layer announcement preserves the pin ownership',
+  );
   selected.length = 0;
   flown.length = 0;
   store.card = card('cctv', 'camera-B');
@@ -1191,6 +1203,95 @@ test('Fly to on a train the rail layer focuses also supersedes an airport pick s
   assert.equal(cards.following, key);
   cards.clear();
   assert.equal(followed, null, 'closing the card releases its train');
+});
+
+test('a pick refused while the dock restores its photo is not reported as taken', (t) => {
+  const viewer = { scene: { pick: () => null, drillPick: () => [] } };
+  const input = fakeInput(viewer);
+  const pinia = createPinia();
+  let restoring = true;
+  const opened = [];
+  const streetLevel = {
+    getAnalystRecords: () => [
+      { id: 'mapillary:A', name: 'A', lat: 47, lon: 2 },
+      { id: 'mapillary:B', name: 'B', lat: 48, lon: 2 },
+    ],
+    hasDockedPhoto: () => true,
+    dockedPhotoRestoring: () => restoring,
+    openPhoto: (id) => {
+      opened.push(id);
+      return new Promise(() => {});
+    },
+  };
+  const disconnect = installEntityContext({
+    viewer,
+    getDataManager: () => ({
+      isEnabled: () => true,
+      layers: new Map([['street-level', { module: streetLevel }]]),
+      getAll: () => [],
+    }),
+    pinia,
+  });
+  t.after(() => {
+    disconnect();
+    input.destroy();
+  });
+  const original = { layerId: 'street-level', id: 'mapillary:A' };
+  const dock = useDockedStore(pinia);
+  dock.dock({
+    key: 'street-level:mapillary:A',
+    kind: 'street',
+    title: 'A',
+    identity: original,
+  });
+  const store = useEntityCardStore(pinia);
+  assert.equal(store.select(original, { reveal: false }), true);
+  const selected = store.card;
+  const generation = store.selectionGeneration();
+  const reveals = [];
+  const dispatchEvent = globalThis.dispatchEvent;
+  globalThis.dispatchEvent = (event) => {
+    if (event.type === 'gev:context-show-view')
+      reveals.push(event.detail?.inspect);
+    return dispatchEvent?.(event);
+  };
+  t.after(() => {
+    if (dispatchEvent) globalThis.dispatchEvent = dispatchEvent;
+    else delete globalThis.dispatchEvent;
+  });
+  const photo = { id: original.id, lat: 47, lon: 2, requestId: 1 };
+  document.dispatchEvent(
+    new CustomEvent(STREET_LEVEL_PHOTO_REQUEST_EVENT, {
+      detail: { requestId: photo.requestId },
+    }),
+  );
+  document.dispatchEvent(
+    new CustomEvent(STREET_LEVEL_PHOTO_EVENT, { detail: photo }),
+  );
+  assert.deepEqual(reveals, [], 'passive confirmation leaves the tab alone');
+  document.dispatchEvent(
+    new CustomEvent(STREET_LEVEL_PHOTO_EVENT, {
+      detail: { ...photo, revealFromOpen: true },
+    }),
+  );
+  assert.deepEqual(
+    reveals,
+    [true],
+    'explicit OPEN reveals the same docked photo',
+  );
+  assert.equal(store.selectionGeneration(), generation);
+
+  const pick = { layerId: 'street-level', id: 'mapillary:B' };
+  assert.equal(store.open(pick, { follow: false }), false);
+  assert.deepEqual(opened, [], 'the dock is not asked while it restores');
+  assert.equal(dock.view?.key, selected.key);
+  assert.equal(store.card, selected, 'the original card stays selected');
+  assert.equal(store.selectionGeneration(), generation);
+
+  restoring = false;
+  assert.equal(store.open(pick), true);
+  assert.deepEqual(opened, ['mapillary:B']);
+  assert.equal(store.card, selected, 'the original card stays until commit');
 });
 
 // The map's Esc clears the pick only for an Esc nobody else took: not one

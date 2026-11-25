@@ -85,7 +85,10 @@ test('in a hero with a preview switch the credit sits above the switch’s row, 
   assert.match(hero, /inset-inline:\s*\d+px/);
 });
 
-test('the phone, whose hero hides the switch, puts the credit at the foot', () => {
+test('the dock credits the cockpit view under its picture; the phone, whose hero hides the switch, at the foot', () => {
+  const [, dock] =
+    rules(css, '.docked-view__cockpit .flight-cockpit__credit')[0] || [];
+  assert.match(dock || '', /display:\s*none/);
   const [, small] =
     rules(phone, '.entity-hero .flight-cockpit__credit')[0] || [];
   assert.ok(small, 'the phone rule');

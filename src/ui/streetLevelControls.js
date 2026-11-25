@@ -53,6 +53,8 @@ export class StreetLevelControls {
       withdrawPhoto: () => this.layer.withdrawPhoto?.(),
       /** Open a remembered photo again (its card was picked from a list). */
       openPhoto: (id) => this.layer.openPhoto?.(id, { frame: false }),
+      stopPlayback: () => this.layer.stopPlayback?.(),
+      cancelDockedPhoto: () => this.layer.cancelDockedPhoto?.(),
     });
     this.destroyed = false;
     this.listeners = new AbortController();
@@ -455,6 +457,11 @@ export class StreetLevelControls {
     this._unsubscribe?.();
     this._unsubscribe = null;
     if (this.destroyed) return;
+    if (this.actions.dockedPhoto)
+      this.layer.attachDockedPhoto?.(
+        this.actions.dockedPhoto,
+        this.actions.dockedPhotoCanPresent,
+      );
     this._unsubscribe = this.layer.subscribe?.((state) => this.render(state));
     if (this.layer.getUIState) this.render(this.layer.getUIState());
   }
@@ -529,6 +536,7 @@ export class StreetLevelControls {
     this._resizeObserver = null;
     this._unsubscribe?.();
     this._unsubscribe = null;
+    if (this.actions.dockedPhoto) this.layer.attachDockedPhoto?.(null);
     this.layer.presentRowControls?.(null);
     if (this._elements.viewer) this.layer.attachViewerHost?.(null);
     this.store.detach(this._storeToken);

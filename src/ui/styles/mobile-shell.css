@@ -95,7 +95,8 @@ body.mobile-shell[data-mobile-sheet] #mobile-sheet-backdrop:not([hidden]) {
 
 /* ── Top bar: logo at the start, globe actions at the end ──────────────── */
 body.mobile-shell #title-bar {
-  top: calc(var(--mobile-top-inset) + 10px);
+  /* Leave room above the logo for the outer Radio broadcast wave. */
+  top: calc(var(--mobile-top-inset) + 16px);
   inset-inline-start: 14px;
 }
 
@@ -109,7 +110,7 @@ body.mobile-shell #title-bar .subtitle {
 }
 
 body.mobile-shell #top-center-actions {
-  top: calc(var(--mobile-top-inset) + 10px);
+  top: calc(var(--mobile-top-inset) + 16px);
   inset-inline-start: auto;
   inset-inline-end: 12px;
 }

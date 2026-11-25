@@ -37,21 +37,23 @@ const heroViews = [
 test('the entity card hand-writes no button; each is a UiButton', () => {
   for (const markup of [card, preview, camera, nearby, ...places, ...heroViews])
     assert.deepEqual(markup.match(/<button\b/gi) ?? [], []);
-  // Find it, the cockpit entry, Follow, Fly to and Ask GEV. The preview
-  // switch moved to the hero preview's own view.
-  assert.equal(card.match(/<UiButton\b/g)?.length, 5);
+  // Find it, the cockpit entry, Follow, Fly to, Pin, Dock and Ask GEV. The
+  // preview switch moved to the hero preview's own view, and the card gained
+  // Pin and Dock, on purpose.
+  assert.equal(card.match(/<UiButton\b/g)?.length, 7);
   assert.equal(card.match(/<UiCloseButton\b/g)?.length, 1);
-  // Photos, Route, 3D, Cockpit view, Map, Play/Pause, a satellite's
-  // Play/Pause, a place's Street View photo and TR-3B.
-  assert.equal(preview.match(/<UiButton\b/g)?.length, 9);
-  // A camera's bigger view and More info; its popup closes with a
-  // UiCloseButton.
-  assert.equal(camera.match(/<UiButton\b/g)?.length, 2);
+  // Show here (while docked), Photos, Route, 3D, Cockpit view, Map,
+  // Play/Pause, a satellite's Play/Pause, a place's Street View photo, TR-3B
+  // and Dock.
+  assert.equal(preview.match(/<UiButton\b/g)?.length, 11);
+  // A camera's bigger view; its popup closes with a UiCloseButton. More info
+  // gave way to the card's Camera settings tab.
+  assert.equal(camera.match(/<UiButton\b/g)?.length, 1);
   assert.equal(camera.match(/<UiCloseButton\b/g)?.length, 1);
   // The hazard row and the alert row; the traffic and other nearby rows are
   // the shared nearby lists now (a row).
   assert.equal(nearby.match(/<UiButton\b/g)?.length, 2);
-  assert.equal(places[2].match(/<UiButton\b/g)?.length, 1);
+  assert.equal(places[2].match(/<UiButton\b/g)?.length, 2);
 });
 
 test('the preview switch and Follow are pressed toggles with their classes', () => {
@@ -81,13 +83,13 @@ test('the entity card hand-writes no Material glyph; each is a UiIcon', () => {
     assert.deepEqual(markup.match(/material-symbols-outlined/g) ?? [], []);
   const counts = [
     // The hero glyph, Find it, the warning, the cockpit entry, Follow, Fly
-    // to, the route's plane and the route note.
-    [card, 8],
-    // The preview switch's four glyphs, Play/Pause and a satellite's
-    // Play/Pause.
-    [preview, 6],
-    // Bigger view, the popup's camera and More info.
-    [camera, 3],
+    // to, Pin, Dock, the route's plane and the route note.
+    [card, 10],
+    // Show here, the preview switch's four glyphs, Play/Pause, a
+    // satellite's Play/Pause and Dock.
+    [preview, 8],
+    // Bigger view and the popup's camera.
+    [camera, 2],
     // The Conditions here, hazard and alert headings and their rows; there
     // are no weather glyphs, and the other headings and rows are in the
     // shared nearby lists.

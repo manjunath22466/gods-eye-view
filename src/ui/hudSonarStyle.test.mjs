@@ -598,7 +598,7 @@ test('the desktop bottom row: credits on the Power Up baseline, the dock lifted,
     /html\[dir='rtl'\] \*\):not\(\.context-docked\)\s*#intel-hud\[data-variant='tactical'\]\s*\.hud-bottom-right \{\s*bottom: max\(3\.375rem, var\(--omnibar-credits-clear\)\);/,
   );
   const locale = read('./styles/locale-picker.css');
-  assert.match(locale, /#corner-actions \{[^}]*inset-inline-end: 0\.9rem;/);
+  assert.match(locale, /#corner-actions \{[^}]*inset-inline-end: 1\.5rem;/);
 
   // From 1200px the readout keeps 8px above Power Up and the coordinates
   // start level with it. The World Timeline sits between the corners, so they

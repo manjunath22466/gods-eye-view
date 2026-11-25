@@ -1,18 +1,19 @@
 <script setup>
-import { computed, inject, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, reactive, ref, watch } from 'vue';
 import { STREET_LEVEL_LAYER } from '../../streetLevelEvents.js';
-import { computed, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onBeforeUpdate, onMounted, onUpdated, reactive, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { t } from '../../../i18n/index.js';
 import { sayWords, useEntityCardStore } from '../../stores/entityCard.js';
 import { useDisplayStore } from '../../stores/display.js';
 import { useCockpitStore } from '../../stores/cockpit.js';
+import { useDockedStore } from '../../stores/docked.js';
 import AircraftModelHero from './AircraftModelHero.vue';
 import CctvPreview from './CctvPreview.vue';
 import { onTileMap } from '../../mapTiles.js';
 import StreetViewHero from './StreetViewHero.vue';
 import CloseUpMap from './CloseUpMap.vue';
 import FlightCockpitView from './FlightCockpitView.vue';
+import FeedDot from './FeedDot.vue';
 import UiButton from '../../kit/UiButton.vue';
 import UiIcon from '../../kit/UiIcon.vue';
 import RouteGlobe from './RouteGlobe.vue';
@@ -66,8 +67,11 @@ const modelFailed = ref(false);
 const cockpitFailed = ref(false);
 const hasPosition = computed(() => !props.positionWithheld && !card.value?.obscured && Number.isFinite(card.value?.lat) && Number.isFinite(card.value?.lon));
 const mapPosition = computed(() => hasPosition.value && onTileMap(card.value.lat));
+
+// A docked cockpit view is not shown on its card a second time.
+const docked = useDockedStore();
 const cockpitKnown = computed(
-  () => card.value?.kind === 'aircraft' && hasPosition.value && !cockpitFailed.value,
+  () => card.value?.kind === 'aircraft' && hasPosition.value && !cockpitFailed.value && !docked.isDocked(`cockpit:${card.value.key}`),
 );
 // A model shows for any item drawn with a fleet model (card.modelSubject)
 // whose bytes the set holds, or while the set is still loading; it is read
@@ -243,6 +247,39 @@ const tr3b = computed(() =>
 );
 const toggleTr3b = () => cockpitStore.act('toggleTr3b');
 
+// Dock: a flight's cockpit view can stay on screen bottom right
+// while other things are inspected, from the small ⧉ on its image (its
+// button row is full). A camera docks from its card's Dock button instead.
+// Docking never pins.
+const dockable = computed(() => {
+  const current = card.value;
+  if (!current?.identity?.id) return null;
+  // A flight's cockpit view: while it shows, and while it is docked, so the
+  // button that undocks it does not go with the views' turns.
+  const key = `cockpit:${current.key}`;
+  if (heroKind.value === 'flight' && (activeFlightPreview.value === 'cockpit' || docked.isDocked(key))) return { key, kind: 'cockpit' };
+  return null;
+});
+const isDocked = computed(() => Boolean(dockable.value && docked.isDocked(dockable.value.key)));
+// A docked camera or photo shows in the dock only: its card has a slim
+// Docked bar instead of the same feed again, and Show here undocks it.
+const dockedHere = computed(() => ['camera', 'street'].includes(heroKind.value) && docked.isDocked(card.value?.key));
+// The docked bar shows the dock's own state and wording (stores/docked.js):
+// never live over a stalled or failed stream. Until the dock has shown its
+// feed, it is loading.
+const dockFeed = computed(() => docked.feedOf(card.value?.key) || { dot: 'loading', text: '' });
+function toggleDock() {
+  const current = card.value;
+  const target = dockable.value;
+  if (!current || !target) return;
+  docked.toggle({
+    ...target,
+    title: props.title || current.title,
+    // Its layer and id only: the dock reads the live record, so an item the
+    // feed has dropped reads as out of feed, not as where it was docked.
+    identity: { layerId: current.layerId, id: current.identity.id },
+  });
+}
 // Each turn starts with the current image or renderer frame. A view that
 // never draws hands over after HERO_READY_WAIT_MS.
 const drawn = reactive(new Set());
@@ -308,6 +345,15 @@ onMounted(() => {
   globalThis.document?.addEventListener('visibilitychange', onVisibility);
   motionQuery?.addEventListener?.('change', onMotionChange);
 });
+// Show here takes the Docked bar (and its button) away: focus goes to the
+// view that replaces it, so it does not fall back to the page.
+async function showHere() {
+  docked.close();
+  await nextTick();
+  const hero = heroElement.value;
+  const control = hero?.querySelector('button:not([disabled]), a[href]');
+  (control || hero)?.focus?.();
+}
 
 watch(activeFlightPreview, (view) => view && made.add(view), { immediate: true });
 watch(
@@ -360,7 +406,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="heroKind !== 'none' || $slots.placeholder" ref="heroElement" class="entity-hero" :data-hero="heroKind" tabindex="-1" @focusin="onFocusIn" @focusout="onFocusOut">
+  <div v-if="dockedHere" class="entity-hero entity-hero--docked" data-hero="docked">
+    <FeedDot :state="dockFeed.dot" :label="dockFeed.text" />
+    <span>{{ dockFeed.dot === 'live' ? t('Docked · bottom right') : dockFeed.text || t('Docked · bottom right') }}</span>
+    <UiButton class="entity-hero__docked-show" :title="t('Show it here instead of docked')" @click="showHere">
+      <UiIcon name="open_in_full" :size="null" />{{ t('Show here') }}
+    </UiButton>
+  </div>
+  <div v-else-if="heroKind !== 'none' || $slots.placeholder" ref="heroElement" class="entity-hero" :data-hero="heroKind" tabindex="-1" @focusin="onFocusIn" @focusout="onFocusOut">
     <template v-if="heroKind === 'flight' || heroKind === 'model'">
       <a
         v-if="photoAvailable && made.has('photo')"
@@ -407,8 +460,11 @@ onBeforeUnmount(() => {
     <CloseUpMap v-else-if="heroKind === 'map'" :key="`map-${card.key}`" class="entity-hero__layer is-shown" :active="onScreen && pageShown" :lat="card.lat" :lon="card.lon" :icon="card.icon" :card="card" />
     <slot v-else name="placeholder" />
     <!-- Small icons in the top corner of the image, never in the button row. -->
-    <div v-if="tr3b" class="entity-hero__corner">
-      <UiButton class="entity-hero__corner-button entity-hero__ufo" :pressed="!!tr3b.converted" pressed-class="is-on" :label="t('Reclassify the followed aircraft as TR-3B')" :title="tr3b.converted ? t('Restore real aircraft') : t('Reclassify as TR-3B')" @click="toggleTr3b">🛸</UiButton>
+    <div v-if="tr3b || dockable" class="entity-hero__corner">
+      <UiButton v-if="tr3b" class="entity-hero__corner-button entity-hero__ufo" :pressed="!!tr3b.converted" pressed-class="is-on" :label="t('Reclassify the followed aircraft as TR-3B')" :title="tr3b.converted ? t('Restore real aircraft') : t('Reclassify as TR-3B')" @click="toggleTr3b">🛸</UiButton>
+      <UiButton v-if="dockable" class="entity-hero__corner-button entity-hero__dock" :pressed="isDocked" pressed-class="is-on" :label="t('Dock this view bottom right')" @click="toggleDock">
+        <UiIcon name="picture_in_picture_alt" :size="null" />
+      </UiButton>
     </div>
   </div>
   <slot />

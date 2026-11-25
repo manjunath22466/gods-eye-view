@@ -129,7 +129,6 @@
     "Los Angeles",
     "MIL",
     "MINI",
-    "MISSION",
     "MM",
     "MONITOR",
     "Metal",
@@ -149,7 +148,6 @@
     "Normal",
     "OK",
     "ORBIT",
-    "ORBIT · ",
     "Oldies",
     "OpenStreetMap + optional Google Maps Places",
     "Operator",
@@ -189,7 +187,6 @@
     "START",
     "STATION",
     "STATUS",
-    "STATUS · ",
     "STD",
     "SW",
     "SYNC",
@@ -310,7 +307,8 @@
     "FL{n}",
     "Position",
     "Codes",
-    "Feed"
+    "Feed",
+    "{value} km²"
   ],
   "es": [
     "1 min/s",
@@ -512,7 +510,8 @@
     "FL{n}",
     "< 2%",
     "2–10%",
-    "> 10%"
+    "> 10%",
+    "{value} km²"
   ],
   "fr": [
     "1 min/s",
@@ -540,7 +539,6 @@
     "Bus",
     "CAL {value}",
     "CAL · {badge}",
-    "CALIBRATION",
     "CARGO",
     "CAUSE",
     "CC BY 4.0",
@@ -598,7 +596,6 @@
     "MIC",
     "MIL",
     "MINI",
-    "MISSION",
     "MM",
     "Monorail",
     "MSG/S",
@@ -778,7 +775,11 @@
     "FL{n}",
     "Position",
     "Codes",
-    "{n} stations"
+    "{n} stations",
+    "Volume, {percent}",
+    "Image",
+    "Projection",
+    "{value} km²"
   ],
   "it": [
     "1 min/s",
@@ -884,7 +885,6 @@
     "RADIO",
     "REC",
     "RESET",
-    "RESET CAL",
     "Radio",
     "Reggae",
     "Rock",
@@ -1019,7 +1019,9 @@
     "2–10%",
     "< 2%",
     "> 10%",
-    "{n} areas"
+    "{n} areas",
+    "Volume, {percent}",
+    "{value} km²"
   ],
   "ja": [
     "1090 MHz",
@@ -1108,7 +1110,8 @@
     "FL{n}",
     "< 2%",
     "2–10%",
-    "> 10%"
+    "> 10%",
+    "{value} km²"
   ],
   "pt": [
     "1 min/s",
@@ -1212,7 +1215,6 @@
     "STARLINK ···",
     "STARLINK ✕",
     "STATUS",
-    "STATUS · ",
     "Sahel",
     "Sentinel-2",
     "Sentinel-2 via HLS",
@@ -1311,7 +1313,9 @@
     "Feed",
     "< 2%",
     "2–10%",
-    "> 10%"
+    "> 10%",
+    "Volume, {percent}",
+    "{value} km²"
   ],
   "ru": [
     "1900–1945",
@@ -1384,7 +1388,6 @@
     "▲ {frp} MW",
     "{value} KM",
     "{value} KM/S",
-    "STATUS · ",
     "DESTINATION",
     "STATUS",
     "T minus {seconds}",
@@ -1560,7 +1563,8 @@
     "UTC",
     "FL{n}",
     "Position",
-    "{n} stations"
+    "{n} stations",
+    "{value} km²"
   ],
   "uk": [
     "1900–1945",

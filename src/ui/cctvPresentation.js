@@ -8,6 +8,7 @@ import {
 import { createCctvVideoSurface } from './cctvVideo.js';
 import { CCTV_SELECTED_EVENT } from './cctvEvents.js';
 import { presentCctvCalibration } from './cctvCalibration.js';
+import { CAL_STATUS_WORDS } from '../data/cctvCalibrationWords.js';
 import { roundHeadingDegrees } from '../data/headingDegrees.js';
 import {
   MOBILE_SHELL_CLASS,
@@ -71,8 +72,8 @@ export function presentCctvPanel(state, enabled) {
   const badge = activeCamera?.calBadge || null;
   const dirty = !!activeCamera?.calDirty;
   return {
-    enabled,
     activeCameraId: activeId,
+    enabled,
     hasLiveSnapshot: Boolean(activeCamera?.liveSnapshotUrl),
     activeCredit: (enabled && activeCamera?.credit) || '',
     activeHeadingEstimated: Boolean(activeCamera?.headingEstimated),
@@ -80,9 +81,20 @@ export function presentCctvPanel(state, enabled) {
       enabled && Boolean(activeCamera?.sourceKind?.startsWith('quebec-')),
     navDisabled: !enabled || catalogCount === 0,
     focusDisabled: !enabled || catalogCount === 0 || !activeId,
+    // Who publishes the active camera, and the owner a partner-supplied feed
+    // names: the camera card shows both.
+    source: activeCamera
+      ? {
+          provider: cctvSourceLabelText(
+            activeCamera.sourceLabel || activeCamera.provider || '',
+          ),
+          credit: String(activeCamera.credit || ''),
+        }
+      : null,
     toggleDisabled: !enabled,
     coverage: {
       active: coverage !== 'off',
+      mode: coverage,
       text:
         coverage === 'viewshed'
           ? t('VIEWSHED ON')
@@ -93,6 +105,8 @@ export function presentCctvPanel(state, enabled) {
     autoHop: {
       active: autoHop,
       text: autoHop ? t('AUTO HOP ON') : t('AUTO HOP OFF'),
+      // Seconds on each camera before the next.
+      sec: Number.isFinite(state?.autoHopSec) ? state.autoHopSec : null,
     },
     projection: {
       active: showProjection,
@@ -103,7 +117,14 @@ export function presentCctvPanel(state, enabled) {
         ? t('CAL · EDITED (UNSAVED)')
         : t('CAL · {badge}', { badge: _calBadgeLabel(badge) }),
       calBadge: dirty ? 'edited' : badge || '',
+      // The same, as a sentence for the camera tools.
+      status:
+        CAL_STATUS_WORDS[dirty ? 'edited' : badge] != null
+          ? t(CAL_STATUS_WORDS[dirty ? 'edited' : badge])
+          : '',
     },
+    // The scene summary as labelled lines (layers/cctv/presentation.js).
+    summaryLines: Array.isArray(state?.summaryLines) ? state.summaryLines : [],
     meta: metaText(state, enabled, activeCamera, catalogCount),
     calibration: presentCctvCalibration(state, enabled),
   };
@@ -340,17 +361,44 @@ export function _renderCctvState(state) {
     enabled && (cardShown || popupShown) ? activeId : null,
   );
   if (this._cctvVideo) {
-    const visible = liveIntent && panelShown;
+    // A live video plays only while its canvas sits in a camera card's top
+    // image: the card moves it there from its hidden home. (The dock paints
+    // its own canvas from the same decoder.) On a phone the card shows only
+    // on Context's sheet, or in its bigger view over the map.
+    const visible =
+      liveIntent &&
+      (panelShown ||
+        (tabShown &&
+          Boolean(this._cctvVideo.closest?.('.cctv-preview')) &&
+          (!phone || sheet === CONTEXT_SHEET || popupShown)));
     if (!visible || this._cctvVideoCameraId !== activeId) {
       this._cctvVideoSurface?.stop();
       this._cctvVideoSurface = null;
+      this.store.setLiveState('');
     }
     this._cctvVideoCameraId = activeId;
     if (visible && !this._cctvVideoSurface) {
-      this._cctvVideoSurface = createCctvVideoSurface(this._cctvVideo, () =>
-        this.cctv.getActiveVideoElement?.(),
+      // The card says what it shows: no LIVE · OK over a canvas that has
+      // not drawn a frame yet, or one whose stream stopped.
+      const surface = createCctvVideoSurface(
+        this._cctvVideo,
+        () => this.cctv.getActiveVideoElement?.(),
+        {
+          onState: (next) => {
+            if (this.destroyed || this._cctvVideoSurface !== surface) return;
+            this.store.setLiveState(next);
+            this._syncCctvSourceBadge(
+              this._cctvState?.activeCamera,
+              !!this._cctvState?.enabled && !!this.actions.isEnabled(),
+            );
+          },
+        },
       );
+      this._cctvVideoSurface = surface;
+      this.store.setLiveState('waiting');
     }
+  } else {
+    this.store.setLiveState('');
   }
 
   if (this._cctvFrame) {

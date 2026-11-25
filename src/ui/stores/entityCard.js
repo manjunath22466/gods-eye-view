@@ -135,6 +135,9 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
       ((lost.value && card.value.layerId === 'wildlife-sightings') ||
         card.value.positionUnconfirmed === true),
   );
+
+  /** Whether the card was opened from the Pinned tab (it outlives its layer). */
+  const fromPin = ref(false);
   /** Bumped on each refresh, so ages shown on the card tick. */
   const tick = ref(0);
   /**
@@ -160,7 +163,8 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
   /**
    * What the camera shows, for the panel to describe when nothing is picked:
    * `{center: {lat, lon}, rect: {west, south, east, north}, heightM,
-   * eye: {lat, lon}, corners: [{lat, lon}] | null, groundM, groundFootprint}`.
+   * eye: {lat, lon}, corners: [{lat, lon}] | null, groundM, groundFootprint, pose}`.
+   * The pose also records camera orientation.
    */
   const view = shallowRef(null);
   /** Whether the last view came from a camera still moving (see setView). */
@@ -172,7 +176,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
   const viewWeather = shallowRef(null);
   /**
    * The card an airport was opened from, for the airport card's Back: `{key,
-   * identity, title, titleWords, fromNear, viaKey}`, where `key` is the airport card's
+   * identity, title, titleWords, fromNear, viaKey, fromPin}`, where `key` is the airport card's
    * own. One card only; it holds while that airport's card is the one shown.
    */
   const backTo = shallowRef(null);
@@ -215,6 +219,13 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     releaseContextRecord = release;
   }
 
+  /**
+   * The last layer a person turned on directly (Data Layers, voice, search),
+   * `{layerId, at}`: a list layer's tab shows only for that, never for a
+   * restore or a link.
+   */
+  const lastDirectOn = shallowRef(null);
+
   function onLayerChange(change) {
     if (
       change?.type === 'params' ||
@@ -230,6 +241,17 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     if (!change?.layerId || change.layerId === BASES_LAYER)
       baseCatalogRevision.value++;
     layerRevision.value++;
+    if (
+      change?.type === 'visibility' &&
+      change.enabled &&
+      (change.origin === 'user' || change.origin === 'voice')
+    )
+      lastDirectOn.value = { layerId: change.layerId, at: Date.now() };
+    else if (
+      change?.type === 'visibility' &&
+      lastDirectOn.value?.layerId === change.layerId
+    )
+      lastDirectOn.value = null;
   }
 
   function listen(manager) {
@@ -238,6 +260,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     const next = { manager };
     subscription = next;
     previous.off?.();
+    lastDirectOn.value = null;
     const selected = card.value;
     replaceContextRecordRelease(
       selected &&
@@ -293,6 +316,15 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     identity?.layerId === PLACE_LAYER
       ? describePlace(identity)
       : describeEntity(dataManager(), identity);
+
+  /** A fresh description of an item, without making it the card (the dock). */
+  function describe(identity) {
+    try {
+      return describeAny(identity) || null;
+    } catch {
+      return null;
+    }
+  }
 
   function read(identity) {
     const next = describeAny(identity);
@@ -668,6 +700,19 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     }
   }
 
+  /** A camera's latest still, for its pinned tile (see frameUrlForCamera). */
+  function cameraFrame(cameraId) {
+    try {
+      return (
+        dataManager()
+          ?.layers?.get?.('cctv')
+          ?.module?.frameUrlForCamera?.(cameraId) ?? null
+      );
+    } catch {
+      return null;
+    }
+  }
+
   /** A camera's heading, refresh and feed, from its layer (or null). */
   function cameraDetails(cameraId) {
     try {
@@ -790,12 +835,15 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
   function refresh({ forAction = false } = {}) {
     const current = card.value;
     if (!current) return;
-    // A card does not outlive its layer: turning the layer off (or clearing
-    // all layers) closes it and lets go of the camera. Its layer is not
-    // turned back on; layers turn on and off in Data Layers only.
+    // Ordinary selections end when their layer is switched off. A pin or
+    // an explicitly reopened saved location keeps its last reading.
     if (layerOff(current.layerId)) {
-      // Explicitly reopening a saved location leaves the layer off.
-      if (!openedWhileOff) return clear();
+      if (!openedWhileOff && !fromPin.value) return clear();
+      if (following.value === current.key) {
+        shell.value?.letGo?.(current);
+        following.value = null;
+        asked = null;
+      }
       tick.value++;
       return;
     }
@@ -953,11 +1001,13 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
 
   /**
    * @param {object} identity
-   * @param {{fly?: boolean, follow?: boolean, explicit?: boolean, reveal?: boolean}} [options]
+   * @param {{fly?: boolean, follow?: boolean, explicit?: boolean, reveal?: boolean, fromPin?: boolean}} [options]
    *   `follow: false` keeps the camera where it is even for an aircraft.
    *   `explicit`: a person's click, so the flight retires older navigation
    *   (a late search cannot take the camera back), as Fly to does.
-   *   `reveal: false` leaves a phone on the sheet it shows.
+   *   `reveal: false` leaves Context as it is (open or collapsed).
+   *   `fromPin`: opened from the Pinned tab, so the card stays even while
+   *   its layer is off.
    */
   function select(
     identity,
@@ -966,6 +1016,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
       follow: autoFollow = true,
       explicit = false,
       reveal = true,
+      fromPin: pinned = false,
     } = {},
   ) {
     const previous = card.value;
@@ -976,6 +1027,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     // Back belongs to the airport card it was made for.
     if (backTo.value && backTo.value.key !== card.value?.key)
       backTo.value = null;
+    fromPin.value = Boolean(pinned);
     stopLocating();
     away.value = false;
     reference =
@@ -993,7 +1045,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
         void street.openPhoto(identity.id);
     }
     const current = card.value;
-    // With its layer off, nothing moves to follow: fly to where the
+    // With its layer off (a pin), nothing moves to follow: fly to where the
     // item was last seen instead.
     const followNow =
       autoFollow &&
@@ -1041,21 +1093,30 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
   }
 
   /**
-   * Open an item from a list (nearby): its card, followed where it
+   * Open an item from a list (nearby, pinned): its card, followed where it
    * can be, flown to otherwise. A camera is also made the active one, so its
    * feed shows on the card.
    * @param {object} identity
-   * @param {{follow?: boolean}} [options] `follow: false` keeps the camera
-   *   where it is even for an aircraft.
+   * @param {{fromPin?: boolean, follow?: boolean}} [options] `fromPin`:
+   *   opened from the Pinned tab, so the card stays even while its layer is
+   *   off. `follow: false` keeps the camera where it is even for an aircraft.
    */
-  function open(identity, { follow = true } = {}) {
+  function open(identity, { fromPin: pinned = false, follow = true } = {}) {
+    if (identity?.layerId === 'street-level') {
+      const replacement = shell.value?.replaceDockedPhoto?.(identity, {
+        fromPin: pinned,
+      });
+      // A dock can handle the request or decline it. Only an inapplicable
+      // dock leaves the pick to the ordinary card route.
+      if (replacement !== undefined) return replacement;
+    }
     if (identity?.layerId === 'cctv' && identity.id) {
       // The card first, so the layer's notice of the pick finds it already
       // showing. The bridge then only brings Context forward. A
       // camera whose layer is off is not made active: that would wake the
       // layer's projection while it is off.
       const previous = card.value;
-      if (!select(identity)) return false;
+      if (!select(identity, { fromPin: pinned })) return false;
       const live = !layerOff('cctv');
       if (live && previous?.key && following.value === previous.key) {
         shell.value?.letGo?.(previous);
@@ -1073,7 +1134,12 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
       if (live) shell.value?.flyTo?.(card.value, { explicit: true });
       return true;
     }
-    return select(identity, { fly: true, follow, explicit: true });
+    return select(identity, {
+      fly: true,
+      follow,
+      explicit: true,
+      fromPin: pinned,
+    });
   }
 
   /**
@@ -1087,6 +1153,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     const identity = placeIdentity({ airport });
     const key = placeKey(identity);
     const from = card.value;
+    const wasFromPin = fromPin.value;
     if (!open(identity)) return false;
     // Its data is OurAirports': credited wherever its card opens from.
     shell.value?.creditAirports?.();
@@ -1100,6 +1167,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
           viaKey,
           title: from.title || '',
           titleWords: from.titleWords || null,
+          fromPin: wasFromPin,
         })
       : null;
     return true;
@@ -1112,7 +1180,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     if (!to || card.value?.key !== to.key) return false;
     // Back shows the card again and flies to it; following an aircraft
     // again is the reader's Follow, not Back's.
-    return open(to.identity, { follow: false });
+    return open(to.identity, { fromPin: to.fromPin, follow: false });
   }
 
   /** The key of the card last closed with its × button, until a pick. */
@@ -1129,6 +1197,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     replaceContextRecordRelease();
     generation.value++;
     backTo.value = null;
+    fromPin.value = false;
     if (following.value) shell.value?.letGo?.(card.value);
     following.value = null;
     asked = null;
@@ -1154,6 +1223,8 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
         : currentActionCard();
     return target && shell.value?.flyTo?.(target, { explicit: true });
   }
+  /** Fly back to a pinned view: the camera as it was (see setView's pose). */
+  const flyToPose = (pose) => shell.value?.flyToPose?.(pose);
   const follow = () => {
     if (!card.value) return;
     asked = card.value.key;
@@ -1227,9 +1298,9 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     nearbyLayers,
     recordsNear,
     satellite,
+    cameraFrame,
     cameraDetails,
     layerModule,
-    layerOff,
     nearbySelected,
     alertsAt,
     liveLayers,
@@ -1237,6 +1308,7 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     managerVersion,
     layerRevision,
     baseCatalogRevision,
+    lastDirectOn,
     valueAt,
     breakdown,
     view,
@@ -1251,8 +1323,12 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     pulseInspector,
     publishInspectorRows,
     publishViewWeather,
+    flyToPose,
     matchesIn,
     sourceOf,
+    describe,
+    layerOff,
+    fromPin,
     canCockpit,
     cockpit,
     inView,

@@ -128,6 +128,13 @@ export function _initCctvPanel() {
     this.actions.setParams({ autoHop: !current }, { origin: 'user' });
   });
 
+  // How long auto-hop stays on each camera.
+  this.listen(this._cctvAutoHopSec, 'change', (event) => {
+    const sec = Number(event.target?.value);
+    if (Number.isFinite(sec) && sec > 0)
+      this.actions.setParams({ autoHopSec: sec }, { origin: 'user' });
+  });
+
   this.listen(this._cctvProjectionBtn, 'click', () => {
     const current = this._cctvState?.showProjection !== false;
     this.actions.setParams({ showProjection: !current }, { origin: 'user' });

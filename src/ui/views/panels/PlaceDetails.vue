@@ -203,7 +203,7 @@ function openSuggestions() {
     <UiButton v-if="backName" class="place-details__back" :title="t('Back to {name}', { name: backName })" @click="goBack">
       <UiIcon name="chevron_left" :size="null" /><span class="place-details__back-name">{{ t('Back to {name}', { name: backName }) }}</span>
     </UiButton>
-    <PlaceLine :lat="card.lat" :lon="card.lon" :name="card.title" :airport="airport" :headed="false" :time="time" />
+    <PlaceLine :lat="card.lat" :lon="card.lon" :name="card.title" :from="card.place?.from || 'search'" :airport="airport" :headed="false" :time="time" />
     <div class="entity-card__tiles place-details__tiles" :style="{ gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))` }">
       <div v-for="tile in tiles" :key="tile.field" class="entity-card__tile" :data-field="tile.field" :title="tile.title || undefined">
         <span>{{ tile.label }}</span>

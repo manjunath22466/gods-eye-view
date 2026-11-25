@@ -6,14 +6,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPinia } from 'pinia';
 import { createApp, h, nextTick } from 'vue';
+import { usePinnedStore } from './stores/pinned.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
 import MissionDetail from './views/panels/MissionDetail.vue';
 import MissionRoster from './views/panels/MissionRoster.vue';
+import SpaceMissionsPanel from './views/panels/SpaceMissionsPanel.vue';
 
 function fixture(t) {
   document.body.replaceChildren();
+  // The scroller that holds the Missions list.
   const scroller = document.body.appendChild(document.createElement('div'));
-  scroller.className = 'space-missions-panel-inner';
+  scroller.setAttribute('data-rail-scroller', '');
   const host = scroller.appendChild(document.createElement('div'));
   const pinia = createPinia();
   const app = createApp({
@@ -29,8 +32,6 @@ function fixture(t) {
       calls.push([name, ...args]);
   store.connect({
     selectMissionAt: record('select'),
-    selectPreviousMission: record('previous'),
-    selectNextMission: record('next'),
     deselectMission: record('deselect'),
     focusSelectedLaunchSite: record('focus'),
     startSelectedReplay: record('replay'),
@@ -48,7 +49,7 @@ function fixture(t) {
     await nextTick();
     await nextTick();
   };
-  return { $, publish, calls, scroller };
+  return { $, publish, calls, scroller, pinia };
 }
 
 const entry = (id, index, label = id.toUpperCase()) => ({
@@ -81,12 +82,16 @@ const replay = (extra = {}) => ({
 });
 
 const mission = (extra = {}) => ({
+  id: 'starlink-12-3',
   scrollRequest: 1,
+  lat: 28.56,
+  lon: -80.58,
   title: 'STARLINK 12-3',
   provider: 'SpaceX',
   status: 'Go for Launch',
   site: null,
   time: '2026-11-01T10:00:00Z',
+  when: 'Nov 1, 2026, 10:00 AM UTC',
   orbit: 'LEO',
   ascent: 'ESTIMATED',
   distance: '410 KM',
@@ -95,9 +100,6 @@ const mission = (extra = {}) => ({
   payloads: [],
   payloadsMore: null,
   stages: [],
-  index: '2 / 5',
-  previousDisabled: false,
-  nextDisabled: true,
   replay: replay(),
   ...extra,
 });
@@ -192,34 +194,60 @@ test('a departed focused mission continues focus beyond the list', async (t) => 
   );
 });
 
-test('the selected mission shows its details and hides absent rows', async (t) => {
+test('the selected mission reads as an item card: map, name and status, actions, figures, folded details', async (t) => {
   const { $, publish } = fixture(t);
   await publish({ roster: null, mission: mission() });
   const panel = $('#space-mission-panel');
   assert.equal(panel.hidden, false);
+  // The top image is the launch site's close-up map.
+  assert.equal($('.entity-hero').dataset.hero, 'map');
+  assert.notEqual($('.entity-hero .close-up-map'), null);
+  assert.equal($('.close-up-map__icon').textContent, 'rocket_launch');
   assert.equal($('[data-mission-title]').textContent, 'STARLINK 12-3');
+  assert.equal($('[data-mission-provider]').textContent, 'SpaceX');
   assert.equal($('[data-mission-status]').textContent, 'Go for Launch');
-  assert.equal(
-    $('[data-mission-site]').closest('[data-mission-field]').hidden,
-    true,
+  assert.deepEqual(
+    [...panel.querySelectorAll('.entity-card__action-row > button')].map(
+      (button) => button.textContent.replace(/^[a-z_]+/, ''),
+    ),
+    ['Replay', 'Fly to', 'Pin'],
   );
-  assert.equal(
-    $('[data-mission-orbit]').closest('[data-mission-field]').hidden,
-    false,
+  assert.deepEqual(
+    [...panel.querySelectorAll('[data-mission-tile]')].map((tile) => [
+      tile.dataset.missionTile,
+      tile.querySelector('span').textContent,
+      tile.querySelector('strong').textContent,
+    ]),
+    [
+      ['time', 'Launch time', 'Nov 1, 2026, 10:00 AM UTC'],
+      ['orbit', 'Orbit', 'LEO'],
+      ['status', 'Status', 'Go for Launch'],
+    ],
   );
+  // The card has no stepping of its own: the Data Layers row steps.
+  assert.equal(
+    panel.querySelector('[data-mission-prev], [data-mission-next]'),
+    null,
+  );
+  assert.equal(panel.querySelector('[data-mission-index]'), null);
+  // Payloads and stages fold under More details, folded at first.
+  const more = $('[data-mission-more]');
+  assert.equal(more.open, false);
+  assert.equal(more.querySelector('summary').textContent, 'More details');
+  assert.equal($('[data-mission-site]'), null);
   assert.equal($('[data-mission-speed]').title, '27,576 km/h');
-  assert.equal($('[data-mission-index]').textContent, '2 / 5');
-  assert.equal($('[data-mission-prev]').disabled, false);
-  assert.equal($('[data-mission-next]').disabled, true);
   assert.equal(
     $('[data-mission-payloads]').textContent,
     'PAYLOAD DATA UNAVAILABLE',
   );
-  assert.equal($('[data-mission-stages-section]').hidden, true);
+  assert.equal($('[data-mission-stages-section]'), null);
   await publish({
     roster: null,
     mission: mission({
+      site: 'SLC-40',
       distance: null,
+      when: null,
+      orbit: null,
       payloads: [
         {
           name: 'Sat ×2',
@@ -240,9 +268,14 @@ test('the selected mission shows its details and hides absent rows', async (t) =
       ],
     }),
   });
-  assert.equal(
-    $('[data-mission-distance]').closest('[data-mission-field]').hidden,
-    true,
+  assert.equal($('[data-mission-site]').textContent, 'SLC-40');
+  assert.equal($('[data-mission-distance]'), null);
+  // A missing figure drops its tile; the raw time stands in for the formatted one.
+  assert.deepEqual(
+    [...panel.querySelectorAll('[data-mission-tile]')].map(
+      (tile) => tile.querySelector('strong').textContent,
+    ),
+    ['2026-11-01T10:00:00Z', 'Go for Launch'],
   );
   const rows = [...$('[data-mission-payloads]').querySelectorAll('tr')].map(
     (row) => row.textContent,
@@ -251,13 +284,39 @@ test('the selected mission shows its details and hides absent rows', async (t) =
     'Sat ×2Maker · 500 KGCommsGTO',
     '+1 additional payload records',
   ]);
-  assert.equal($('[data-mission-stages-section]').hidden, false);
   assert.equal(
     $('[data-mission-stages]').textContent,
     'B1080FLIGHT 9LandedASOG28.40, -77.10 · DRONESHIP',
   );
+  // A launch with no site position has no map and nothing to pin.
+  await publish({ roster: null, mission: mission({ lat: null, lon: null }) });
+  assert.equal($('.entity-hero'), null);
+  assert.equal($('[data-mission-pin]'), null);
   await publish({ roster: null, mission: null });
   assert.equal(panel.hidden, true);
+});
+
+test('Pin keeps the launch site as a place on the Pinned tab', async (t) => {
+  const { $, publish, pinia } = fixture(t);
+  const pinned = usePinnedStore(pinia);
+  await publish({ roster: null, mission: mission({ site: 'SLC-40' }) });
+  const pin = $('[data-mission-pin]');
+  assert.equal(pin.getAttribute('aria-pressed'), 'false');
+  pin.click();
+  await nextTick();
+  assert.equal(pinned.pins.length, 1);
+  const [entry] = pinned.pins;
+  assert.equal(entry.kind, 'place');
+  assert.equal(entry.title, 'SLC-40');
+  assert.equal(entry.identity.layerId, 'place');
+  assert.equal(entry.identity.lat, 28.56);
+  assert.equal(entry.identity.lon, -80.58);
+  assert.equal(pin.getAttribute('aria-pressed'), 'true');
+  assert.match(pin.textContent, /Pinned$/);
+  pin.click();
+  await nextTick();
+  assert.equal(pinned.pins.length, 0);
+  assert.equal(pin.getAttribute('aria-pressed'), 'false');
 });
 
 test('the replay controls follow the layer and call its commands', async (t) => {
@@ -266,19 +325,14 @@ test('the replay controls follow the layer and call its commands', async (t) => 
     roster: null,
     mission: mission({ replay: replay({ available: false }) }),
   });
-  const start = $('[data-mission-replay]');
-  assert.equal(start.hidden, true);
-  assert.equal(start.disabled, true);
+  assert.equal($('[data-mission-replay]'), null);
   assert.equal($('.mission-replay-speed-control').hidden, true);
   await publish({ roster: null, mission: mission() });
-  assert.equal(start.hidden, false);
-  assert.equal(start.getAttribute('aria-pressed'), 'false');
-  assert.equal($('[data-mission-replay-transport]').hidden, true);
-  start.click();
+  assert.equal($('[data-mission-replay-transport]'), null);
+  $('[data-mission-replay]').click();
   await publish({
     roster: null,
     mission: mission({
-      nextDisabled: false,
       replay: replay({
         active: true,
         paused: true,
@@ -291,11 +345,19 @@ test('the replay controls follow the layer and call its commands', async (t) => 
       }),
     }),
   });
+  // While it runs, the replay is the top image and pause and cancel take
+  // Replay's place.
+  assert.equal($('.entity-hero').dataset.hero, 'replay');
+  assert.match($('[data-mission-replay-hero]').textContent, /Liftoff, paused/);
+  assert.match(
+    $('[data-mission-replay-hero]').textContent,
+    /410 KM · 7.66 KM\/S/,
+  );
+  assert.equal($('[data-mission-replay]'), null);
   const transport = $('[data-mission-replay-transport]');
-  assert.equal(start.hidden, true);
-  assert.equal(transport.hidden, false);
   assert.equal(transport.classList.contains('is-paused'), true);
   assert.equal(transport.getAttribute('aria-label'), 'Liftoff, paused');
+  assert.equal($('.mission-replay-speed-control').hidden, false);
   const toggle = $('[data-mission-replay-toggle]');
   assert.equal(toggle.textContent, '▶');
   assert.equal(toggle.getAttribute('aria-label'), 'Resume replay');
@@ -308,24 +370,78 @@ test('the replay controls follow the layer and call its commands', async (t) => 
   speed.value = '3';
   speed.dispatchEvent(new Event('input'));
   $('[data-mission-focus]').click();
-  $('[data-mission-prev]').click();
-  $('[data-mission-next]').click();
   $('[data-mission-close]').click();
-  $('[data-mission-show-all]').click();
   assert.deepEqual(calls, [
     ['replay'],
     ['toggle'],
     ['cancel'],
     ['speed', 3],
     ['focus'],
-    ['previous'],
-    ['next'],
-    ['deselect'],
     ['deselect'],
   ]);
 });
 
-test('each newly presented selection returns the Space Missions panel to the top', async (t) => {
+test('closing from the keyboard hands focus to the mission in the roster', async (t) => {
+  const { $, publish, calls } = fixture(t);
+  await publish({
+    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
+    mission: mission(),
+  });
+  const close = $('[data-mission-close]');
+  close.focus();
+  // A keyboard press clicks with no pointer count.
+  close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+  await publish({
+    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
+    mission: null,
+  });
+  assert.deepEqual(calls[0], ['deselect']);
+  assert.equal(
+    document.activeElement?.dataset?.missionRosterId,
+    'starlink-12-3',
+  );
+  // A pointer close leaves focus where it is.
+  await publish({
+    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
+    mission: mission(),
+  });
+  close.focus();
+  close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  await publish({
+    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
+    mission: null,
+  });
+  assert.equal(document.activeElement, close);
+});
+
+test('in the panel, a keyboard close focuses the closed mission, not the first row', async (t) => {
+  document.body.replaceChildren();
+  const host = document.body.appendChild(document.createElement('div'));
+  const pinia = createPinia();
+  const app = createApp({ render: () => h(SpaceMissionsPanel) }).use(pinia);
+  const store = useSpaceMissionsStore(pinia);
+  const rows = roster([entry('a', 0), entry('starlink-12-3', 1)]);
+  store.setEnabled(true);
+  // Deselecting publishes at once, as the launches layer does.
+  store.connect({
+    deselectMission: () => store.publish({ roster: rows, mission: null }),
+  });
+  store.publish({ roster: rows, mission: mission() });
+  app.mount(host);
+  t.after(() => app.unmount());
+  await nextTick();
+  await nextTick();
+  const close = document.querySelector('[data-mission-close]');
+  close.focus();
+  close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+  for (let i = 0; i < 5; i += 1) await nextTick();
+  assert.equal(
+    document.activeElement?.dataset?.missionRosterId,
+    'starlink-12-3',
+  );
+});
+
+test('each newly presented selection returns the list it shows in to the top', async (t) => {
   const { publish, scroller } = fixture(t);
   scroller.scrollTop = 120;
   await publish({ roster: null, mission: mission({ scrollRequest: 4 }) });

@@ -8,10 +8,16 @@ import {
 } from './policy.js';
 import { CCTV_HELPER_PICK_ID } from './pickIds.js';
 import { isHeadingEstimated } from './headingConfidence.js';
+import { t } from '../../i18n/index.js';
+import { attachCctvVideo } from './videoPlayback.js';
 
 export function createControls({ state: layerState, services, parts, source }) {
   const { holdContinuousRender, releaseContinuousRender } = services.render;
   const { CCTV_ACTIVATION_RESULT } = services.activation;
+  let rowControlsListener = null;
+  // Prev/Next are offered while Cameras is on with more than one camera.
+  const stepsOffered = () =>
+    Boolean(layerState._enabled) && layerState._records.length > 1;
 
   function applyParams(params) {
     if (typeof params.showCoverage === 'boolean') {
@@ -297,6 +303,60 @@ export function createControls({ state: layerState, services, parts, source }) {
     },
 
     /**
+     * A video camera's own stream, for a view that keeps playing it after the
+     * layer's projection lets it go (a docked camera with Cameras off). Null
+     * for a still camera, a browser-overlay camera or one the layer does not
+     * hold. The records stay while the layer is off.
+     * @param {string} cameraId
+     * @returns {?{url: string, feedType: string}}
+     */
+    streamSourceForCamera(cameraId) {
+      const camera = layerState._recordById.get(String(cameraId))?.camera;
+      if (!camera || parts.model.isBrowserOverlayCamera(camera)) return null;
+      const feedType = parts.model.normalizeFeedType(camera.feedType);
+      if (!parts.model.isVideoFeedType(feedType)) return null;
+      return { url: source.getMediaUrl(camera), feedType };
+    },
+
+    /**
+     * Play a stream from `streamSourceForCamera` into a muted, inline video
+     * element: one connection, released (and its lease returned) by the
+     * handle's `dispose()`; `onFailure` hears a stream that cannot play.
+     * @param {HTMLVideoElement} video
+     * @param {{url: string, feedType: string}} stream
+     * @param {{onFailure?: () => void}} [options]
+     * @returns {{dispose: () => void}}
+     */
+    attachCameraStream(video, stream, { onFailure = () => {} } = {}) {
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      video.preload = 'auto';
+      return attachCctvVideo(video, stream.url, stream.feedType, { onFailure });
+    },
+
+    /**
+     * A pinned camera's still, refreshed no faster than the provider minimum.
+     * Québec overlays and streams without a registered snapshot have no still.
+     * @param {string} cameraId
+     * @returns {?{url: string, refreshMs: number}}
+     */
+    frameUrlForCamera(cameraId) {
+      const camera = layerState._recordById.get(String(cameraId))?.camera;
+      if (!camera || parts.model.isBrowserOverlayCamera(camera)) return null;
+      const snapshotOnly = parts.model.isVideoFeedCamera(camera);
+      if (snapshotOnly && !camera.hasSnapshot) return null;
+      const refreshMs = Math.max(
+        10_000,
+        Number.isFinite(camera.frameRefreshMs) ? camera.frameRefreshMs : 0,
+      );
+      return {
+        url: source.getFrameUrl(camera, refreshMs, { snapshotOnly }),
+        refreshMs,
+      };
+    },
+
+    /**
      * What a camera's card shows about it: where it looks, how often its
      * frame refreshes, and who runs its feed. Null for an unknown camera.
      * @param {string} cameraId
@@ -432,6 +492,79 @@ export function createControls({ state: layerState, services, parts, source }) {
         parts.navigation.focusCamera(nextId, options.durationSec || 1.8);
       }
       return nextId;
+    },
+
+    /**
+     * Steps to the previous or next of the cameras nearest the view and
+     * selects it, flying there unless `focus` is false (see
+     * navigation.stepNearbyCamera).
+     * @param {number} direction Negative for previous, otherwise next.
+     * @param {{focus?: boolean, durationSec?: number}} [options]
+     * @returns {?{cameraId: string, focusResult: ?string}}
+     */
+    stepNearbyCamera(direction, options = {}) {
+      return parts.navigation.stepNearbyCamera(direction, options);
+    },
+
+    /**
+     * The cameras within a radius of a point, nearest first, with their
+     * distances: Context's Cameras list (see navigation.camerasNear).
+     * @param {{lat: number, lon: number}} at
+     * @param {{radiusKm?: number, limit?: number}} [options]
+     */
+    camerasNear(at, options) {
+      return parts.navigation.camerasNear(at, options);
+    },
+
+    /**
+     * Context's Cameras list area, for Prev/Next to walk the same list.
+     * @param {?{lat: number, lon: number, radiusKm: number}} area
+     */
+    setNearbyArea(area) {
+      parts.navigation.setNearbyArea(area);
+    },
+
+    /**
+     * ‹ Prev · Next › on the Data Layers row, while Cameras is on: they step
+     * through the cameras nearest the view and open each one's card.
+     */
+    getRowControls() {
+      if (!stepsOffered()) return null;
+      return {
+        chips: [
+          {
+            id: 'previous-camera',
+            label: t('Previous camera'),
+            icon: 'chevron_left',
+            action: true,
+            onClick: () => parts.navigation.stepNearbyCamera(-1),
+          },
+          {
+            id: 'next-camera',
+            label: t('Next camera'),
+            icon: 'chevron_right',
+            action: true,
+            onClick: () => parts.navigation.stepNearbyCamera(1),
+          },
+        ],
+      };
+    },
+
+    setRowControlsListener(listener) {
+      if (rowControlsListener)
+        layerState._listeners.delete(rowControlsListener);
+      rowControlsListener = null;
+      if (typeof listener !== 'function') return;
+      // Redrawn only when whether the steps are offered changes, not on
+      // every camera or progress update.
+      let previous = stepsOffered();
+      rowControlsListener = () => {
+        const offered = stepsOffered();
+        if (offered === previous) return;
+        previous = offered;
+        listener();
+      };
+      layerState._listeners.add(rowControlsListener);
     },
 
     /**

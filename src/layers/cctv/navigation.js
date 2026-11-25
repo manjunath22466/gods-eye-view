@@ -8,7 +8,10 @@ import {
   cellHalfExtents,
 } from '../../data/cctvCellCounts.js';
 import { CCTV_FOCUS_RESULT, VIEW_CELL_PX, VIEW_MIN_CELL_M } from './policy.js';
-import { cameraOf, canvasOf } from '../../render/rendererOf.js';
+import { cameraOf, canvasOf, findCamera } from '../../render/rendererOf.js';
+
+/** How many of the cameras nearest the view a walk steps through without Context's list. */
+const CAMERA_WALK_SIZE = 25;
 
 export function createNavigation({
   state: layerState,
@@ -76,7 +79,7 @@ export function createNavigation({
     );
   }
 
-  /** Activate a camera without opening its Context card. */
+  /** Run a layer-owned activation without treating it as someone's pick. */
   function quietly(activate) {
     layerState._quietActivation = true;
     try {
@@ -97,8 +100,10 @@ export function createNavigation({
       return false;
     const nearest = nearestCameraIdToViewer();
     if (!nearest || nearest === layerState._activeCameraId) return false;
-    // Still the opening pick: later settled moves may replace it.
-    parts.selection.setActiveCamera(nearest, { opening: true });
+    // Still the layer's own opening pick, nobody's choice: its notification
+    // says so (as a restored camera's does), so Context opens no card for it.
+    // Later settled moves may still replace it.
+    quietly(() => parts.selection.setActiveCamera(nearest, { opening: true }));
     return true;
   }
 
@@ -110,6 +115,154 @@ export function createNavigation({
     )
       return CCTV_FOCUS_RESULT.COCKPIT_ACTIVE;
     return isFollowing(viewer) ? CCTV_FOCUS_RESULT.TRACKING_HOLDS_VIEW : null;
+  }
+
+  /**
+   * The cameras within a radius of a point, nearest first, each with its
+   * distance: the order Context's Cameras list and Nearby show them in, and
+   * the order Prev/Next step through. Empty while the layer is off.
+   * @param {{lat: number, lon: number}} at
+   * @param {{radiusKm?: number, limit?: number}} [options]
+   * @returns {{id: string, name: string, city: string, provider: string, lat: number, lon: number, km: number}[]}
+   */
+  function camerasNear(at, { radiusKm = Infinity, limit = Infinity } = {}) {
+    if (
+      !layerState._enabled ||
+      !Number.isFinite(at?.lat) ||
+      !Number.isFinite(at?.lon)
+    )
+      return [];
+    const found = [];
+    for (const record of layerState._records) {
+      const camera = record?.camera;
+      if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon))
+        continue;
+      const km = parts.model.haversineKm(
+        at.lat,
+        at.lon,
+        camera.lat,
+        camera.lon,
+      );
+      if (km <= radiusKm) found.push({ camera, km });
+    }
+    return found
+      .sort((a, b) => a.km - b.km)
+      .slice(0, limit)
+      .map(({ camera, km }) => ({
+        id: camera.id,
+        name: camera.name || '',
+        city: camera.city || '',
+        provider: camera.provider || '',
+        lat: camera.lat,
+        lon: camera.lon,
+        km,
+      }));
+  }
+
+  /**
+   * The area Context lists cameras for (its view centre and radius), so a
+   * walk steps through the same list; null while Context shows no list.
+   * @param {?{lat: number, lon: number, radiusKm: number}} area
+   */
+  function setNearbyArea(area) {
+    layerState._nearbyArea =
+      Number.isFinite(area?.lat) &&
+      Number.isFinite(area?.lon) &&
+      Number.isFinite(area?.radiusKm) &&
+      area.radiusKm > 0
+        ? { lat: area.lat, lon: area.lon, radiusKm: area.radiusKm }
+        : null;
+  }
+
+  /**
+   * A new walk's order: Context's list of the cameras within its radius
+   * while it has one with two or more, else the cameras nearest the view.
+   * @returns {?Array<string>}
+   */
+  function walkOrder() {
+    const area = layerState._nearbyArea;
+    if (area) {
+      const listed = camerasNear(area, { radiusKm: area.radiusKm });
+      if (listed.length > 1) return listed.map((camera) => camera.id);
+    }
+    const at = area || walkStart();
+    if (!at) return null;
+    return camerasNear(at, { limit: CAMERA_WALK_SIZE }).map(
+      (camera) => camera.id,
+    );
+  }
+
+  /** The middle of the view's rectangle, across the date line too; null without one. */
+  function viewMiddle() {
+    const rect = layerState._viewer
+      ? findCamera(layerState._viewer)?.viewRectangle?.()
+      : null;
+    if (
+      ![rect?.west, rect?.south, rect?.east, rect?.north].every(Number.isFinite)
+    )
+      return null;
+    const span = rect.east - rect.west + (rect.west > rect.east ? 360 : 0);
+    let lon = rect.west + span / 2;
+    if (lon > 180) lon -= 360;
+    return { lat: (rect.south + rect.north) / 2, lon };
+  }
+
+  /** Where a new walk starts: the middle of the view, else the point under the viewer, else the open camera. */
+  function walkStart() {
+    const centre = viewMiddle() || parts.model.eyePose();
+    if (Number.isFinite(centre?.lat) && Number.isFinite(centre?.lon))
+      return centre;
+    const active = layerState._recordById.get(layerState._activeCameraId);
+    return Number.isFinite(active?.camera?.lat) ? active.camera : null;
+  }
+
+  /**
+   * Steps to the previous or next camera in Context's Cameras list (the
+   * cameras within its radius of the view centre, nearest first) or, while
+   * Context shows no list, of the cameras nearest the view, and selects it:
+   * its card opens in Context as a picked camera's does. A walk keeps the
+   * order it started with while the open camera is the one it last reached,
+   * so flying to each camera does not reorder it; picking another camera
+   * starts a new walk from the view. From a camera outside the walk, either step goes to the
+   * nearest. The Data Layers row's Prev/Next and voice next/prev share it.
+   * @param {number} direction Negative for previous, otherwise next.
+   * @param {Object} [options]
+   * @param {boolean} [options.focus=true] Fly to the camera after selecting it.
+   * @param {number} [options.durationSec=1.8] Fly-to duration in seconds.
+   * @returns {?{cameraId: string, focusResult: ?string}} Null when the layer
+   *   is off or no other camera is near.
+   */
+  function stepNearbyCamera(direction, options = {}) {
+    if (!layerState._enabled || !layerState._records.length) return null;
+    const activeId = layerState._activeCameraId;
+    let walk = layerState._cameraWalk;
+    if (!walk || walk.lastId !== activeId) {
+      const order = walkOrder();
+      if (!order) return null;
+      walk = { order, lastId: activeId };
+      layerState._cameraWalk = walk;
+    }
+    const { order } = walk;
+    const index = order.indexOf(activeId);
+    const nextId =
+      index < 0
+        ? order[0]
+        : order[
+            (index + (direction < 0 ? -1 : 1) + order.length) % order.length
+          ];
+    if (!nextId || nextId === activeId) return null;
+    if (!layerState._recordById.has(nextId)) {
+      // The catalog changed under the walk: the next step starts afresh.
+      layerState._cameraWalk = null;
+      return null;
+    }
+    parts.selection.setActiveCamera(nextId);
+    walk.lastId = nextId;
+    const focusResult =
+      options.focus === false
+        ? null
+        : focusCamera(nextId, options.durationSec || 1.8);
+    return { cameraId: nextId, focusResult };
   }
 
   /**
@@ -243,28 +396,18 @@ export function createNavigation({
     const viewChanged = viewKey !== layerState._lastViewContext;
     layerState._lastViewContext = viewKey;
 
-    if (viewChanged) {
-      const nearest = nearestCameraIdToViewer();
-      if (nearest && nearest !== layerState._activeCameraId) {
-        // Use setActiveCamera so the full activation path runs (obstruction
-        // probe, projection runtime, geometry rewrite) — previously bypassed
-        // with a bare assignment
-        quietly(() => parts.selection.setActiveCamera(nearest));
-        layerState._lastHopAt = nowMs;
-        return;
-      }
+    let nextId = viewChanged ? nearestCameraIdToViewer() : null;
+    if (!nextId || nextId === layerState._activeCameraId) {
+      const nextIdx = cctvCycleIndex(
+        layerState._records.findIndex(
+          (record) => record.camera.id === layerState._activeCameraId,
+        ),
+        1,
+        layerState._records.length,
+      );
+      nextId = layerState._records[nextIdx].camera.id;
     }
-
-    const nextIdx = cctvCycleIndex(
-      layerState._records.findIndex(
-        (record) => record.camera.id === layerState._activeCameraId,
-      ),
-      1,
-      layerState._records.length,
-    );
-    quietly(() =>
-      parts.selection.setActiveCamera(layerState._records[nextIdx].camera.id),
-    );
+    quietly(() => parts.selection.setActiveCamera(nextId));
     layerState._lastHopAt = nowMs;
   }
 
@@ -294,6 +437,9 @@ export function createNavigation({
     focusCctvRecord,
     zoomToCell,
     focusCamera,
+    camerasNear,
+    setNearbyArea,
+    stepNearbyCamera,
     maybeAutoHop,
     setPreviewedCamera,
     quietly,

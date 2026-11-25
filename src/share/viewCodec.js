@@ -319,7 +319,7 @@ export const SHARE_VIEW_LAYER_OPTION_ABSENT = Object.freeze({
     pano: 'all',
     sinceDays: 0,
   }),
-  radio: Object.freeze({ filter: 'all', volume: 0.8 }),
+  radio: Object.freeze({ filter: 'all', volume: 0.8, source: 'internet' }),
   rail: Object.freeze({
     transit: true,
     local: true,

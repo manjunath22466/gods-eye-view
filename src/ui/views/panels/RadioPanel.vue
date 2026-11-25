@@ -68,6 +68,6 @@ const radioWords = computed(() => ({
       <a href="https://www.radio-browser.info/" target="_blank" rel="noopener noreferrer">{{ t('DIRECTORY: RADIO BROWSER') }}</a>
     </div>
     <p class="radio-privacy">{{ t('Audio connects directly to the broadcaster when you press play, choose a station on the globe or ask voice to play. Your IP is visible to that broadcaster.') }}</p>
-    <SdrCard />
+    <div class="sdr-card-home"><SdrCard /></div>
 </RailPanel>
 </template>

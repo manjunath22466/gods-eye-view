@@ -109,3 +109,23 @@ export function tileBlock(lat, lon, zoom, template = ESRI_TILES) {
     }
   return list;
 }
+
+/**
+ * One Esri World Imagery tile with a spot on it, for a still that never
+ * changes (a pinned place, or where a moving item was when it was pinned).
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} [zoom]
+ * @returns {string} The tile's address, or '' without a position.
+ */
+export function mapStill(lat, lon, zoom = 13) {
+  return (
+    tileBlock(lat, lon, zoom).find(
+      (tile) =>
+        tile.left <= 0 &&
+        tile.left > -TILE &&
+        tile.top <= 0 &&
+        tile.top > -TILE,
+    )?.src || ''
+  );
+}

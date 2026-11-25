@@ -1,3 +1,4 @@
+import { useDockedStore } from './stores/docked.js';
 import { readEntityRecord } from '../data/entityRecords.js';
 import { nextTick, watch } from 'vue';
 import {
@@ -1287,7 +1288,7 @@ export class StyleManager extends ShellFacade {
           streetLevelPhotoStore.publish(view),
         ) ?? null;
       streetLevelLayer.attachNavigation?.({
-        begin: (noun) => this._beginDeferredNavigation(noun),
+        begin: (noun, options) => this._beginDeferredNavigation(noun, options),
         reassert: (generation) => this._reassertNavigationHandoff(generation),
       });
     }
@@ -1295,6 +1296,8 @@ export class StyleManager extends ShellFacade {
     const display = useDisplayStore(pinia);
     const chrome = usePanelChromeStore(pinia);
     const bhote = useBhoteKoshiPanelStore(pinia);
+    const dock = useDockedStore(pinia);
+    const context = useContextStore(pinia);
     this._streetLevelControls = new StreetLevelControls({
       root: this._streetLevelViewer,
       layer: streetLevelLayer,
@@ -1306,6 +1309,15 @@ export class StyleManager extends ShellFacade {
           }),
         setParams: (params, options) =>
           this._dataManager?.setLayerParams('street-level', params, options),
+        dockedPhoto: () => (dock.view?.kind === 'street' ? dock.view : null),
+        dockedPhotoCanPresent: () =>
+          !dock.stowed &&
+          !document.hidden &&
+          Boolean(
+            document
+              .querySelector('.docked-view[data-kind="street"]')
+              ?.getClientRects().length,
+          ),
         // Tie the accepted photo to its pick so a newer selection can win.
         contextSelectionCover: () => this.contextSelectionCover?.(),
         photoRequested: (requestId, cover) =>
@@ -1323,6 +1335,7 @@ export class StyleManager extends ShellFacade {
               () => display.phoneShell?.sheet,
               () => bhote.visiblePanel?.owner,
               activeTab,
+              () => context.inspectorTab,
             ],
             changed,
             { flush: 'sync' },
@@ -1336,7 +1349,8 @@ export class StyleManager extends ShellFacade {
           activeTab.value = 'view';
           return true;
         },
-        isInspectorTab: () => activeTab.value === 'view',
+        isInspectorTab: () =>
+          activeTab.value === 'view' && context.inspectorTab === 'inspect',
         isContextExpanded: () =>
           chrome.panels['global-context-panel']?.collapsed === false,
         showPhoto: (photo, { revealFromOpen } = {}) =>
@@ -1363,6 +1377,7 @@ export class StyleManager extends ShellFacade {
       elements: {
         _cctvAdjustBtn: this._cctvAdjustBtn,
         _cctvAutoHopBtn: this._cctvAutoHopBtn,
+        _cctvAutoHopSec: this._cctvAutoHopSec,
         _cctvCalReadout: this._cctvCalReadout,
         _cctvCalibResetBtn: this._cctvCalibResetBtn,
         _cctvCalibSaveBtn: this._cctvCalibSaveBtn,

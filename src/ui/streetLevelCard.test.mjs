@@ -33,6 +33,7 @@ import { parseOmnibar } from './omnibarIntent.js';
 import { createGevActionRunner, showStreetLevel } from '../voice/gevActions.js';
 import { applicationPinia } from './vueRuntime.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
+import { useDockedStore } from './stores/docked.js';
 import { fakeInput } from '../input/testDoubles.mjs';
 import * as Cesium from 'cesium';
 import {
@@ -55,10 +56,11 @@ import {
 } from './mobileShell.js';
 
 // A street-level photo's card in Context: the layer remembers the photos
-// opened, a card reads them, and the bridge opens the card of each new photo
-// unless something newer was picked.
+// opened, a card reads them, the bridge opens the card of each new photo
+// unless something newer was picked, and a docked photo follows.
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const dockedPhoto = { identity: { id: 'mapillary:A' } };
 
 const street = (overrides = {}) => ({
   open: true,
@@ -293,6 +295,697 @@ test('dismissing a card cancels its pending photo without closing a replacement'
   );
 });
 
+test('a docked replacement publishes its position and moves the camera only after it shows', async (t) => {
+  let poseReceived;
+  let showPhoto;
+  const pose = new Promise((resolve) => {
+    poseReceived = resolve;
+  });
+  const waitForPhoto = new Promise((resolve) => {
+    showPhoto = resolve;
+  });
+  t.after(showPhoto);
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    null,
+    undefined,
+    ['mapillary', 'panoramax'],
+    {
+      viewer,
+      afterPose: async (id) => {
+        if (id !== 'B') return;
+        poseReceived();
+        await waitForPhoto;
+      },
+    },
+  );
+  const { store, docked, setContextOpen } = bridge(t, { streetLayer: layer });
+  const published = watchPhotos(t, layer, docked);
+  setContextOpen(true);
+  assert.equal(await layer.openPhoto('mapillary:A'), true);
+  assert.equal(store.card?.identity.id, 'mapillary:A');
+  docked.dock({
+    key: store.card.key,
+    kind: 'street',
+    title: 'A',
+    identity: store.card.identity,
+  });
+
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await pose;
+  assert.equal(layer.getUIState().dockPhotoLoading, true);
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(viewer.flights.started, 0);
+  assert.equal(store.card?.identity.id, 'mapillary:A');
+  assert.equal(docked.view?.identity.id, 'mapillary:A');
+  assert.deepEqual(published, ['mapillary:A']);
+  showPhoto();
+  assert.equal(await opening, true);
+  assert.deepEqual(published, ['mapillary:A', 'panoramax:B']);
+  assert.equal(docked.view?.identity.id, 'panoramax:B');
+  assert.equal(store.card?.identity.id, 'panoramax:B');
+  assert.equal(layer.getUIState().acceptedPhoto?.id, 'panoramax:B');
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(layer.getUIState().street.providerId, 'panoramax');
+  assert.equal(layer.getUIState().street.imageId, 'B');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 49, lon: 2 });
+  assert.equal(viewer.flights.started, 1);
+});
+
+test('cancel restores the docked photo and camera even if an old provider reports late', async (t) => {
+  let started;
+  let release;
+  const pending = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(release);
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id !== 'B') return;
+      started();
+      await gate;
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+    { viewer },
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await pending;
+  layer.cancelDockedPhoto();
+  assert.equal(await opening, false);
+  release();
+  await settle();
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(layer.getUIState().street.providerId, 'mapillary');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(
+    layer.getUIState().dockPhotoNotice,
+    undefined,
+    'a cancelled replacement is not reported as failed',
+  );
+  assert.equal(viewer.flights.started, 0);
+});
+
+test('rejection restores the original photo across providers without a camera flight', async (t) => {
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    (id) => {
+      if (id === 'B') throw new Error('The fixture could not open this photo');
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+    { viewer },
+  );
+  const published = watchPhotos(t, layer);
+  await layer.openPhoto('mapillary:A');
+  const revision = layer.getUIState().acceptedPhoto?.revision;
+  layer.attachDockedPhoto(() => dockedPhoto);
+  assert.equal(await layer.openPhoto('panoramax:B', { frame: true }), false);
+  assert.equal(layer.getUIState().acceptedPhoto?.revision, revision);
+  assert.deepEqual(published, ['mapillary:A'], 'restoring A is silent');
+  assert.equal(layer.getUIState().street.providerId, 'mapillary');
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(viewer.flights.started, 0);
+});
+
+test('a dock restore accepts only the original presentation', async (t) => {
+  const walker = {};
+  let restoring = false;
+  const layer = await layerWithPoses(
+    t,
+    (id) => {
+      if (id === 'B') {
+        restoring = true;
+        throw new Error('The fixture could not open this photo');
+      }
+    },
+    undefined,
+    ['mapillary'],
+    {
+      walker,
+      afterPose: (id) => {
+        if (restoring && id === 'A') walker.step('C');
+      },
+    },
+  );
+  const published = watchPhotos(t, layer);
+  assert.equal(await layer.openPhoto('mapillary:A'), true);
+  layer.attachDockedPhoto(() => dockedPhoto);
+
+  assert.equal(await layer.openPhoto('mapillary:B'), false);
+  const state = layer.getUIState();
+  assert.equal(state.acceptedPhoto, null);
+  assert.equal(state.street.imageId, 'A');
+  assert.deepEqual(state.street.position, { lat: 48, lon: 2 });
+  assert.equal(state.dockPhotoUnavailable, true);
+  assert.equal(state.dockPhotoLoading, undefined);
+  assert.deepEqual(published, ['mapillary:A']);
+  assert.equal(layer.photo('mapillary:C'), null);
+});
+
+test('a docked photo cannot commit after its deadline before the timer callback runs', async (t) => {
+  let reportFirstPose;
+  const firstPose = new Promise((resolve) => {
+    reportFirstPose = resolve;
+  });
+  let showPhoto;
+  const loading = new Promise((resolve) => {
+    showPhoto = resolve;
+  });
+  t.after(showPhoto);
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    null,
+    undefined,
+    ['mapillary', 'panoramax'],
+    {
+      viewer,
+      afterPose: async (id) => {
+        if (id !== 'B') return;
+        reportFirstPose();
+        await loading;
+      },
+    },
+  );
+  assert.equal(await layer.openPhoto('mapillary:A'), true);
+  layer.attachDockedPhoto(() => dockedPhoto);
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await firstPose;
+  // Advance the clock without dispatching the replacement's real timer.
+  t.mock.timers.setTime(10_001);
+  showPhoto();
+  assert.equal(await opening, false);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(layer.photo('panoramax:B'), null);
+  assert.equal(viewer.flights.started, 0);
+});
+
+test('a stalled docked replacement times out and takes the original photo back', async (t) => {
+  const viewer = fakeCesiumViewer();
+  const never = new Promise(() => {});
+  const layer = await layerWithPoses(
+    t,
+    (id) => (id === 'B' ? never : undefined),
+    undefined,
+    ['mapillary', 'panoramax'],
+    { viewer },
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  assert.equal(layer.getUIState().dockPhotoLoading, true);
+  t.mock.timers.tick(10_000);
+  assert.equal(await opening, false);
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(viewer.flights.started, 0);
+  // The dock says it could not load the photo, for a few seconds only.
+  assert.equal(layer.getUIState().dockPhotoNotice, 'failed');
+  t.mock.timers.tick(4_000);
+  assert.equal(layer.getUIState().dockPhotoNotice, undefined);
+});
+
+test('a pick while the dock restores its photo is refused and says so; the failure then says it', async (t) => {
+  let restoreStarted;
+  let releaseRestore;
+  const restoring = new Promise((resolve) => {
+    restoreStarted = resolve;
+  });
+  const restoreGate = new Promise((resolve) => {
+    releaseRestore = resolve;
+  });
+  t.after(releaseRestore);
+  let opensOfA = 0;
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id === 'B') throw new Error('The fixture could not open this photo');
+      if (id === 'A' && ++opensOfA === 2) {
+        restoreStarted();
+        await restoreGate;
+      }
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await restoring;
+  assert.equal(layer.dockedPhotoRestoring(), true);
+  assert.equal(await layer.openPhoto('mapillary:C'), false);
+  assert.equal(layer.getUIState().dockPhotoNotice, 'restoring');
+  releaseRestore();
+  assert.equal(await opening, false);
+  assert.equal(layer.dockedPhotoRestoring(), false);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(layer.getUIState().dockPhotoNotice, 'failed');
+  // The next pick takes the word away.
+  assert.equal(await layer.openPhoto('mapillary:C'), true);
+  assert.equal(layer.getUIState().dockPhotoNotice, undefined);
+});
+
+test('while the dock restores its photo it says so, and Cancel cannot end the restore', async (t) => {
+  let restoreStarted;
+  let releaseRestore;
+  const restoring = new Promise((resolve) => {
+    restoreStarted = resolve;
+  });
+  const restoreGate = new Promise((resolve) => {
+    releaseRestore = resolve;
+  });
+  t.after(releaseRestore);
+  let opensOfA = 0;
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id === 'B') throw new Error('The fixture could not open this photo');
+      if (id === 'A' && ++opensOfA === 2) {
+        restoreStarted();
+        await restoreGate;
+      }
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const updates = [];
+  t.after(
+    layer.subscribe((ui) => updates.push(ui.dockPhotoRestoring === true)),
+  );
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  assert.equal(layer.getUIState().dockPhotoRestoring, undefined, 'loading B');
+  await restoring;
+  assert.equal(layer.getUIState().dockPhotoLoading, true);
+  assert.equal(layer.getUIState().dockPhotoRestoring, true);
+  layer.cancelDockedPhoto();
+  await settle();
+  assert.equal(
+    layer.getUIState().dockPhotoRestoring,
+    true,
+    'the restore runs on',
+  );
+  assert.equal(updates.at(-1), true, 'listeners hear the restore start');
+  releaseRestore();
+  assert.equal(await opening, false);
+  const settled = layer.getUIState();
+  assert.equal(settled.dockPhotoLoading, undefined);
+  assert.equal(settled.dockPhotoRestoring, undefined);
+  assert.equal(settled.street.imageId, 'A');
+  assert.equal(settled.dockPhotoUnavailable, undefined, 'the original is back');
+});
+
+// Show here moves the docked photo into its card: the dock lets it go, and
+// DockedView cancels a replacement still loading. The original comes back
+// on the card, not nothing.
+test('Show here while a replacement loads cancels it and brings the original back on its card', async (t) => {
+  let started;
+  let release;
+  const pending = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(release);
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id !== 'B') return;
+      started();
+      await gate;
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+    { viewer },
+  );
+  await layer.openPhoto('mapillary:A');
+  let dock = dockedPhoto;
+  layer.attachDockedPhoto(() => dock);
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await pending;
+  // Show here: the dock closes, and DockedView cancels what it was loading.
+  dock = null;
+  layer.cancelDockedPhoto();
+  assert.equal(await opening, false);
+  release();
+  await settle();
+  const ui = layer.getUIState();
+  assert.equal(ui.street.open, true, 'a photo is open');
+  assert.equal(ui.street.providerId, 'mapillary');
+  assert.equal(ui.street.imageId, 'A', 'the original');
+  assert.equal(ui.street.error, null);
+  assert.equal(ui.dockPhotoLoading, undefined);
+  assert.equal(ui.dockPhotoUnavailable, undefined);
+  assert.equal(viewer.flights.started, 0);
+});
+
+test('Show here while the original restores lets the restore finish on its card', async (t) => {
+  let restoreStarted;
+  let releaseRestore;
+  const restoring = new Promise((resolve) => {
+    restoreStarted = resolve;
+  });
+  const restoreGate = new Promise((resolve) => {
+    releaseRestore = resolve;
+  });
+  t.after(releaseRestore);
+  let opensOfA = 0;
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id === 'B') throw new Error('The fixture could not open this photo');
+      if (id === 'A' && ++opensOfA === 2) {
+        restoreStarted();
+        await restoreGate;
+      }
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+  );
+  await layer.openPhoto('mapillary:A');
+  let dock = dockedPhoto;
+  layer.attachDockedPhoto(() => dock);
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await restoring;
+  dock = null;
+  layer.cancelDockedPhoto();
+  releaseRestore();
+  assert.equal(await opening, false);
+  const ui = layer.getUIState();
+  assert.equal(ui.street.open, true, 'a photo is open');
+  assert.equal(ui.street.imageId, 'A', 'the original');
+  assert.equal(ui.dockPhotoRestoring, undefined);
+  assert.equal(
+    ui.dockPhotoNotice,
+    undefined,
+    'no dock is left to say anything',
+  );
+});
+
+// Out of the dock, a restore that cannot finish says so on the card.
+test('Show here, then an original that cannot come back: the card says so', async (t) => {
+  let started;
+  let release;
+  const pending = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(release);
+  let opensOfA = 0;
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id === 'B') {
+        started();
+        await gate;
+      }
+      if (id === 'A' && ++opensOfA === 2)
+        throw new Error('The fixture could not open this photo');
+    },
+    undefined,
+    ['mapillary', 'panoramax'],
+  );
+  await layer.openPhoto('mapillary:A');
+  let dock = dockedPhoto;
+  layer.attachDockedPhoto(() => dock);
+  const opening = layer.openPhoto('panoramax:B', { frame: true });
+  await pending;
+  dock = null;
+  layer.cancelDockedPhoto();
+  assert.equal(await opening, false);
+  release();
+  await settle();
+  const ui = layer.getUIState();
+  assert.equal(ui.dockPhotoLoading, undefined);
+  assert.ok(ui.street.error, 'an error the card shows');
+});
+
+test('a pick while the street photo dock is stowed keeps its photo and card', async (t) => {
+  const viewer = fakeCesiumViewer();
+  const opened = [];
+  const layer = await layerWithPoses(
+    t,
+    (id) => opened.push(id),
+    undefined,
+    ['mapillary'],
+    { viewer },
+  );
+  await layer.openPhoto('mapillary:B');
+  await layer.openPhoto('mapillary:A');
+  const previous = globalThis.matchMedia;
+  globalThis.matchMedia = () => ({ matches: true });
+  const contextViewer = { scene: { pick: () => null, drillPick: () => [] } };
+  const input = fakeInput(contextViewer);
+  const pinia = createPinia();
+  const disconnect = installEntityContext({
+    viewer: contextViewer,
+    getDataManager: () => ({
+      isEnabled: () => true,
+      layers: new Map([['street-level', { module: layer }]]),
+      getAll: () => [],
+    }),
+    pinia,
+  });
+  t.after(() => {
+    disconnect();
+    input.destroy();
+    if (previous) globalThis.matchMedia = previous;
+    else delete globalThis.matchMedia;
+  });
+  const docked = useDockedStore(pinia);
+  const store = useEntityCardStore(pinia);
+  layer.attachDockedPhoto(
+    () => (docked.view?.kind === 'street' ? docked.view : null),
+    () => !docked.stowed,
+  );
+  const original = { layerId: 'street-level', id: 'mapillary:A' };
+  assert.equal(store.select(original, { reveal: false }), true);
+  docked.dock({
+    key: streetLevelCardKey(original.id),
+    kind: 'street',
+    title: 'A',
+    identity: original,
+  });
+  const originalDock = docked.view;
+  const originalCard = store.card;
+  const generation = store.selectionGeneration();
+  docked.setStowed(true);
+
+  const picked = store.open({
+    layerId: 'street-level',
+    id: 'mapillary:B',
+  });
+
+  assert.equal(docked.view, originalDock, 'the dock still owns the original');
+  assert.equal(store.card, originalCard);
+  assert.equal(store.selectionGeneration(), generation);
+  assert.equal(picked, false);
+  await settle();
+  assert.deepEqual(opened, ['B', 'A'], 'the provider was not asked again');
+  docked.setStowed(false);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(viewer.flights.started, 0);
+});
+
+test('a late B cannot disturb the newer C or change the dock again', async (t) => {
+  let started;
+  let showB;
+  const pending = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    showB = resolve;
+  });
+  t.after(showB);
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(t, null, undefined, ['mapillary'], {
+    viewer,
+    afterPose: async (id) => {
+      if (id !== 'B') return;
+      started();
+      await gate;
+    },
+  });
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const older = layer.openPhoto('mapillary:B', { frame: true });
+  await pending;
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(await layer.openPhoto('mapillary:C', { frame: true }), true);
+  showB();
+  assert.equal(await older, false);
+  assert.equal(layer.getUIState().street.imageId, 'C');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 49, lon: 2 });
+  assert.equal(viewer.flights.started, 1);
+});
+
+test('an empty docked lookup leaves the intact viewer alone and reports the attempted result', async (t) => {
+  let photoOpens = 0;
+  const layer = await layerWithPoses(
+    t,
+    () => {
+      photoOpens++;
+    },
+    async () => null,
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  let failure;
+  assert.equal(
+    await layer.openNearest(
+      { lat: 49, lon: 2 },
+      {
+        providerIds: ['mapillary'],
+        onDockedFailure: (state) => {
+          failure = state;
+        },
+      },
+    ),
+    false,
+  );
+  assert.equal(failure.nearestOutcome, 'empty');
+  assert.equal(photoOpens, 1);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+});
+
+test('switching sources during a lookup reloads the original docked photo', async (t) => {
+  let startLookup;
+  let finishLookup;
+  const looking = new Promise((resolve) => {
+    startLookup = resolve;
+  });
+  const result = new Promise((resolve) => {
+    finishLookup = resolve;
+  });
+  t.after(() => finishLookup(null));
+  const opens = [];
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    (id) => opens.push(id),
+    async () => {
+      startLookup();
+      return result;
+    },
+    ['mapillary', 'panoramax'],
+    { viewer },
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const opening = layer.openNearest(
+    { lat: 49, lon: 2 },
+    { providerIds: ['mapillary'] },
+  );
+  await looking;
+  layer.setProviderEnabled('panoramax', true);
+  assert.equal(await opening, false);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(layer.getUIState().dockPhotoUnavailable, undefined);
+  assert.equal(viewer.flights.started, 0);
+  assert.deepEqual(opens, ['A', 'A']);
+});
+
+test('a replacement cannot take the camera while the dock is hidden', async (t) => {
+  let finish;
+  let ready;
+  const posed = new Promise((resolve) => {
+    ready = resolve;
+  });
+  const wait = new Promise((resolve) => {
+    finish = resolve;
+  });
+  t.after(finish);
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(t, null, undefined, ['mapillary'], {
+    viewer,
+    afterPose: async (id) => {
+      if (id !== 'B') return;
+      ready();
+      await wait;
+    },
+  });
+  await layer.openPhoto('mapillary:A');
+  let visible = true;
+  layer.attachDockedPhoto(
+    () => dockedPhoto,
+    () => visible,
+  );
+  const opening = layer.openPhoto('mapillary:B', { frame: true });
+  await posed;
+  visible = false;
+  finish();
+  assert.equal(await opening, false);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(viewer.flights.started, 0);
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+});
+
+test('an unavailable original ends the recovery deadline with its last known identity', async (t) => {
+  let loseProvider = false;
+  const never = new Promise(() => {});
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(
+    t,
+    () => (loseProvider ? never : undefined),
+    undefined,
+    ['mapillary'],
+    { viewer },
+  );
+  await layer.openPhoto('mapillary:A');
+  layer.attachDockedPhoto(() => dockedPhoto);
+  loseProvider = true;
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const opening = layer.openPhoto('mapillary:B', { frame: true });
+  t.mock.timers.tick(10_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(4_000);
+  assert.equal(await opening, false);
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(layer.getUIState().dockPhotoUnavailable, true);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(viewer.flights.started, 0);
+
+  assert.equal(
+    await layer.openNearest(
+      { lat: 49, lon: 2 },
+      { providerIds: ['mapillary'] },
+    ),
+    false,
+  );
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+  assert.equal(layer.getUIState().dockPhotoUnavailable, true);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(viewer.flights.started, 0);
+});
+
 test('a dismissed Nearby street card cancels its lookup', async (t) => {
   let release;
   const gate = new Promise((resolve) => {
@@ -511,7 +1204,7 @@ test('a new map lookup takes over from a card whose photo is loading', async (t)
  * remembers photos A, B and C, a flight to pick, and Context's rail button,
  * whose clicks count the times Context was opened.
  */
-function bridge(t, { exitContextSelectionView, contextSelectionCover } = {}) {
+function bridge(t, { streetLayer = null, exitContextSelectionView, contextSelectionCover } = {}) {
   const previous = globalThis.matchMedia;
   globalThis.matchMedia = () => ({ matches: true });
   document.body.replaceChildren();
@@ -552,7 +1245,7 @@ function bridge(t, { exitContextSelectionView, contextSelectionCover } = {}) {
         [
           'street-level',
           {
-            module: {
+            module: streetLayer ?? {
               getAnalystRecords: () => photos.list(),
               photo: (id) => photos.get(id),
             },
@@ -613,6 +1306,7 @@ function bridge(t, { exitContextSelectionView, contextSelectionCover } = {}) {
   return {
     pinia,
     store,
+    docked: useDockedStore(pinia),
     request,
     announce,
     opened: () => opened,
@@ -1134,7 +1828,7 @@ test('a lookup given up after its photo first posed keeps that photo out of Near
 });
 
 /** The photos the real Street Level viewer announces for `layer`. */
-function watchPhotos(t, layer) {
+function watchPhotos(t, layer, docked = null) {
   const host = document.body.appendChild(document.createElement('div'));
   const app = createApp(StreetLevelViewer);
   const pinia = createPinia();
@@ -1150,8 +1844,23 @@ function watchPhotos(t, layer) {
       setEnabled() {},
       setParams() {},
       showToast() {},
-      photoRequested() {},
-      showPhoto: (photo) => photos.push(photo.id),
+      dockedPhoto: () => docked?.view,
+      dockedPhotoCanPresent: () => !docked?.stowed,
+      photoRequested(requestId) {
+        if (docked)
+          document.dispatchEvent(
+            new CustomEvent(STREET_LEVEL_PHOTO_REQUEST_EVENT, {
+              detail: { requestId },
+            }),
+          );
+      },
+      showPhoto(photo) {
+        photos.push(photo.id);
+        if (docked)
+          document.dispatchEvent(
+            new CustomEvent(STREET_LEVEL_PHOTO_EVENT, { detail: photo }),
+          );
+      },
     },
   });
   controls.connect();
@@ -1608,6 +2317,23 @@ test('on a phone the viewer follows the sheet: in the card only while the Contex
   body.setAttribute('data-mobile-sheet', 'layers');
   await settle();
   assert.ok(wrap.parentElement === home, 'home again');
+});
+
+test('on a phone the same viewer stays in the visible dock outside the Context sheet', async (t) => {
+  const { home, wrap, slot } = viewerPlaces(t);
+  const body = document.body;
+  const dock = body.appendChild(document.createElement('div'));
+  dock.id = 'sl-docked-slot';
+  body.classList.add('mobile-shell');
+  body.setAttribute('data-mobile-sheet', 'context');
+  await settle();
+  assert.equal(wrap.parentElement, slot);
+  body.setAttribute('data-mobile-sheet', 'cameras');
+  await settle();
+  assert.equal(wrap.parentElement, dock);
+  dock.hidden = true;
+  placeStreetLevelViewer();
+  assert.equal(wrap.parentElement, home);
 });
 
 test('unmounting the viewer home lets its viewer go, and a remounted home takes over', async (t) => {
@@ -2317,4 +3043,69 @@ test('closing a photo while it opens leaves no open in flight, so later steps ar
   assert.equal(await layer.openImage('mapillary', 'A', { frame: false }), true);
   walker.step('C');
   assert.equal(layer.settledPhotoId(), 'mapillary:C');
+});
+
+test('explicitly reopening the accepted dock photo reuses its frame', async (t) => {
+  const opened = [];
+  const layer = await layerWithPoses(t, (id) => opened.push(id));
+  assert.equal(await layer.openPhoto('mapillary:A'), true);
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const revision = layer.getUIState().acceptedPhoto.revision;
+  assert.equal(await layer.openPhoto('mapillary:A'), true);
+  assert.deepEqual(opened, ['A']);
+  assert.ok(layer.getUIState().acceptedPhoto.revision > revision);
+  assert.equal(layer.getUIState().dockPhotoLoading, undefined);
+});
+
+test('a visible dock admits an idle cursor step without another selection or frame', async (t) => {
+  const viewer = fakeCesiumViewer();
+  const layer = await layerWithPoses(t, null, undefined, ['mapillary'], {
+    viewer,
+  });
+  assert.equal(await layer.openPhoto('mapillary:A'), true);
+  layer.attachDockedPhoto(() => dockedPhoto);
+  const generation = layer.getUIState().photoRequests;
+  assert.equal(
+    await layer.openImage('mapillary', 'B', { request: false }),
+    true,
+  );
+  assert.equal(layer.settledPhotoId(), 'mapillary:B');
+  assert.equal(layer.getUIState().acceptedPhoto.requestId, null);
+  assert.equal(layer.getUIState().photoRequests, generation);
+  assert.equal(viewer.flights.started, 0);
+});
+
+test('a docked photo follows the viewer, and another card stays', (t) => {
+  const { store, docked, announce } = bridge(t);
+  const selected = [];
+  store.select = (identity) => {
+    selected.push(identity.id);
+    return true;
+  };
+  docked.dock({
+    key: streetLevelCardKey('mapillary:A'),
+    kind: 'street',
+    title: 'A',
+    identity: { layerId: 'street-level', id: 'mapillary:A' },
+  });
+  // A camera's card shows while the docked photo walks on.
+  store.card = { key: 'cctv:1', layerId: 'cctv', identity: { id: '1' } };
+  announce('B');
+  assert.equal(docked.view.key, 'street-level:mapillary:B');
+  assert.equal(docked.view.kind, 'street');
+  assert.deepEqual(selected, [], "the camera's card stays");
+  store.card = null;
+  announce('C');
+  assert.equal(docked.view.key, 'street-level:mapillary:C');
+  assert.deepEqual(
+    selected,
+    [],
+    'Nearby stays while the docked photo advances',
+  );
+  announce('C');
+  assert.deepEqual(
+    selected,
+    [],
+    'restoring the docked photo leaves Nearby open',
+  );
 });

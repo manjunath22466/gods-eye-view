@@ -31,6 +31,7 @@ export const useCctvStore = defineStore('gev-cctv', () => {
   const previewPopups = shallowRef([]);
   /** Whether the live video surface replaces the still frame. */
   const live = shallowRef(false);
+  const liveState = shallowRef('');
   /** `{label, state}` for the source badge; null until first synced. */
   const sourceBadge = shallowRef(null);
   /**
@@ -75,6 +76,10 @@ export const useCctvStore = defineStore('gev-cctv', () => {
     live.value = Boolean(on);
   }
 
+  function setLiveState(next) {
+    liveState.value = next || '';
+  }
+
   /** @param {{label: string, state: string}} next */
   function setSourceBadge(next) {
     sourceBadge.value = markRaw(next);
@@ -97,6 +102,7 @@ export const useCctvStore = defineStore('gev-cctv', () => {
     previewCards,
     previewPopups,
     live,
+    liveState,
     sourceBadge,
     summary,
     picker,
@@ -106,6 +112,7 @@ export const useCctvStore = defineStore('gev-cctv', () => {
     showPreviewCard,
     showPreviewPopup,
     setLive,
+    setLiveState,
     setSourceBadge,
     setSummary,
     setPicker,

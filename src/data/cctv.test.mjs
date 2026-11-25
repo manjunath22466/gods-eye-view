@@ -1445,13 +1445,52 @@ test('the opening camera follows a shared view that lands after CCTV turned on, 
       enabled: true,
       openingCameraProvisional: true,
     });
+    // The re-pick after a settled move notifies as the layer's own, so
+    // Context opens no card for it (a view moving while Cameras turns on).
+    const reopened = [];
+    const offReopen = cctvLayer.subscribe((state) => reopened.push(state));
     assert.equal(reopenNearestCamera(), true);
+    offReopen();
     assert.equal(cctvLayer.getUIState().activeCameraId, 'gb-kings-cross');
     // The re-pick is still the layer's own: Context opens no card for it.
     assert.equal(cctvLayer.getUIState().openingCamera, true);
+    // The scene summary also comes as short labelled lines for the tools.
+    assert.deepEqual(
+      cctvLayer.getUIState().summaryLines.map((line) => line.label),
+      ['Coverage', 'Overlap', 'Projection', 'Calibration', 'Source'],
+    );
+    assert.equal(
+      cctvLayer
+        .getUIState()
+        .summaryLines.find((line) => line.label === 'Calibration').value,
+      "Using the camera's default calibration",
+    );
+    const repicked = reopened.filter(
+      (state) => state.activeCameraId === 'gb-kings-cross',
+    );
+    assert.ok(repicked.length, 'the re-pick notifies');
+    assert.ok(
+      repicked.every((state) => state.openingCamera === true),
+      'every notification of the re-pick says it is the opening camera',
+    );
     assert.equal(reopenNearestCamera(), false, 'already the nearest');
 
+    // A camera restored over the opening pick (last time's choice, a share
+    // link) notifies as the layer's own: Context opens no card for it.
+    const seen = [];
+    const off = cctvLayer.subscribe((state) => seen.push(state));
+    seen.length = 0;
+    cctvLayer.setParams({ selectedCameraId: 'au-sydney' });
+    const restored = seen.find((state) => state.activeCameraId === 'au-sydney');
+    assert.equal(restored?.openingCamera, true);
+    assert.equal(
+      cctvLayer.getUIState().openingCamera,
+      false,
+      'only during the restore',
+    );
+    off();
     // Someone chooses a camera: settled moves leave it alone.
+    setActiveCamera('gb-kings-cross');
     setActiveCamera('au-sydney');
     assert.equal(reopenNearestCamera(), false);
     assert.equal(cctvLayer.getUIState().activeCameraId, 'au-sydney');
@@ -2020,6 +2059,8 @@ test('with Auto-hop on, a manual or voice step is a pick and a timed hop is quie
       activeCameraId: records[0].camera.id,
       enabled: true,
     });
+    const { lat, lon } = records[0].camera;
+    cctvLayer.setNearbyArea({ lat, lon, radiusKm: 5 });
     cctvLayer.setParams({ autoHop: true, autoHopSec: 8 });
     unsubscribe = cctvLayer.subscribe((state) =>
       seen.push([state.activeCameraId, state.openingCamera]),
@@ -2036,7 +2077,7 @@ test('with Auto-hop on, a manual or voice step is a pick and a timed hop is quie
     maybeAutoHop(Date.now());
     assert.equal(cctvLayer.getUIState().activeCameraId, 'hop-0');
     assert.equal(cctvLayer.getParams().autoHop, true);
-    cctvLayer.cycleCamera(1);
+    assert.equal(cctvLayer.stepNearbyCamera(1)?.cameraId, 'hop-1');
     cctvLayer.setPreviewedCamera('hop-1');
     await controlCctv(
       {
@@ -2060,6 +2101,7 @@ test('with Auto-hop on, a manual or voice step is a pick and a timed hop is quie
   } finally {
     cctvLayer.setPreviewedCamera(null);
     unsubscribe();
+    cctvLayer.setNearbyArea(null);
     cctvLayer.setParams({ autoHop: false });
     globalThis.document = originalDocument;
     globalThis.Image = originalImage;

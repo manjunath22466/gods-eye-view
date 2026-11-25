@@ -16,3 +16,9 @@ export function announceCameraReselection(cameraId, previousId) {
   );
   return true;
 }
+
+/**
+ * Sent on the document when a camera card moves the live video canvas into
+ * its top image or back to its hidden home, so the video starts or stops.
+ */
+export const CCTV_VIDEO_HOST_EVENT = 'gev:cctv-video-host';

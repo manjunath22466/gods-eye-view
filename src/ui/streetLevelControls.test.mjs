@@ -1287,3 +1287,36 @@ test('after Context moves the viewer to its home, the controls still bind it and
       registerStreetLevelViewerHome(null);
     }
   }));
+
+test('the Street Level controls hand dock placement and actions to the owning layer', async () =>
+  withDom(async ({ root, store }) => {
+    const actions = [];
+    const readDock = () => ({
+      kind: 'street',
+      identity: { id: 'mapillary:a' },
+    });
+    const canPresent = () => true;
+    const controls = new StreetLevelControls({
+      root,
+      store,
+      layer: {
+        attachDockedPhoto: (...args) => actions.push(args),
+        cancelDockedPhoto: () => actions.push('cancel'),
+        stopPlayback: () => actions.push('stop'),
+      },
+      actions: { dockedPhoto: readDock, dockedPhotoCanPresent: canPresent },
+    });
+    try {
+      controls.connect();
+      store.act('cancelDockedPhoto');
+      store.act('stopPlayback');
+    } finally {
+      controls.destroy();
+    }
+    assert.deepEqual(actions, [
+      [readDock, canPresent],
+      'cancel',
+      'stop',
+      [null],
+    ]);
+  }));

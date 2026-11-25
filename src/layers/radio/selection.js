@@ -1,5 +1,5 @@
 import { normalizeRadioFilter } from '../../data/layerState.js';
-import { RADIO_TUNER_DIRECTORY_LIMIT } from './policy.js';
+import { RADIO_SOURCES, RADIO_TUNER_DIRECTORY_LIMIT } from './policy.js';
 
 export function createSelection({
   state: layerState,
@@ -25,6 +25,12 @@ export function createSelection({
       numericVolume === null
         ? null
         : parts.volume.clampRadioVolume(numericVolume);
+    const nextSource = Object.hasOwn(params, 'source')
+      ? RADIO_SOURCES.includes(params.source)
+        ? params.source
+        : null
+      : undefined;
+    if (nextSource === null) return false;
 
     let changed = false;
     let filterChanged = false;
@@ -55,6 +61,10 @@ export function createSelection({
       parts.tuningNoise.syncTuningNoiseGain();
       changed = true;
     }
+    if (nextSource !== undefined && nextSource !== layerState._source) {
+      setRadioSource(nextSource);
+      changed = true;
+    }
     if (changed && parts.interaction.radioPresentationAllowed()) {
       parts.rendering.updateRenderVisibility();
       if (filterChanged) parts.rendering.reclusterStations();
@@ -65,7 +75,39 @@ export function createSelection({
   }
 
   function getRadioParams() {
-    return { filter: layerState._filter, volume: layerState._userVolume };
+    return {
+      filter: layerState._filter,
+      volume: layerState._userVolume,
+      source: layerState._source,
+    };
+  }
+
+  /**
+   * Switch between the internet stations and a local receiver. The local
+   * receiver stops the internet stream and takes the stations off the map;
+   * back on the internet stations, they are drawn again (read first if they
+   * never were). The receiver's own audio is stopped by its controls
+   * (LocalSdrControls), which follow this source.
+   */
+  function setRadioSource(next) {
+    layerState._source = next;
+    if (next === 'local') {
+      parts.tuning.endRadioTuning();
+      if (layerState._audioStationId)
+        parts.playback.stopRadioPlayback({ origin: 'user' });
+      // A directory read under way is let go.
+      layerState._requestGeneration += 1;
+      layerState._abortController?.abort();
+      layerState._abortController = null;
+      layerState._loading = false;
+    }
+    parts.interaction.syncRadioLifecyclePresentation();
+    if (
+      next === 'internet' &&
+      layerState._enabled &&
+      !layerState._stations.length
+    )
+      void parts.ingestion?.methods?.update?.();
   }
 
   // A paused or failed stream of another station would outlive its selection.
@@ -138,6 +180,63 @@ export function createSelection({
     // A user step to another station cancels a playback voice prepared.
     else if (origin === 'user' && changed)
       parts.presentation.emitPlaybackControl('select', origin);
+    return true;
+  }
+
+  /**
+   * Play a station whether or not the layer is on: with the layer off (a
+   * pinned station, the mini player) the stream starts from the station
+   * catalogue already read, without drawing the layer or turning it on.
+   * False when the catalogue has no such station, or while the local
+   * receiver is the source: it plays no internet station until the user
+   * switches back.
+   */
+  function playRadioStation(id, { origin = 'programmatic' } = {}) {
+    if (layerState._source === 'local') return false;
+    if (parts.interaction.radioPresentationAllowed())
+      return selectRadioStation(id, { autoplay: true, origin });
+    const station = layerState._stationById.get(String(id));
+    if (!station?.streamUrl) return false;
+    releaseStaleRadioStream(station.id);
+    parts.navigation.invalidateRadioCameraNavigation();
+    layerState._cancelledTuningPresentationStation = null;
+    layerState._tuningUnavailableStationId = null;
+    layerState._selectedId = station.id;
+    layerState._selectionGeneration += 1;
+    parts.presentation.emitState();
+    void parts.playback.playSelectedRadio({ origin, whileOff: true });
+    return true;
+  }
+
+  /**
+   * Step to the previous or next station of the catalogue already read,
+   * with the layer off: nearest the view first, as with the layer on, but
+   * without moving the camera or drawing anything. The stream follows the
+   * step while one is heard. False when there is nothing to step to.
+   */
+  function stepRadioStationWhileOff(
+    direction = 1,
+    { origin = 'programmatic' } = {},
+  ) {
+    const ranked = parts.queries.rankedVisibleStations();
+    if (ranked.length < 2) return false;
+    const current = ranked.findIndex(
+      (station) => station.id === layerState._selectedId,
+    );
+    const next =
+      ranked[
+        current < 0
+          ? 0
+          : (current + (direction < 0 ? -1 : 1) + ranked.length) % ranked.length
+      ];
+    const sounding = ['loading', 'buffering', 'playing'].includes(
+      layerState._audioState,
+    );
+    if (sounding) return playRadioStation(next.id, { origin });
+    releaseStaleRadioStream(next.id);
+    layerState._selectedId = next.id;
+    layerState._selectionGeneration += 1;
+    parts.presentation.emitState();
     return true;
   }
 
@@ -279,6 +378,8 @@ export function createSelection({
     setRadioParams,
     getRadioParams,
     selectRadioStation,
+    playRadioStation,
+    stepRadioStationWhileOff,
     cycleRadioStation,
     selectRequestedRadioStation,
     setRadioFilter,

@@ -31,7 +31,9 @@ import SuggestedLayers from './SuggestedLayers.vue';
 import { CONTEXT_EXEMPT, MISSIONS_LAYER, inspectorFeedLabel, inspectorHasLayers, inspectorLayerRows, presentLayerRow, shownApart } from '../../layerRowState.js';
 import { COUNT_TILE_LAYERS, countAgeMs } from '../../layerCounts.js';
 import { useLayerCountsStore } from '../../stores/layerCounts.js';
+import { usePinnedStore } from '../../stores/pinned.js';
 import { useSpaceMissionsStore } from '../../stores/spaceMissions.js';
+import { viewPin } from '../../placeCard.js';
 
 // The Inspector refreshes after the camera settles and while it is visible.
 // Data Layers owns layer switches.
@@ -100,6 +102,15 @@ const centerCoordinates = computed(() => {
   if (!at) return '';
   return `${Math.abs(at.lat).toFixed(3)}°${at.lat >= 0 ? 'N' : 'S'}  ${Math.abs(at.lon).toFixed(3)}°${at.lon >= 0 ? 'E' : 'W'}`;
 });
+// 📌 pins the view itself: the camera as it is and the place's name, from
+// what this header already has. Its tile flies back to the same view.
+const pinned = usePinnedStore();
+const thisViewPin = computed(() => viewPin(store.view, placeName.value));
+const viewPinned = computed(() => Boolean(thisViewPin.value && pinned.isPinned(thisViewPin.value.key)));
+function toggleViewPin() {
+  if (thisViewPin.value) pinned.toggle(thisViewPin.value);
+}
+
 const weather = computed(() => viewWeather.value?.reading ?? null);
 const weatherFailed = computed(() => Boolean(viewWeather.value?.failed && !viewWeather.value.pending));
 const viewZone = computed(() => {
@@ -601,9 +612,15 @@ function openSuggested() {
       <p class="view-context__eyebrow">{{ t('In view') }} · {{ t('Nothing selected') }}</p>
       <h3 class="view-context__title">
         <span>{{ placeName }}</span>
+        <UiButton v-if="thisViewPin" class="view-context__pin" :pressed="viewPinned" pressed-class="is-on" :label="viewPinned ? t('Unpin this view') : t('Pin this view')" @click="toggleViewPin">
+          <UiIcon name="keep" :size="null" />
+        </UiButton>
       </h3>
       <p class="view-context__region view-context__region--clock" :title="[centerCoordinates, clock].filter(Boolean).join(' · ')"><span v-if="centerCoordinates">{{ centerCoordinates }}</span><span>{{ clock }}</span></p>
     </template>
+    <!-- A layer whose list is Context's nothing-picked content (Radio's
+         stations) comes right under the place. -->
+    <slot name="lead" />
 
     <template v-if="!anyOn">
       <p v-if="contextNeedle" class="view-context__empty" role="status">{{ tn(0, '{n} results', '{n} results', { n: formatNumber(0) }) }}</p>

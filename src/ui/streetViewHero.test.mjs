@@ -9,6 +9,7 @@ import { createApp, h, nextTick } from 'vue';
 import StreetViewHero from './views/panels/StreetViewHero.vue';
 import { useEntityCardStore } from './stores/entityCard.js';
 import { useStreetLevelStore } from './stores/streetLevel.js';
+import { usePinnedStore } from './stores/pinned.js';
 import { presentStreetLevel } from './streetLevelPresentation.js';
 import { createStreetLevelLayer } from '../layers/streetLevel/index.js';
 import {
@@ -36,7 +37,17 @@ function connectLayer(cards, record) {
   });
 }
 
-function mountHero(t, id, { providerOn = true, alreadyOpen = false } = {}) {
+function mountHero(
+  t,
+  id,
+  {
+    providerOn = true,
+    alreadyOpen = false,
+    layerEnabled = true,
+    savedStill = null,
+    recordStill = null,
+  } = {},
+) {
   document.body.replaceChildren();
   const host = document.body.appendChild(document.createElement('div'));
   const pinia = createPinia();
@@ -45,12 +56,12 @@ function mountHero(t, id, { providerOn = true, alreadyOpen = false } = {}) {
     id: 'street-level',
     name: 'Street Level',
     enabled: true,
-    module: { photo: () => null },
+    module: { photo: () => (recordStill ? { still: recordStill } : null) },
   };
   connectLayer(cards, layer);
   const street = useStreetLevelStore(pinia);
   const view = (error = null) => ({
-    enabled: true,
+    enabled: layerEnabled,
     error,
     providers: [
       { id: id.replace(/^near:/, '').split(':')[0], active: providerOn },
@@ -58,6 +69,15 @@ function mountHero(t, id, { providerOn = true, alreadyOpen = false } = {}) {
     viewer: { open: alreadyOpen, photo: alreadyOpen ? { id } : null },
   });
   street.publish(view());
+  if (savedStill) {
+    usePinnedStore(pinia).pin({
+      key: `street-level:${id}`,
+      title: 'Saved street photo',
+      kind: 'street',
+      identity: { layerId: 'street-level', id },
+      still: savedStill,
+    });
+  }
   const asked = [];
   let answer = null;
   street.attach({
@@ -260,4 +280,25 @@ test('a superseded Nearby card offers Retry without adopting the other lookup er
   retry.click();
   await nextTick();
   assert.deepEqual(asked, [id, id]);
+});
+
+test('when Street Level is off only a pin can supply the hero still', async (t) => {
+  const saved = 'https://example.invalid/street.jpg';
+  const { host, asked } = mountHero(t, 'mapillary:saved', {
+    layerEnabled: false,
+    savedStill: saved,
+    recordStill: 'https://example.invalid/forgotten-live.jpg',
+  });
+  await nextTick();
+  const image = host.querySelector('.sl-hero__still img');
+  assert.equal(image?.getAttribute('src'), saved);
+  assert.equal(image.getAttribute('referrerpolicy'), 'no-referrer');
+  assert.match(
+    host.querySelector('.paused-chip')?.getAttribute('aria-label') ?? '',
+    /Street Level off · last image/,
+  );
+  image.dispatchEvent(new Event('error'));
+  await nextTick();
+  assert.equal(host.querySelector('.sl-hero__still img'), null);
+  assert.deepEqual(asked, []);
 });

@@ -170,6 +170,10 @@ export function _handleContextLayerChange(change) {
       explicit: true,
     });
     this.actions.setPanelCollapsed('radio-panel', false, { explicit: true });
+    // Radio's stations show in Context.
+    globalThis.document?.dispatchEvent(
+      new CustomEvent('gev:radio-show-stations'),
+    );
   }
   finishContextLayerChange(this);
 }

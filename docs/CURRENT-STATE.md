@@ -1157,6 +1157,60 @@ application hook (`src/render/cesium/cardPreviews.js`), each in a small scene
 of its own that frees its graphics context as it closes; the model comes from
 the fleet set loaded at startup, so opening a card fetches no model.
 
+### Lists, pins, the dock and Radio in Context
+
+Context's tabs sit on one line under its header (`ContextView.vue`):
+Inspect at the start, then, while they apply, Camera settings (a camera
+card's projection, coverage, auto-hop, calibration and scene summary; the
+tools stay in the CCTV panel and move into the tab while it shows,
+`cctvToolsPlacement.js`), a list layer's tab and Pinned; arrow keys,
+Home and End move between them. A layer with a list of its own (Space
+Missions, Weather, News, Recent Imagery, Cameras) adds a tab while it is
+on, named with its count or why it has none ("Imagery · no area"); two or
+more share one Lists tab with a sub-tab per layer, Space Missions' sub-tab
+holding the mission roster and a selected mission's card. A list going off
+while it shows moves Lists to the next list that is on; with none left,
+Context goes back to Inspect. While its list shows, Context borrows the layer's right-rail readout, which
+reports its own presence (`setContextListPresence`,
+`src/ui/contextLists.js`). Only a layer a person turned on in the last 15 s
+takes Context over; one a link or a restore turned on adds its tab quietly,
+and Cameras never take it over. Esc anywhere in Context clears the pick
+first while Inspect shows it, then closes the search (keeping its text);
+only then does the panel's own Esc collapse it. On the other tabs the pick
+is out of view, so Esc leaves it. A control that handles Esc itself (the
+radio tuner, a calibration value being typed, an open volume slider,
+Recent Imagery while it previews a day or draws a box: `data-owns-escape`)
+keeps it.
+
+Pin, among a card's actions, sends the item to the Pinned tab
+(`src/ui/stores/pinned.js`, `PinnedGrid.vue`); unpinning offers Undo above
+the tabs. A camera feed, a flight's cockpit view or a street-level photo
+can be docked bottom right (`src/ui/stores/docked.js`, `DockedView.vue`),
+directly above the radio mini player. Under an open Context the dock and
+the mini player stand at the column's foot (`data-column-bottom`), and the
+column keeps room for them (`--right-stack-reserve`, rightPanelRail.js),
+so Context shrinks to make room; until it has, they wait unseen.
+Replacing a docked street-level photo keeps the dock in place; while the
+new photo loads, the photo area may show a loading state, but the card and
+share link keep the original until the new photo appears. Cancel,
+a failure or a timeout restores the original photo: quick successive picks
+share one 10 s deadline, and the restore has up to 4 s more
+(`src/layers/streetLevel/index.js`). If the original photo cannot be
+restored either, the dock keeps its card and share link and shows the
+photo's saved still when there is one, or an "Image could not be opened"
+error announced to screen readers. A replacement that does not load, or
+a pick made while the dock restores its photo, says so on the dock for a
+few seconds. While the original is being restored, Cancel is hidden and
+the dock says it is still restoring the photo; by voice, a replacement
+asked for then is refused, and the reply says the docked photo is still
+being restored. With Radio
+on and nothing picked, Context lists the stations within the radius,
+nearest first, with a mini player; Radio's Data Layers row chooses Internet
+stations or Local receiver (the layer's `source`, kept in share links).
+Folded, Context's name opens it as its ◀ button does, and its scrollbar
+shows its thumb only while the pointer or focus is in the panel. The
+standalone panels are still there in this state.
+
 ### Nothing-on count tiles
 
 With no layer on, Context's "Worldwide, last known" tiles count eligible
@@ -1616,9 +1670,9 @@ Left weather rows retain only the toggle and one status line with a source
 tooltip. Configuration and the cyclone Storms list live in the cards, as do the
 cyclone advisory, position time, wind, pressure, geometry status and the
 official advisory link. The panel hides when empty, auto-expands once per page
-session and then preserves the user's collapsed state. Status lines reserve their space and refreshes are coalesced
-per frame. Generic keyed rail cards preserve DOM nodes and avoid identical
-writes; the weather panel owns descriptor mapping.
+session and then preserves the user's collapsed state; Context's Weather list
+tab shows only while a weather layer is on. Status lines reserve their space and refreshes are coalesced
+per frame. Generic keyed rail cards preserve DOM nodes and avoid identical writes; the weather list owns descriptor mapping.
 Inspection emphasizes the chosen scalar and marks the exact sampled location;
 the passive marker follows that snapshot, respects globe occlusion and disappears
 on dismissal, field/model changes, disable or teardown. Clean view and
@@ -3467,7 +3521,15 @@ Context controls own Contacts state, entry and exit transactions, layer
 snapshots and restoration. Space Missions is an ordinary layer outside this
 owner: the launches layer keeps its own Satellites dependency
 (`src/layers/launches/satelliteIntents.js`), and `SpaceMissionsControls`
-(`src/ui/spaceMissionsControls.js`) connects it to its panel and store. The application supplies the existing manager,
+(`src/ui/spaceMissionsControls.js`) connects it to its panel and store.
+Turning it on or off leaves the user's other layers as they are, and turning
+another layer on leaves it on. The one exception is Satellites, which it
+needs for orbit data: turning Space Missions on saves the Satellites layer's
+state, switches it on with the dense catalog and no dots or orbits drawn,
+and turning Space Missions off restores the saved params and, unless the
+person switched Satellites in the meantime, its saved on or off state
+(`src/layers/launches/ingestion.js`, `satelliteParamsForSpaceMissions` in
+`policyHelpers.js`). The application supplies the existing manager,
 installations search and camera/panel actions. Tab listeners and pending
 presentation work stop during disposal; layer restoration retains its existing
 compensation and latest-intent rules. Clear Selected Layers shares this owner,
@@ -4463,8 +4525,11 @@ they do not reduce the materialized entity count or establish an FPS gain.
   the map panel and Cockpit Display. Arrow keys retain native range adjustment.
   The enabled CCTV camera dropdown shows keyboard focus as well.
 - Tab reaches the Contacts control in Context and the separate Space Missions
-  rail button when launches are enabled. Both keep a visible focus ring when
-  active.
+  rail button when launches are enabled, and Context's own tabs (Inspect,
+  Camera settings, a list layer's tab and Pinned;
+  arrow keys move between them) and a list layer's sub-tabs while two or
+  more are on. Each keeps a
+  visible focus ring when active.
 - Keyboard focus on a Space Missions roster item uses the same temporary globe
   rotation and mission-marker highlight as pointer hover. Focus alone does not
   select the mission; Enter or Space performs selection. Keyboard and pointer
@@ -6706,8 +6771,8 @@ for every provider (Mapillary, Google Street View, KartaView, Panoramax).
 Context owns the one photo viewer (`StreetLevelViewer.vue`), in an
 offscreen, inert home that keeps it sized; a photo's card borrows it as its
 top image (`StreetViewHero.vue`) while the card can be seen, and gives it
-back on the Properties tab, under another phone sheet, or when the card
-goes. The controls and credit sit below the photo, and its date appears in
+to a visible dock or to the offscreen home on the Properties tab, under
+another phone sheet, or when the card goes. The controls and credit sit below the photo, and its date appears in
 the card's source line. The home registers on mount and lets the viewer go on unmount
 (`streetLevelViewerPlacement.js`). A photo picked on the map opens Context
 on its card after the photo settles, including the Context sheet on a phone.
@@ -6718,7 +6783,8 @@ or sheets during the load. A voice request also shows the settled photo's
 card. For billed Google Street View, the pane must be visible before the
 panorama loads. Context puts the viewer in its loading slot, then moves it
 to the accepted card. An explicit embedded request uses the visible overlay.
-A Nearby row shows its card at once and loads the photo into it. The latest
+A Nearby row normally shows its card at once and loads the photo into it. A
+docked replacement updates the card and dock when the new photo is visible. The latest
 pick wins: Street Level reports each photo request
 (`photoRequests`), and the bridge (`entityContextBridge.js`) shows a photo's
 card only if nothing else was selected since that request, a street card
@@ -6726,10 +6792,12 @@ included. While a photo's card shows, each step the viewer takes (arrows,
 PLAY) moves the card along without counting as a new pick, opening Context
 or changing its tab. If the camera moves on or the photo surface is hidden while a voice
 request loads, closing that late photo clears the card it opened. The photo card's × closes the photo, and so does selecting something
-else: the new item's card shows in Context, also on a phone, where the
+else unless the dock owns the photo or a pin owns a settled photo. A pin
+alone keeps its saved still and withdraws its pending load. The new item's
+card shows in Context, also on a phone, where the
 Context sheet stays. Another photo's card, a click on open ground or Escape
 on the map cancels only a photo still loading for that card; a photo
-already showing goes back to the viewer's offscreen home and stays open.
+already showing stays open in its dock or goes back to the offscreen home.
 Street Level remembers up to 12 photos opened this session. With no
 selection, In view lists remembered photos from enabled providers on the
 current map and drawn sequences that cross the viewport. The sequence row
@@ -7822,7 +7890,9 @@ When the user explicitly clicks Enable inside the expanded Radio section, the
 Context panel performs one internal post-render scroll to reveal the station
 filter and primary transport together without moving keyboard focus, the page,
 or the globe. Compact controls, voice/tools, restoration, Data Layers, and
-programmatic activation do not trigger this reveal.
+programmatic activation do not trigger this reveal. Turning Radio on as a
+user also brings Context's Inspect forward; with nothing picked its station
+list shows there, and a picked or followed item stays until it is let go.
 
 Radio directory admission is atomic on both sides of the proxy boundary. A
 refresh is healthy only when it reaches the minimum accepted-query and station
@@ -9888,7 +9958,7 @@ on it.
   counters, and timing labels.
 - Voice debug log: `tail -f .gev-logs/realtime-conversations.jsonl` (gitignored).
 
-Replay chase-camera updates run in Cesium `preUpdate` before scene traversal, preventing 3D-tile refinement stutter when the mission replay speed is reduced. Replay Ascent first gives the selected launch site a five-second tile-preparation hold before displaying the T-minus countdown. Replay ascent duration is mission-specific: disclosed insertion, SECO, or separation timing is compressed into the replay, while sparse records use reconstructed path length with bounded fallback timing instead of a universal fixed duration. Replay transitions directly from ascent to orbit; stage re-entry/recovery remains static contextual linework and is never a camera-tracked playback phase. The screen-space rocket/thrust symbol renders at 50% of its 92 × 138 px design box, while the separate callout text remains unchanged. Successful/upcoming selected missions show a current orbit marker: green for a reliable TLE match or amber and explicitly estimated when no live match exists. Failed launches show their source status and suppress live/estimated orbit markers and fallback rings. A retained Launch Library orbit is labeled as the planned target, an absent ascent is reported as unavailable, and replay-only controls remain hidden unless the selected mission has a rendered track; authoritative supplied trajectory points remain visible when present. Mission orbit primitives realign by model matrix each tick from the same current-GMST frame as their marker, preventing ring/marker drift; their host annotation reads the position cache updated in that same tick. During depth-dominant ascent segments, the replay rocket retains its last valid path-facing rotation rather than snapping toward the camera. Mission selection and replay overlays never call photoreal `sampleHeight()` from the render loop; the launch-zone ground primitive and precomputed surface-safe replay path avoid remote tile-refinement probes that previously caused a one-second globe texture pulse. The shared host replaces the former mission-label visibility churn and quadratic overlap loop; the layer's remaining frame sweep only culls native point/billboard geometry and refreshes selected UTC copy when its displayed second changes. Replay samples uneven path vertices by cumulative distance and normalizes camera-yaw easing to frame time.
+Replay chase-camera updates run in Cesium `preUpdate` before scene traversal, preventing 3D-tile refinement stutter when the mission replay speed is reduced. Replay first gives the selected launch site a five-second tile-preparation hold before displaying the T-minus countdown. Replay ascent duration is mission-specific: disclosed insertion, SECO, or separation timing is compressed into the replay, while sparse records use reconstructed path length with bounded fallback timing instead of a universal fixed duration. Replay transitions directly from ascent to orbit; stage re-entry/recovery remains static contextual linework and is never a camera-tracked playback phase. The screen-space rocket/thrust symbol renders at 50% of its 92 × 138 px design box, while the separate callout text remains unchanged. Successful/upcoming selected missions show a current orbit marker: green for a reliable TLE match or amber and explicitly estimated when no live match exists. Failed launches show their source status and suppress live/estimated orbit markers and fallback rings. A retained Launch Library orbit is labeled as the planned target, an absent ascent is reported as unavailable, and replay-only controls remain hidden unless the selected mission has a rendered track; authoritative supplied trajectory points remain visible when present. Mission orbit primitives realign by model matrix each tick from the same current-GMST frame as their marker, preventing ring/marker drift; their host annotation reads the position cache updated in that same tick. During depth-dominant ascent segments, the replay rocket retains its last valid path-facing rotation rather than snapping toward the camera. Mission selection and replay overlays never call photoreal `sampleHeight()` from the render loop; the launch-zone ground primitive and precomputed surface-safe replay path avoid remote tile-refinement probes that previously caused a one-second globe texture pulse. The shared host replaces the former mission-label visibility churn and quadratic overlap loop; the layer's remaining frame sweep only culls native point/billboard geometry and refreshes selected UTC copy when its displayed second changes. Replay samples uneven path vertices by cumulative distance and normalizes camera-yaw easing to frame time.
 
 Orbit replay framing uses one combined bounding sphere for Earth and every sample of the selected orbit. The camera derives its final range from that full envelope, while its look-at target retains a radial bias toward the moving vehicle rather than collapsing onto the singular Earth-center frame. Compact-orbit launchers therefore remain tracked during camera rotation, and highly eccentric transfer orbits still keep both the globe and their distant apogee arc visible. The orbital camera stays on one side of the mission's 3D orbit plane and uses the vehicle radial as visual up, so forward motion remains screen-left through polar/local-heading wraps instead of alternating left and right. The fixed-size cyan orbit dot retains one pixel scale throughout the pullback. While replay owns the camera, the selected launch-site host label is suppressed so it cannot duplicate or overlap the replay vehicle's DOM callout; cancel/completion restores it.
 
