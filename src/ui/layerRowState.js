@@ -2,13 +2,17 @@ import { layerFeedState } from '../data/feedState.js';
 
 export const CONTEXT_EXEMPT = Object.freeze(['radio', 'directions']);
 export const MISSIONS_LAYER = 'rocket-launches';
+export const MISSIONS_LIST_LAYERS = Object.freeze([
+  MISSIONS_LAYER,
+  'satellites',
+]);
 
 export function inspectorLayerRows(rows) {
   return rows.filter((row) => row.enabled && !CONTEXT_EXEMPT.includes(row.id));
 }
 
 export function shownApart(id, missionsEnabled) {
-  return missionsEnabled && id === MISSIONS_LAYER;
+  return missionsEnabled && MISSIONS_LIST_LAYERS.includes(id);
 }
 
 export function inspectorHasLayers(rows, missionsEnabled) {

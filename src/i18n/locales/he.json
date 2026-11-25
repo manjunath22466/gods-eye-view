@@ -2562,7 +2562,6 @@
   "No matching languages": "אין שפות תואמות",
   "Selected Space Mission": "משימת החלל הנבחרת",
   "Show all missions": "הצגת כל המשימות",
-  "Deselect mission": "ביטול בחירת המשימה",
   "PAYLOAD": "מטען",
   "NAME": "שם",
   "TYPE": "סוג",
@@ -2578,11 +2577,8 @@
   "Cancel replay": "ביטול ההצגה החוזרת",
   "Previous mission": "המשימה הקודמת",
   "Next mission": "המשימה הבאה",
-  "Available Space Missions": "משימות החלל הזמינות",
-  "AVAILABLE MISSIONS": "המשימות הזמינות",
   "SELECT A MISSION TO INSPECT": "בחר משימה לבחינה",
   "LOADING 30-DAY MISSION INDEX": "טוען את רשימת המשימות ל-30 יום",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "Tab לתצוגה מקדימה · Enter / מקש הרווח בוחר",
   "Panel position": "מקום הפאנל",
   "Move above the dock": "מעבר מעל העגינה",
   "Dock to the right": "עגינה משמאל",
@@ -4722,5 +4718,7 @@
   "{name} per page, showing {range}": "{name} בעמוד, מוצגות {range}",
   "Tuner and volume": "מקלט ועוצמת שמע",
   "Open Context to view street-level imagery": "פתחו את ההקשר כדי לראות תמונות ברמת הרחוב",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "תוויות של השכבות הפעילות: הצפיפות קובעת כמה מהן מתויגות. האפשרויות של כל שכבה נמצאות בשורה שלה בשכבות הנתונים"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "תוויות של השכבות הפעילות: הצפיפות קובעת כמה מהן מתויגות. האפשרויות של כל שכבה נמצאות בשורה שלה בשכבות הנתונים",
+  "Upcoming": "בקרוב",
+  "Nothing matches “{text}”.": "אין התאמות ל“{text}”."
 }

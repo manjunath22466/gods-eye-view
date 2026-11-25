@@ -23,15 +23,13 @@ import LocalReceiverPlayer from './panels/LocalReceiverPlayer.vue';
 import DockedView from './panels/DockedView.vue';
 import CctvTools from './panels/CctvTools.vue';
 import { placeCctvTools, registerCctvToolsHome, returnCctvToolsHome } from '../cctvToolsPlacement.js';
-import { CAMERA_SETTINGS_EVENT, CONTEXT_NEARBY_EVENT, ESCAPE_OWNING_DIALOGS } from '../contextEvents.js';
+import { CAMERA_SETTINGS_EVENT, CONTEXT_MISSIONS_EVENT, CONTEXT_NEARBY_EVENT, ESCAPE_OWNING_DIALOGS } from '../contextEvents.js';
 import StreetLevelViewer from './panels/StreetLevelViewer.vue';
 import { placeStreetLevelViewer, registerStreetLevelViewerHome } from '../streetLevelViewerPlacement.js';
 import { useStreetLevelStore } from '../stores/streetLevel.js';
 import { useDockedStore } from '../stores/docked.js';
 import { useRadioLayer } from '../radioContext.js';
 import { useSpaceMissionsStore } from '../stores/spaceMissions.js';
-import MissionRoster from './panels/MissionRoster.vue';
-import MissionDetail from './panels/MissionDetail.vue';
 import {
   contextListChoice,
   contextListPresence,
@@ -39,7 +37,6 @@ import {
   leaveContextLists,
   listForLayer,
   listsOn,
-  setContextListPresence,
   showContextList,
   shownList,
 } from '../contextLists.js';
@@ -83,13 +80,30 @@ onBeforeUnmount(() => {
   bodyWatch?.disconnect();
   globalThis.document?.removeEventListener('visibilitychange', updatePageVisibility);
 });
+const missions = useSpaceMissionsStore();
+// Keep the selected follow alive while Inspect shows Missions. A later pick
+// or the end of the follow removes the temporary route back to that card.
+const missionFollowGeneration = ref(null);
+const missionsOverFollow = computed(() =>
+  missions.enabled &&
+  missionFollowGeneration.value === entityCards.selectionGeneration(),
+);
+const viewContextShown = computed(() => !entityCard.value || Boolean(inlineCameraId.value) || missionsOverFollow.value);
+watch(missionsOverFollow, (showing) => {
+  if (!showing) missionFollowGeneration.value = null;
+});
+// An explicit mission replay can take the camera. Keep its controls on
+// screen once there is no longer a followed card to return to.
+watch(() => entityCards.isFollowing(), (following) => {
+  if (!following && missionsOverFollow.value) entityCards.clear();
+});
 // What is pinned: with anything pinned, Context has two tabs, Inspect (the
 // pick, or awareness) and Pinned (the grid); with nothing pinned, no tabs.
 const pinned = usePinnedStore();
 const { pins, tab: pinnedTab } = storeToRefs(pinned);
-// A layer with a list of its own (Space Missions, Weather, News, Recent
-// Imagery) adds a list while it is on. The list bodies stay mounted in
-// Context so the readouts can retain their state while another tab shows.
+// Weather, News, Recent Imagery add a list while they are on.
+// Their bodies stay mounted while another tab shows. Space Missions
+// has its roster in Inspect.
 const lists = computed(() => listsOn(contextListPresence));
 const listShown = computed(() =>
   contextListsActive.value ? shownList(lists.value, contextListChoice.value) : '',
@@ -164,24 +178,10 @@ watch(
     const added = ids.find((id) => !before.includes(id));
     const direct = entityCards.lastDirectOn;
     if (added && direct && Date.now() - direct.at < DIRECT_ON_MS && listForLayer(direct.layerId) === added) {
-
       showContextList(added);
     }
   },
 );
-// Space Missions' list is on while its layer is; the others report from
-// their readouts (contextLists.js). Turned off while its list shows, Lists
-// moves to the next list that is on; with none left, Context goes to Inspect
-// (never back to Pinned).
-const { enabled: missionsOn, roster: missionRoster, mission: selectedMission } = storeToRefs(useSpaceMissionsStore());
-watch(
-  [missionsOn, () => missionRoster.value?.entries?.length],
-  ([on, count]) => {
-    setContextListPresence('space-missions', on ? { count: count ?? null } : null);
-  },
-  { immediate: true },
-);
-onBeforeUnmount(() => setContextListPresence('space-missions', null));
 // Any list going while focus is on its sub-tab or in its list hands focus to
 // the list that shows then: its sub-tab, or the Lists tab when it is the
 // only one left. The Lists tab going is handled with the other tabs below.
@@ -198,7 +198,7 @@ watch(
     );
   },
 );
-// Any other tab that goes while it has focus (Lists, when its last list
+// A tab that goes while it has focus (Lists, when its last list
 // layer goes off; Camera settings, when Cameras go off) hands focus to the
 // tab that shows then, else Inspect, else Context's body.
 watch(tabIds, (ids, before) => {
@@ -210,19 +210,6 @@ watch(tabIds, (ids, before) => {
     (doc.getElementById(`context-tab-${tab.value}`) ?? doc.getElementById('context-tab-inspect') ?? contextScroller.value)?.focus({ preventScroll: true }),
   );
 });
-// Keep focus in Missions when its detail replaces the roster or closes.
-const missionHost = ref(null);
-watch(
-  () => Boolean(selectedMission.value),
-  async (selected) => {
-    const host = missionHost.value;
-    if (!host?.contains(globalThis.document?.activeElement)) return;
-    await nextTick();
-    const active = globalThis.document?.activeElement;
-    if (!selected && active?.closest('[data-mission-roster-id]') && host.contains(active)) return;
-    host.querySelector(selected ? '[data-mission-close]' : '[data-mission-roster-id]')?.focus();
-  },
-);
 // Radio: with the layer on, its stations show in Context while nothing is
 // picked; the station selected or heard is in the mini player as well,
 // whatever Context shows. Tapping a pinned station plays it and leaves
@@ -233,12 +220,11 @@ const { module: radioModule, ui: radioUi } = useRadioLayer();
 // shell publishes whether it is on and its open sheet.
 const contextOnScreen = computed(() => !phoneShell.value?.enabled || phoneShell.value.sheet === 'context');
 const radioListShown = computed(() =>
-  Boolean(contextOpen.value && showInspect.value && !entityCard.value && radioUi.value?.enabled && contextOnScreen.value),
+  Boolean(contextOpen.value && showInspect.value && viewContextShown.value && radioUi.value?.enabled && contextOnScreen.value),
 );
 // A station picked on the globe (or Radio just turned on) shows in the list:
 // Inspect, with the pick let go so the list is in view.
 function showStations() {
-
   entityCards.clear();
   pinned.show('inspect');
 }
@@ -247,16 +233,42 @@ function showStations() {
 // Radio turned on only brings Inspect forward: a picked (or followed) item
 // stays, and its stations show once it is let go.
 const showInspectTab = () => pinned.show('inspect');
+function showMissions(event) {
+  if (!missions.enabled) return;
+  const focusWasOnCard = globalThis.document?.activeElement?.closest('#entity-card');
+  // A globe pick has already released the camera; the card's follow report can lag.
+  missionFollowGeneration.value = event?.detail?.keepFollow !== false && entityCards.isFollowing()
+    ? entityCards.selectionGeneration()
+    : null;
+  if (!missionsOverFollow.value) entityCards.clear();
+  pinned.show('inspect');
+  if (missionsOverFollow.value && focusWasOnCard)
+    void nextTick(() => contextScroller.value?.querySelector('[data-missions-back]')?.focus());
+}
+watch(() => missions.enabled, (enabled) => {
+  if (enabled || !globalThis.document?.activeElement?.closest('.nearby-missions, [data-missions-back]')) return;
+  void nextTick(() => {
+    const scroller = contextScroller.value;
+    const target = scroller?.querySelector('.entity-card__close') ?? scroller?.querySelector('#context-tab-inspect') ?? scroller;
+    target?.focus({ preventScroll: true });
+  });
+});
+function returnToFollowedCard() {
+  missionFollowGeneration.value = null;
+  void nextTick(() => contextScroller.value?.querySelector('.entity-card__close')?.focus());
+}
 onMounted(() => {
   globalThis.document?.addEventListener('gev:radio-selected', showStations);
   globalThis.document?.addEventListener('gev:radio-show-stations', showInspectTab);
   globalThis.document?.addEventListener(CONTEXT_NEARBY_EVENT, showStations);
+  globalThis.document?.addEventListener(CONTEXT_MISSIONS_EVENT, showMissions);
   globalThis.document?.addEventListener(CAMERA_SETTINGS_EVENT, showCameraSettings);
 });
 onBeforeUnmount(() => {
   globalThis.document?.removeEventListener('gev:radio-selected', showStations);
   globalThis.document?.removeEventListener('gev:radio-show-stations', showInspectTab);
   globalThis.document?.removeEventListener(CONTEXT_NEARBY_EVENT, showStations);
+  globalThis.document?.removeEventListener(CONTEXT_MISSIONS_EVENT, showMissions);
   globalThis.document?.removeEventListener(CAMERA_SETTINGS_EVENT, showCameraSettings);
 });
 // A pinned station played with Radio on: the pick lets go so the station
@@ -337,6 +349,11 @@ function onEscape(event) {
   if (globalThis.document?.body?.classList.contains('mobile-shell')) return;
   // Focus inside the card or the search goes with them; it moves to the
   // panel first, so the next Esc still reaches Context.
+  if (showInspect.value && missionsOverFollow.value) {
+    event.preventDefault();
+    returnToFollowedCard();
+    return;
+  }
   const leaving = event.target.closest('#entity-card, .context-search');
   if (entityCard.value && showInspect.value) entityCards.clear();
   else if (contextSearchOpen.value) closeContextSearch();
@@ -370,7 +387,7 @@ function toggleSearch() {
   void nextTick(() => searchInput.value?.focus());
 }
 const searchHint = computed(() =>
-  entityCard.value ? t('Search {name} and nearby', { name: entityCard.value.title }) : t('Search what is in view'),
+  !viewContextShown.value && entityCard.value ? t('Search {name} and nearby', { name: entityCard.value.title }) : t('Search what is in view'),
 );
 
 // Expanded, Context becomes a full-height column over the right edge of the
@@ -412,7 +429,7 @@ const readInspectorVisibility = () =>
 const contextOpen = computed(() => chromePanels.value['global-context-panel']?.collapsed === false);
 const { presence: cockpit } = storeToRefs(useCockpitStore());
 const inspectorMount = ref(null);
-const viewContextPresent = computed(() => showInspect.value && (!entityCard.value || Boolean(inlineCameraId.value)));
+const viewContextPresent = computed(() => showInspect.value && viewContextShown.value);
 const inspectorShown = computed(() =>
   inspectorMount.value !== null &&
   contextOpen.value &&
@@ -746,9 +763,12 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
           <div id="context-tab-panel" :hidden="tab === 'lists'" :role="tabIds.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="tabIds.length > 1 ? `context-tab-${tab === 'lists' ? 'inspect' : tab}` : undefined">
             <template v-if="tab === 'lists'"></template>
             <template v-else-if="showInspect">
-              <EntityCard v-if="!inlineCameraId" />
-              <!-- Nothing picked: the place, then Radio's stations while it
-                   is on, then what is nearby. -->
+              <UiButton v-if="entityCard && missionsOverFollow" data-missions-back variant="action" size="compact" @click="returnToFollowedCard">
+                <UiIcon name="chevron_left" :size="null" />{{ t('Back to {name}', { name: entityCard.title }) }}
+              </UiButton>
+              <EntityCard v-else-if="!inlineCameraId" />
+              <!-- The place, Radio's stations, and what is nearby while
+                   there is no visible item card. -->
               <ViewContext v-if="viewContextPresent" @mounted="inspectorMount = Symbol()" @unmounting="inspectorMount = null">
                 <!-- Radio shows only the source chosen on its row: the
                      internet stations, or the local receiver. -->
@@ -769,12 +789,6 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
         <div v-show="contextOpen && tab === 'lists'" id="context-lists" role="tabpanel" aria-labelledby="context-tab-lists">
           <div v-if="lists.length > 1" class="context-pin-tabs context-list-tabs" role="tablist" :aria-label="t('Lists')" @keydown="onListKey">
             <UiButton v-for="list in lists" :id="`context-list-tab-${list.id}`" :key="list.id" role="tab" :aria-selected="String(listShown === list.id)" :tabindex="listShown === list.id ? 0 : -1" :aria-controls="`context-list-${list.id}`" @click="showContextList(list.id)">{{ listLabel(list) }}</UiButton>
-          </div>
-          <div v-show="listShown === 'space-missions'" id="context-list-space-missions" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-space-missions' : undefined">
-            <div id="space-mission-panel-host" ref="missionHost">
-              <MissionRoster />
-              <MissionDetail />
-            </div>
           </div>
           <div v-show="listShown === 'weather'" id="context-list-weather" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-weather' : undefined">
             <div id="weather-panel-body" class="context-list__body ui-scroll"></div>

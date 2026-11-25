@@ -1,6 +1,5 @@
-// src/ui/missionPanels.test.mjs — the Space Missions roster and selected
-// mission render what the launches layer publishes (`subscribePanel()`),
-// over happy-dom.
+// src/ui/missionPanels.test.mjs — the selected Space Mission renders what
+// the launches layer publishes (`subscribePanel()`), over happy-dom.
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,10 +8,6 @@ import { createApp, h, nextTick } from 'vue';
 import { usePinnedStore } from './stores/pinned.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
 import MissionDetail from './views/panels/MissionDetail.vue';
-import MissionRoster from './views/panels/MissionRoster.vue';
-import ContextView from './views/ContextView.vue';
-import { usePanelChromeStore } from './stores/panelChrome.js';
-import { leaveContextLists, showContextList } from './contextLists.js';
 
 function fixture(t) {
   document.body.replaceChildren();
@@ -22,7 +17,7 @@ function fixture(t) {
   const host = scroller.appendChild(document.createElement('div'));
   const pinia = createPinia();
   const app = createApp({
-    render: () => [h(MissionRoster), h(MissionDetail)],
+    render: () => h(MissionDetail),
   }).use(pinia);
   app.mount(host);
   t.after(() => app.unmount());
@@ -40,10 +35,6 @@ function fixture(t) {
     toggleReplayPause: record('toggle'),
     cancelReplay: record('cancel'),
     setReplaySpeed: record('speed'),
-    rosterPointerEnter: record('pointer-enter'),
-    rosterPointerLeave: record('pointer-leave'),
-    rosterFocus: record('focus-row'),
-    rosterBlur: record('blur-row'),
   });
   const $ = (selector) => document.querySelector(selector);
   const publish = async (view) => {
@@ -53,22 +44,6 @@ function fixture(t) {
   };
   return { $, publish, calls, scroller, pinia };
 }
-
-const entry = (id, index, label = id.toUpperCase()) => ({
-  index,
-  id,
-  color: 'rgb(1, 2, 3)',
-  label,
-  ariaLabel: `Select ${label}`,
-  provider: 'SpaceX',
-  date: '2026-11-01',
-});
-
-const roster = (entries) => ({
-  count: `${entries.length} / 30D`,
-  entries,
-  empty: 'NONE IN WINDOW',
-});
 
 const replay = (extra = {}) => ({
   available: true,
@@ -106,97 +81,7 @@ const mission = (extra = {}) => ({
   ...extra,
 });
 
-test('before the layer presents, the roster loads and no mission shows', (t) => {
-  const { $ } = fixture(t);
-  assert.equal($('[data-mission-roster-count]').textContent, '—');
-  assert.equal(
-    $('.space-mission-roster-empty').textContent,
-    'LOADING 30-DAY MISSION INDEX',
-  );
-  assert.equal($('#space-mission-panel').hidden, true);
-  assert.equal($('[data-mission-replay-speed-output]').textContent, '1×');
-  assert.equal($('[data-mission-replay-speed]').value, '1');
-});
-
-test('the roster lists missions and drives selection and preview', async (t) => {
-  const { $, publish, calls } = fixture(t);
-  await publish({
-    roster: roster([entry('a', 0), entry('b', 3)]),
-    mission: null,
-  });
-  assert.equal($('[data-mission-roster-count]').textContent, '2 / 30D');
-  const [a, b] = document.querySelectorAll('.space-mission-roster-item');
-  assert.equal(b.dataset.missionRosterIndex, '3');
-  assert.equal(b.dataset.missionRosterId, 'b');
-  assert.equal(b.getAttribute('aria-label'), 'Select B');
-  assert.equal(b.querySelector('small').textContent, 'SpaceX · 2026-11-01');
-  assert.equal(
-    b
-      .querySelector('.space-mission-roster-marker')
-      .style.getPropertyValue('--mission-roster-color'),
-    'rgb(1, 2, 3)',
-  );
-  b.click();
-  b.dispatchEvent(new MouseEvent('mouseenter'));
-  b.dispatchEvent(new MouseEvent('mouseleave'));
-  a.dispatchEvent(new FocusEvent('blur', { relatedTarget: b }));
-  a.dispatchEvent(new FocusEvent('blur', { relatedTarget: null }));
-  assert.deepEqual(calls, [
-    ['select', 3],
-    ['pointer-enter', 3],
-    ['pointer-leave'],
-    ['blur-row', 3],
-    ['blur-row', null],
-  ]);
-  await publish({ roster: roster([]), mission: null });
-  assert.equal($('.space-mission-roster-empty').textContent, 'NONE IN WINDOW');
-  assert.equal(
-    document.querySelectorAll('.space-mission-roster-item').length,
-    0,
-  );
-});
-
-test('a roster refresh keeps keyboard focus and its preview on the same mission', async (t) => {
-  const { publish, calls } = fixture(t);
-  await publish({
-    roster: roster([entry('a', 0), entry('b', 1), entry('c', 2)]),
-    mission: null,
-  });
-  const list = document.querySelector('[data-mission-roster-list]');
-  // Browsers drop focus from a node that is moved; happy-dom keeps it, so
-  // any move drops it here.
-  const insertBefore = list.insertBefore;
-  list.insertBefore = function (node, ref) {
-    if (list.contains(document.activeElement)) document.activeElement.blur();
-    return insertBefore.call(this, node, ref);
-  };
-  document.querySelector('[data-mission-roster-id="b"]').focus();
-  calls.length = 0;
-  await publish({
-    roster: roster([entry('b', 0), entry('c', 1), entry('a', 2)]),
-    mission: null,
-  });
-  const focused = document.activeElement;
-  assert.equal(focused?.dataset?.missionRosterId, 'b');
-  assert.deepEqual(calls.at(-1), ['focus-row', 0]);
-});
-
-test('a departed focused mission continues focus beyond the list', async (t) => {
-  const { publish } = fixture(t);
-  await publish({
-    roster: roster([entry('a', 0), entry('b', 1)]),
-    mission: null,
-  });
-  document.querySelector('[data-mission-roster-id="b"]').focus();
-  await publish({ roster: roster([entry('a', 0)]), mission: null });
-  assert.equal(
-    document.activeElement ===
-      document.querySelector('[data-mission-roster-focus-continuation]'),
-    true,
-  );
-});
-
-test('the selected mission reads as an item card: map, name and status, actions, figures, folded details', async (t) => {
+test('the selected mission reads as an item card: map, name and status, actions, figures, details', async (t) => {
   const { $, publish } = fixture(t);
   await publish({ roster: null, mission: mission() });
   const panel = $('#space-mission-panel');
@@ -232,9 +117,9 @@ test('the selected mission reads as an item card: map, name and status, actions,
     null,
   );
   assert.equal(panel.querySelector('[data-mission-index]'), null);
-  // Payloads and stages fold under More details, folded at first.
+  // Payloads and stages sit under More details, open at first.
   const more = $('[data-mission-more]');
-  assert.equal(more.open, false);
+  assert.equal(more.open, true);
   assert.equal(more.querySelector('summary').textContent, 'More details');
   assert.equal($('[data-mission-site]'), null);
   assert.equal($('[data-mission-speed]').title, '27,576 km/h');
@@ -372,89 +257,16 @@ test('the replay controls follow the layer and call its commands', async (t) => 
   speed.value = '3';
   speed.dispatchEvent(new Event('input'));
   $('[data-mission-focus]').click();
-  $('[data-mission-close]').click();
   assert.deepEqual(calls, [
     ['replay'],
     ['toggle'],
     ['cancel'],
     ['speed', 3],
     ['focus'],
-    ['deselect'],
   ]);
 });
 
-test('closing from the keyboard hands focus to the mission in the roster', async (t) => {
-  const { $, publish, calls } = fixture(t);
-  await publish({
-    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
-    mission: mission(),
-  });
-  const close = $('[data-mission-close]');
-  close.focus();
-  // A keyboard press clicks with no pointer count.
-  close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
-  await publish({
-    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
-    mission: null,
-  });
-  assert.deepEqual(calls[0], ['deselect']);
-  assert.equal(
-    document.activeElement?.dataset?.missionRosterId,
-    'starlink-12-3',
-  );
-  // A pointer close leaves focus where it is.
-  await publish({
-    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
-    mission: mission(),
-  });
-  close.focus();
-  close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-  await publish({
-    roster: roster([entry('a', 0), entry('starlink-12-3', 1)]),
-    mission: null,
-  });
-  assert.equal(document.activeElement, close);
-});
-
-test('in the panel, a keyboard close focuses the closed mission, not the first row', async (t) => {
-  document.body.replaceChildren();
-  const host = document.body.appendChild(document.createElement('div'));
-  const pinia = createPinia();
-  const app = createApp(ContextView).use(pinia);
-  const store = useSpaceMissionsStore(pinia);
-  const rows = roster([entry('a', 0), entry('starlink-12-3', 1)]);
-  const previews = [];
-  store.setEnabled(true);
-  // Deselecting publishes at once, as the launches layer does.
-  store.connect({
-    deselectMission: () => store.publish({ roster: rows, mission: null }),
-    rosterFocus: (index) => previews.push(index),
-  });
-  store.publish({ roster: rows, mission: mission() });
-  app.mount(host);
-  const chrome = usePanelChromeStore(pinia);
-  const owner = chrome.connect({});
-  chrome.publish(owner, 'global-context-panel', { collapsed: false });
-  showContextList('space-missions');
-  t.after(() => {
-    leaveContextLists();
-    chrome.detach(owner);
-    app.unmount();
-  });
-  await nextTick();
-  await nextTick();
-  const close = document.querySelector('[data-mission-close]');
-  close.focus();
-  close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
-  for (let i = 0; i < 5; i += 1) await nextTick();
-  assert.equal(
-    document.activeElement?.dataset?.missionRosterId,
-    'starlink-12-3',
-  );
-  assert.equal(previews.at(-1), 1, 'focus restores the closed mission preview');
-});
-
-test('each newly presented selection returns the list it shows in to the top', async (t) => {
+test('each newly presented selection returns Context to the top', async (t) => {
   const { publish, scroller } = fixture(t);
   scroller.scrollTop = 120;
   await publish({ roster: null, mission: mission({ scrollRequest: 4 }) });
@@ -469,39 +281,22 @@ test('each newly presented selection returns the list it shows in to the top', a
   assert.equal(scroller.scrollTop, 0);
 });
 
-test('a roster refresh lets the row under the pointer take the preview back on its next movement', async (t) => {
-  const { publish, calls } = fixture(t);
-  await publish({
-    roster: roster([entry('a', 0), entry('b', 1)]),
-    mission: null,
-  });
-  const row = document.querySelector('[data-mission-roster-id="a"]');
-  row.dispatchEvent(new MouseEvent('mouseenter'));
-  row.dispatchEvent(new MouseEvent('mousemove'));
-  await publish({
-    roster: roster([entry('a', 0, 'RENAMED'), entry('b', 1)]),
-    mission: null,
-  });
-  assert.equal(
-    document.querySelector('[data-mission-roster-id="a"]') === row,
-    true,
-  );
-  row.dispatchEvent(new MouseEvent('mousemove'));
-  row.dispatchEvent(new MouseEvent('mousemove'));
-  assert.deepEqual(calls, [
-    ['pointer-enter', 0],
-    ['pointer-enter', 0],
-  ]);
+test('the card has no close of its own (its list card’s Back lets it go); a layer that stops presenting hides it', async (t) => {
+  const { $, publish } = fixture(t);
+  await publish({ roster: null, mission: mission() });
+  assert.equal($('[data-mission-close]'), null);
+  await publish({ roster: null, mission: null });
+  assert.equal($('#space-mission-panel').hidden, true);
 });
 
-test('a layer that stops presenting returns the roster to loading and hides the mission', async (t) => {
+test('More details opens for each mission as it shows, and stays folded while the same one stays', async (t) => {
   const { $, publish } = fixture(t);
-  await publish({ roster: roster([entry('a', 0)]), mission: mission() });
-  await publish({ roster: null, mission: null });
-  assert.equal($('[data-mission-roster-count]').textContent, '—');
-  assert.equal(
-    $('.space-mission-roster-empty').textContent,
-    'LOADING 30-DAY MISSION INDEX',
-  );
-  assert.equal($('#space-mission-panel').hidden, true);
+  await publish({ roster: null, mission: mission() });
+  const more = $('[data-mission-more]');
+  assert.equal(more.open, true);
+  more.open = false;
+  await publish({ roster: null, mission: mission({ distance: '412 KM' }) });
+  assert.equal($('[data-mission-more]').open, false, 'the same mission');
+  await publish({ roster: null, mission: mission({ id: 'other-mission' }) });
+  assert.equal($('[data-mission-more]').open, true, 'the next mission');
 });

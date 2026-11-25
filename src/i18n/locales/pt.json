@@ -957,7 +957,6 @@
   "NADIR": "AO NADIR",
   "Selected Space Mission": "Missão espacial selecionada",
   "Show all missions": "Mostrar todas as missões",
-  "Deselect mission": "Desmarcar missão",
   "PAYLOAD": "CARGA ÚTIL",
   "NAME": "NOME",
   "TYPE": "TIPO",
@@ -2945,13 +2944,10 @@
   "Search any location...": "Buscar qualquer local...",
   "CONTEXT": "CONTEXTO",
   "SPACE MISSIONS": "MISSÕES ESPACIAIS",
-  "Available Space Missions": "Missões espaciais disponíveis",
-  "AVAILABLE MISSIONS": "MISSÕES DISPONÍVEIS",
   "SELECT A MISSION TO INSPECT": "SELECIONE UMA MISSÃO PARA INSPECIONAR",
   "LOADING 30-DAY MISSION INDEX": "CARREGANDO ÍNDICE DE MISSÕES DE 30 DIAS",
   "Space Missions unavailable: the mission index could not load. Try again later.": "Missões espaciais indisponíveis: não foi possível carregar o índice de missões. Tente novamente mais tarde.",
   "30-DAY MISSION INDEX UNAVAILABLE": "ÍNDICE DE MISSÕES DE 30 DIAS INDISPONÍVEL",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB MOSTRA PRÉVIA · ENTER / SPACE SELECIONA",
   "Filter stations by station tag": "Filtrar estações por tag",
   "All": "Todos",
   "DRAG TO TUNE": "ARRASTE PARA SINTONIZAR",
@@ -4722,5 +4718,7 @@
   "{name} per page, showing {range}": "{name} por página, mostrando {range}",
   "Tuner and volume": "Sintonizador e volume",
   "Open Context to view street-level imagery": "Abra Contexto para ver imagens ao nível da rua",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Rótulos das camadas ativas: a densidade define quantos são rotulados. As opções próprias de cada camada ficam na sua linha em Camadas de dados"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Rótulos das camadas ativas: a densidade define quantos são rotulados. As opções próprias de cada camada ficam na sua linha em Camadas de dados",
+  "Upcoming": "Próxima",
+  "Nothing matches “{text}”.": "Nada corresponde a “{text}”."
 }

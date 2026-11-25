@@ -22,6 +22,7 @@ import { useEntityCardStore } from '../ui/stores/entityCard.js';
 import { usePinnedStore } from '../ui/stores/pinned.js';
 import {
   CAMERA_SETTINGS_EVENT,
+  CONTEXT_MISSIONS_EVENT,
   CONTEXT_NEARBY_EVENT,
   PLACE_PICK_EVENT,
 } from '../ui/contextEvents.js';
@@ -193,8 +194,9 @@ const RETIRED_CONTEXT_PANELS = new Set([
 ]);
 
 /**
- * Retired panels whose list is a tab in Context while their layer is on: the
- * ids still name them, and open Context on that list (contextLists.js).
+ * Retired panels whose list shows in Context while their layer is on: the
+ * ids still name them, and open Context on that list (Space Missions' in
+ * Inspect, the others' on the list tab, contextLists.js).
  */
 const CONTEXT_LIST_PANELS = new Map([
   ['space-missions-panel', { list: 'space-missions', name: 'Space Missions' }],
@@ -964,11 +966,22 @@ export function createGevActionRunner({
       };
     }
 
-    /** Open Context on one of its lists (and, on a phone, its sheet). */
+    /**
+     * Open Context on one of its lists (and, on a phone, its sheet). Space
+     * Missions' list opens in Inspect while keeping an active follow.
+     */
     function showListInContext(list) {
-      showContextList(list);
+      if (list !== 'space-missions') showContextList(list);
       const opened = setPanelOpen(styleManager, 'global-context-panel', true);
       if (opened) styleManager?.revealPanel?.('global-context-panel');
+      if (
+        opened &&
+        list === 'space-missions' &&
+        typeof CustomEvent === 'function'
+      )
+        globalThis.document?.dispatchEvent?.(
+          new CustomEvent(CONTEXT_MISSIONS_EVENT),
+        );
       return opened;
     }
 
@@ -1387,8 +1400,8 @@ export function createGevActionRunner({
         // Space Missions is an ordinary layer, not a Context mode; older
         // phrasings still reach it through this alias. Turning it on leaves
         // the person's other layers as they are, apart from Satellites, which
-        // the layer switches on (no dots or orbits drawn) for its orbit data
-        // and restores when it turns off. Its list is a tab in Context.
+        // it uses for orbit data and restores when it turns off. Its list is
+        // Context's Inspect view.
         const result = await runGevAction(
           'set_layer_visibility',
           { layerId: 'rocket-launches', enabled: true },

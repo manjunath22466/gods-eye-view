@@ -128,7 +128,6 @@
       "src/ui/cockpitRollingValue.js",
       "src/ui/radioTunerModel.js",
       "src/ui/views/panels/MissionDetail.vue",
-      "src/ui/views/panels/MissionRoster.vue",
       "src/ui/views/DisplayControlsView.vue",
       "src/ui/views/LayerPanelsView.vue",
       "src/ui/views/ProviderSettingsView.vue",
@@ -402,7 +401,9 @@
       "src/ui/views/panels/RadioFold.vue",
       "src/ui/views/panels/StreetLevelViewer.vue",
       "src/ui/labelLayers.js",
-      "src/ui/rideFace.js"
+      "src/ui/rideFace.js",
+      "src/ui/views/panels/NearbyMissions.vue",
+      "src/ui/missionsByTime.js"
     ],
     "external": ["vue", "pinia", "vue-i18n"]
   },

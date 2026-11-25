@@ -1,16 +1,11 @@
 import { reactive, ref } from 'vue';
 import { msg } from '../i18n/index.js';
 
-// Context's list tabs. A layer with a list of its own (Space Missions,
-// Weather, News, Recent Imagery, Cameras) adds a tab to Context while it is
-// on; with two or more on, one Lists tab holds a sub-tab per layer. Space
-// Missions, Weather, News and Recent Imagery show the readout of their
-// right-rail panel, which is still there; Context borrows it while its list
-// shows.
+// The providers of Lists in Context. With two or more on, Lists has a
+// sub-tab for each. The readouts stay in Context between tab changes.
 
 /** The lists, in tab order. `label` is the tab's name. */
 export const CONTEXT_LISTS = Object.freeze([
-  Object.freeze({ id: 'space-missions', label: msg('Space Missions') }),
   Object.freeze({ id: 'weather', label: msg('Weather') }),
   Object.freeze({ id: 'news', label: msg('News') }),
   Object.freeze({ id: 'recent-imagery', label: msg('Imagery') }),
@@ -19,7 +14,6 @@ const LIST_IDS = new Set(CONTEXT_LISTS.map((list) => list.id));
 
 /** The layers behind each list. */
 const LIST_LAYERS = Object.freeze({
-  'space-missions': ['rocket-launches'],
   weather: [
     'weather-cyclones',
     'wind',
@@ -44,8 +38,7 @@ export function listForLayer(layerId) {
 
 /**
  * The lists whose layer is on, by id: `{count}` (a number, or null for no
- * count). Space Missions is read from its own store; the others' readouts
- * report here as they show and hide.
+ * count). Their readouts report here as they show and hide.
  */
 export const contextListPresence = reactive({});
 

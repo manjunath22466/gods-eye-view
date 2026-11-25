@@ -289,7 +289,6 @@
   "{value} KM": "{value} KM",
   "{value} KM/S": "{value} KM/S",
   "Show all missions": "Visa alla uppdrag",
-  "Deselect mission": "Avmarkera uppdrag",
   "PAYLOAD": "NYTTOLAST",
   "NAME": "NAMN",
   "TYPE": "TYP",
@@ -827,13 +826,10 @@
   "Search any location...": "Sök valfri plats …",
   "CONTEXT": "KONTEXT",
   "SPACE MISSIONS": "RYMDUPPDRAG",
-  "Available Space Missions": "Tillgängliga rymduppdrag",
-  "AVAILABLE MISSIONS": "TILLGÄNGLIGA UPPDRAG",
   "SELECT A MISSION TO INSPECT": "VÄLJ ETT UPPDRAG ATT GRANSKA",
   "LOADING 30-DAY MISSION INDEX": "LADDAR UPPDRAGSINDEX FÖR 30 DAGAR",
   "Space Missions unavailable: the mission index could not load. Try again later.": "Rymduppdrag otillgängliga: uppdragsindexet kunde inte laddas. Försök igen senare.",
   "30-DAY MISSION INDEX UNAVAILABLE": "UPPDRAGSINDEX FÖR 30 DAGAR OTILLGÄNGLIGT",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB FÖRHANDSVISAR · ENTER / MELLANSLAG VÄLJER",
   "Filter stations by station tag": "Filtrera stationer efter stationstagg",
   "All": "Alla",
   "DRAG TO TUNE": "DRA OCH STÄLL IN",
@@ -4613,5 +4609,7 @@
   "{name} per page, showing {range}": "{name} per sida, visar {range}",
   "Tuner and volume": "Mottagare och volym",
   "Open Context to view street-level imagery": "Öppna Kontext för att se bilder i gatuhöjd",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Etiketter för lagren som är på: Täthet anger hur många som får en etikett. Varje lagers egna alternativ finns på dess rad i Datalager"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Etiketter för lagren som är på: Täthet anger hur många som får en etikett. Varje lagers egna alternativ finns på dess rad i Datalager",
+  "Upcoming": "Kommande",
+  "Nothing matches “{text}”.": "Inget matchar ”{text}”."
 }

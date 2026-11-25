@@ -661,16 +661,16 @@ async function main() {
     await open(page, { query: "?welcome=1", errorSink: consoleErrors });
     await pick(page, 'space-missions');
     state = await appState(page);
-    // Its list is a tab in Context, which opens on it.
+    // Context opens Inspect on the Missions roster.
     await page.waitForFunction(() => document
-      .getElementById('context-list-space-missions')?.checkVisibility(), { timeout: 10000 })
+      .querySelector('[data-list-card="space-missions"]')?.checkVisibility(), { timeout: 10000 })
       .catch(() => {});
     const missions = await page.evaluate(() => {
       const context = document.getElementById('global-context-panel');
       return {
         layerOn: window.__godsEyeView.dataManager.isEffectivelyEnabled('rocket-launches'),
         panelOpen: Boolean(context && !context.classList.contains('collapsed')
-          && document.getElementById('context-list-space-missions')?.checkVisibility()),
+          && document.querySelector('[data-list-card="space-missions"]')?.checkVisibility()),
       };
     });
     record('SPACE MISSIONS switches its layer on without a Context mode',

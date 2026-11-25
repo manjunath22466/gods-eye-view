@@ -959,7 +959,6 @@
   "NADIR": "AU NADIR",
   "Selected Space Mission": "Mission spatiale sélectionnée",
   "Show all missions": "Afficher toutes les missions",
-  "Deselect mission": "Désélectionner la mission",
   "PAYLOAD": "CHARGE UTILE",
   "NAME": "NOM",
   "TYPE": "TYPE",
@@ -2943,13 +2942,10 @@
   "Search any location...": "Rechercher un lieu…",
   "CONTEXT": "CONTEXTE",
   "SPACE MISSIONS": "MISSIONS SPATIALES",
-  "Available Space Missions": "Missions spatiales disponibles",
-  "AVAILABLE MISSIONS": "MISSIONS DISPONIBLES",
   "SELECT A MISSION TO INSPECT": "CHOISIR UNE MISSION À EXAMINER",
   "LOADING 30-DAY MISSION INDEX": "CHARGEMENT DE L'INDEX DES MISSIONS À 30 JOURS",
   "Space Missions unavailable: the mission index could not load. Try again later.": "Missions spatiales indisponibles : impossible de charger l'index des missions. Réessayez plus tard.",
   "30-DAY MISSION INDEX UNAVAILABLE": "INDEX DES MISSIONS À 30 JOURS INDISPONIBLE",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB APERÇU · ENTER / SPACE SÉLECTIONNE",
   "Filter stations by station tag": "Filtrer les stations par tag de station",
   "All": "Tous",
   "DRAG TO TUNE": "GLISSER POUR RÉGLER",
@@ -4722,5 +4718,7 @@
   "{name} per page, showing {range}": "{name} par page, affichage {range}",
   "Tuner and volume": "Tuner et volume",
   "Open Context to view street-level imagery": "Ouvrez Contexte pour voir les images au niveau de la rue",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Étiquettes des couches activées : la densité fixe combien sont étiquetées. Les options propres à chaque couche sont sur sa ligne dans Couches de données"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Étiquettes des couches activées : la densité fixe combien sont étiquetées. Les options propres à chaque couche sont sur sa ligne dans Couches de données",
+  "Upcoming": "À venir",
+  "Nothing matches “{text}”.": "Rien ne correspond à « {text} »."
 }

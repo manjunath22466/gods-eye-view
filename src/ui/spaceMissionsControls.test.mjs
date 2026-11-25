@@ -85,7 +85,7 @@ function rig({ cockpit = false, layers = [] } = {}) {
     layer,
     store,
     actions: {
-      showMissions: () => reveals.push('missions'),
+      showMissions: ({ keepFollow }) => reveals.push(keepFollow),
       isCockpitActive: () => state.cockpit,
     },
   });
@@ -131,13 +131,13 @@ test('a person switching the layer on shows its list in Context; a restore does 
   r.manager.emit({ ...userOn, type: 'visibility-requested' });
   assert.deepEqual(r.reveals, []);
   r.manager.emit(userOn);
-  assert.deepEqual(r.reveals, ['missions']);
+  assert.deepEqual(r.reveals, [true]);
 });
 
 test('a mission picked on the globe shows the Missions list', () => {
   const r = rig();
   r.layer.pick('L1');
-  assert.deepEqual(r.reveals, ['missions']);
+  assert.deepEqual(r.reveals, [false]);
 });
 
 test('the Cockpit keeps the screen: no reveal while it is on', () => {
@@ -179,7 +179,7 @@ test('Space Missions on or off switches no other layer, and another layer on lea
   announce('cctv', true, 'user');
   announce('rocket-launches', true, 'user');
   await settle();
-  assert.deepEqual(r.reveals, ['missions']);
+  assert.deepEqual(r.reveals, [true]);
   assert.equal(r.store.enabled, true);
 
   announce('earthquakes', true, 'voice');

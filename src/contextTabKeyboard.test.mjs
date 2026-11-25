@@ -21,7 +21,8 @@ test('Context has no Contacts control, and Space Missions no panel or rail item 
   assert.doesNotMatch(html, /id="global-context-flights-btn"/);
   assert.doesNotMatch(html, /id="installations-search-btn"/);
   assert.doesNotMatch(html, /id="global-context-missions-btn"/);
-  // Missions, Weather, News, and Recent Imagery share the Lists tab.
+  // Its list is Context's Inspect view while the layer is on; Weather's,
+  // News's and Recent Imagery's share the Lists tab.
   for (const id of ['space-missions-panel', 'weather-panel', 'news-panel', 'recent-imagery-panel']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
     assert.equal(PANEL_RAIL_ITEMS[id], undefined, `${id} has no rail item`);
@@ -30,10 +31,7 @@ test('Context has no Contacts control, and Space Missions no panel or rail item 
   const listsStart = html.indexOf('id="context-lists"');
   assert.notEqual(listsStart, -1, 'Context has a shared Lists panel');
   const lists = html.slice(listsStart);
-  assert.match(
-    lists,
-    /<div id="context-list-space-missions"[^>]*>\s*<div id="space-mission-panel-host"/,
-  );
+  assert.doesNotMatch(lists, /id="context-list-space-missions"/);
   for (const body of ['weather-panel-body', 'news-panel-body', 'recent-imagery-panel-body'])
     assert.match(lists, new RegExp(`id="${body}"`));
 });

@@ -40,8 +40,9 @@ const views = {
   // search toggle.
   'CommandDockView.vue': { markup: dock, buttons: 15, icons: 0, closes: 0 },
   // The collapsed title's Expand, Search and Expand in the header, the
-  // Inspect, Camera settings, Lists and Pinned, plus a list sub-tab.
-  'ContextView.vue': { markup: context, buttons: 8, icons: 2, closes: 0 },
+  // Inspect, Camera settings, Lists and Pinned, a list sub-tab and
+  // Back to the followed card from Missions.
+  'ContextView.vue': { markup: context, buttons: 9, icons: 3, closes: 0 },
   // Pin this view, the Data Layers pointer and a row nearest the centre.
   // The glyphs: the pin, the layer tiles' four and the pointer's layers.
   // The rework moved the chips and the rows with a motion glyph to the

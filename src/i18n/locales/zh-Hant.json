@@ -896,7 +896,6 @@
   "NADIR": "回到天底",
   "Selected Space Mission": "已選太空任務",
   "Show all missions": "顯示所有任務",
-  "Deselect mission": "取消選擇任務",
   "PAYLOAD": "有效載荷",
   "NAME": "名稱",
   "TYPE": "類型",
@@ -2683,13 +2682,10 @@
   "Search any location...": "搜索任意位置…",
   "CONTEXT": "態勢",
   "SPACE MISSIONS": "太空任務",
-  "Available Space Missions": "可用太空任務",
-  "AVAILABLE MISSIONS": "可用任務",
   "SELECT A MISSION TO INSPECT": "選擇一項任務以查看",
   "LOADING 30-DAY MISSION INDEX": "正在加載 30 天任務索引",
   "Space Missions unavailable: the mission index could not load. Try again later.": "太空任務不可用：無法加載任務索引。請稍後重試。",
   "30-DAY MISSION INDEX UNAVAILABLE": "30 天任務索引不可用",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB 預覽 · ENTER / 空格鍵選擇",
   "Filter stations by station tag": "按電臺標籤篩選電臺",
   "All": "全部",
   "DRAG TO TUNE": "拖動調諧",
@@ -4504,5 +4500,7 @@
   "{name} per page, showing {range}": "每頁{name}，當前顯示 {range}",
   "Tuner and volume": "調諧器和音量",
   "Open Context to view street-level imagery": "打開“態勢”以查看街景圖像",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "已開啟圖層的標籤：密度決定標註多少個。每個圖層自己的選項在數據圖層中它的那一行"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "已開啟圖層的標籤：密度決定標註多少個。每個圖層自己的選項在數據圖層中它的那一行",
+  "Upcoming": "即將到來",
+  "Nothing matches “{text}”.": "沒有與“{text}”匹配的內容。"
 }

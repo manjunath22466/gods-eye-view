@@ -323,7 +323,6 @@
   "Return to nadir (Home or 0)": "Zurück zum Nadir (Pos1 oder 0)",
   "NADIR": "ZUM NADIR",
   "Show all missions": "Alle Missionen anzeigen",
-  "Deselect mission": "Mission abwählen",
   "PAYLOAD": "NUTZLAST",
   "NAME": "NAME",
   "TYPE": "TYP",
@@ -910,13 +909,10 @@
   "Search any location...": "Ort suchen...",
   "CONTEXT": "KONTEXT",
   "SPACE MISSIONS": "RAUMMISSIONEN",
-  "Available Space Missions": "Verfügbare Raummissionen",
-  "AVAILABLE MISSIONS": "VERFÜGBARE MISSIONEN",
   "SELECT A MISSION TO INSPECT": "MISSION ZUM ANSEHEN WÄHLEN",
   "LOADING 30-DAY MISSION INDEX": "30-TAGE-MISSIONSINDEX WIRD GELADEN",
   "Space Missions unavailable: the mission index could not load. Try again later.": "Raummissionen nicht verfügbar: Der Missionsindex konnte nicht geladen werden. Später erneut versuchen.",
   "30-DAY MISSION INDEX UNAVAILABLE": "30-TAGE-MISSIONSINDEX NICHT VERFÜGBAR",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB: VORSCHAU · ENTER / LEERTASTE: AUSWAHL",
   "Filter stations by station tag": "Sender nach Kategorie filtern",
   "All": "Alle",
   "DRAG TO TUNE": "ZUM ABSTIMMEN ZIEHEN",
@@ -4613,5 +4609,7 @@
   "{name} per page, showing {range}": "{name} pro Seite, angezeigt {range}",
   "Tuner and volume": "Tuner und Lautstärke",
   "Open Context to view street-level imagery": "Öffne Kontext, um Straßenbilder zu sehen",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Beschriftungen der eingeschalteten Ebenen: Die Dichte legt fest, wie viele beschriftet werden. Die eigenen Optionen jeder Ebene stehen in ihrer Zeile unter Datenebenen"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Beschriftungen der eingeschalteten Ebenen: Die Dichte legt fest, wie viele beschriftet werden. Die eigenen Optionen jeder Ebene stehen in ihrer Zeile unter Datenebenen",
+  "Upcoming": "Bevorstehend",
+  "Nothing matches “{text}”.": "Nichts passt zu „{text}“."
 }
