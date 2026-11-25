@@ -68,7 +68,7 @@ export function heroKindOf({
   if (layerId === 'cctv') return 'camera';
   if (layerId === 'street-level') return 'street';
   // Anything else on the map without a photo of its own: a close-up
-  // satellite map of where it is. Never an icon while it has a position.
+  // map of where it is. Never an icon while it has a position.
   if (position) return 'map';
   return 'none';
 }

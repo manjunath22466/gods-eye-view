@@ -276,16 +276,23 @@ test('a place pins as a still with a map; its pin flies there and shows no Nearb
   t.after(() => pinned.unpin('place:30.2610,-97.7454'));
   const [pin] = pinned.pins;
   assert.equal(pin.kind, 'place');
-  assert.match(pinned.stillOf(pin.key), /\/tile\/13\//, 'a map still');
+  assert.equal(
+    pinned.stillOf(pin.key),
+    'card-map:13/30.26100/-97.74540',
+    'a map still: its spot and zoom',
+  );
   cards.clear();
   pinned.show('pinned');
   await nextTick();
-  assert.match($('.pinned-grid__frame').getAttribute('src'), /\/tile\/13\//);
-  assert.match(
-    $('.pinned-grid__credit').textContent,
-    /Powered by Esri .*Esri, Maxar, Earthstar Geographics/,
-    'the imagery is credited on screen, every source named',
+  assert.equal(
+    $('.pinned-grid__frame').tagName,
+    'CANVAS',
+    'drawn as a card map',
   );
+  assert.ok($('.pinned-grid__frame').classList.contains('card-map'));
+  const { textContent: credit } = $('.pinned-grid__credit');
+  assert.match(credit, /© OpenStreetMap contributors/);
+  assert.match(credit, /© OpenMapTiles/);
   $('.pinned-grid__open').click();
   await settle();
   assert.equal(cards.card.key, 'place:30.2610,-97.7454');
@@ -330,7 +337,11 @@ test('the place header pins the view: the camera as it is, and its tile flies ba
   assert.equal(saved.kind, 'view');
   assert.deepEqual(saved.pose, pose, 'the camera itself, not only the point');
   assert.equal(saved.title, $('.view-context__title span').textContent);
-  assert.match(pinned.stillOf(saved.key), /^https?:|^\//, 'a still of the map');
+  assert.match(
+    pinned.stillOf(saved.key),
+    /^card-map:13\/29\.47270\/-98\.61970$/,
+    'a still of the map',
+  );
   assert.equal($('.view-context__pin').getAttribute('aria-pressed'), 'true');
   // Its tile flies back to that view, and Context describes it there.
   pinned.show('pinned');

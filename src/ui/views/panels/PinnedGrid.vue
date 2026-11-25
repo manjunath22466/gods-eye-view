@@ -4,12 +4,14 @@ import { storeToRefs } from 'pinia';
 import { formatNumber, t } from '../../../i18n/index.js';
 import { usePinnedStore } from '../../stores/pinned.js';
 import { useEntityCardStore } from '../../stores/entityCard.js';
-import { ESRI_IMAGERY_CREDIT } from '../../../maps/attribution.js';
+import { OPENFREEMAP_CARD_CREDIT, OPENFREEMAP_CARD_CREDIT_FULL } from '../../../maps/attribution.js';
+import { parseMapStill } from '../../mapTiles.js';
 import { streetPhotoCredit } from '../../streetPhotoCredit.js';
 import { cameraCredit } from '../../cameraCredit.js';
 import { useDockedStore } from '../../stores/docked.js';
 import { stationPlayback, useRadioLayer } from '../../radioContext.js';
 import { pinnedStationMiss, playPinnedStation } from '../../pinnedStation.js';
+import CardMapCanvas from './CardMapCanvas.vue';
 import EntityMark from './EntityMark.vue';
 import FeedDot from './FeedDot.vue';
 import PausedChip from './PausedChip.vue';
@@ -20,8 +22,8 @@ import UiIcon from '../../kit/UiIcon.vue';
 // The Pinned tab: what was pinned, two to a row, as many as were pinned; the
 // panel scrolls. Every pin is a still: the picture a camera or a
 // photo showed when it was pinned, a station's name, a place's map, where a
-// moving item was. Nothing here plays, refreshes or asks for anything until
-// it is tapped. Tapping a tile opens that item's card on Inspect, and tapping
+// moving item was. Nothing here plays or refreshes until it is tapped; a map
+// still reads its tiles when it scrolls into view. Tapping a tile opens that item's card on Inspect, and tapping
 // a station plays it; the pin stays until it is unpinned, and unpinning
 // offers Undo.
 // The Undo notice for an unpin sits in Context above the tabs, so it stays
@@ -76,10 +78,12 @@ const offNote = (pin) => {
   return '';
 };
 
-// Map stills (a place, where a moving item was) are Esri World Imagery,
-// credited while any shows.
-const MAP_KINDS = new Set(['place', 'item', 'view']);
-const mapShown = () => pins.value.some((pin) => MAP_KINDS.has(pin.kind) && pinned.stillOf(pin.key));
+// Map stills (a place, where a moving item was) are card maps drawn from
+// OpenStreetMap's vector tiles, each a 16:10 frame round its spot, credited
+// while any shows.
+const MAP_FRAME = Object.freeze({ width: 256, height: 160 });
+const mapOf = (pin) => parseMapStill(pinned.stillOf(pin.key));
+const mapShown = () => pins.value.some((pin) => mapOf(pin));
 // A street-level still carries its provider's credit on its tile, as long
 // as the picture shows; a camera's still, its provider and a partner feed's
 // owner, read from the layer or, with Cameras off, kept with the pin. A pin
@@ -167,7 +171,8 @@ function open(pin, event) {
     <ul class="pinned-grid__tiles">
       <li v-for="pin in pins" :key="pin.key" class="pinned-grid__tile" :data-kind="pin.kind" :data-pin-key="pin.key">
         <UiButton class="pinned-grid__open" :title="pin.kind === 'station' ? t('Play {name}', { name: pin.title }) : t('Show {name} on Inspect', { name: pin.title })" @click="open(pin, $event)">
-          <img v-if="pinned.stillOf(pin.key)" class="pinned-grid__frame" :src="pinned.stillOf(pin.key)" alt="" />
+          <CardMapCanvas v-if="mapOf(pin)" class="pinned-grid__frame" :lat="mapOf(pin).lat" :lon="mapOf(pin).lon" :zoom="mapOf(pin).zoom" :frame="MAP_FRAME" :clear-bottom="28" lazy />
+          <img v-else-if="pinned.stillOf(pin.key)" class="pinned-grid__frame" :src="pinned.stillOf(pin.key)" alt="" />
           <EntityMark v-if="pin.kind === 'item' && pin.identity?.layerId" class="pinned-grid__icon" :class="{ 'pinned-grid__icon--over': Boolean(pinned.stillOf(pin.key)) }" :layer="pin.identity.layerId" :kind="pin.mark || ''" :icon="pin.icon" />
           <UiIcon v-else class="pinned-grid__icon" :class="{ 'pinned-grid__icon--over': Boolean(pinned.stillOf(pin.key)), 'pinned-grid__icon--place': PLACE_PINS.has(pin.kind) }" :name="pin.icon" :size="null" />
           <span class="pinned-grid__name">
@@ -181,8 +186,10 @@ function open(pin, event) {
         <UiCloseButton class="pinned-grid__unpin" glyph="icon" :label="t('Unpin {name}', { name: pin.title })" :title="t('Unpin')" @click="unpin(pin, $event)" />
       </li>
     </ul>
-    <!-- The map stills' credit, in full. -->
-    <p v-if="mapShown()" class="pinned-grid__credit">{{ ESRI_IMAGERY_CREDIT }}</p>
+    <!-- Keep the map credits at the foot of the scrolling list while a map pin is present. -->
+    <div v-if="mapShown()" class="pinned-grid__credits">
+      <p class="pinned-grid__credit" :title="OPENFREEMAP_CARD_CREDIT_FULL"><bdi dir="ltr">{{ OPENFREEMAP_CARD_CREDIT }}</bdi></p>
+    </div>
     <p class="pinned-grid__hint">{{ t('Tap a pin to open it on Inspect.') }}</p>
   </section>
 </template>

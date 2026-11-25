@@ -139,6 +139,7 @@
   "Data provided by:": "Дані надали:",
   "Close data attribution": "Закрити відомості про джерела даних",
   "Light aircraft": "Легкий літак",
+  "Light map": "Світла карта",
   "Glider": "Планер",
   "Turboprop": "Турбогвинтовий літак",
   "Airliner": "Авіалайнер",
@@ -4585,8 +4586,6 @@
   "Airport": "Аеропорт",
   "Reclassify the followed aircraft as TR-3B": "Перекласифікувати відстежуваний літак як TR-3B",
   "More details": "Докладніше",
-  "Close-up satellite map · {place}": "Супутникова мапа зблизька · {place}",
-  "Close-up satellite map": "Супутникова мапа зблизька",
   "How it is changing": "Як змінюється",
   "Last 24 hours": "Останні 24 години",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4770,7 +4769,6 @@
   "Next station": "Наступна станція",
   "Previous camera": "Попередня камера",
   "Next camera": "Наступна камера",
-  "Show all {n}": "Показати всі ({n})",
   "No cameras within {radius} of the view centre": "Немає камер у радіусі {radius} від центру огляду",
   "No cameras here match the search": "Тут немає камер, що відповідають пошуку",
   "VIDEO · STALLED": "ВІДЕО · ЗАВИСЛО",
@@ -4821,7 +4819,6 @@
   "Alerts": "Попередження",
   "Back": "Назад",
   "{from}–{to} of {total}": "{from}–{to} з {total}",
-  "{range} · {size}/page": "{range} · {size}/стор.",
   "Pages": "Сторінки",
   "Previous": "Назад",
   "{name} per page, showing {range}": "{name} на сторінці, показано {range}",
@@ -4829,5 +4826,7 @@
   "Open Context to view street-level imagery": "Відкрийте «Контекст», щоб побачити вуличні знімки",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Підписи увімкнених шарів: щільність визначає, скільки з них підписано. Власні параметри кожного шару — у його рядку в шарах даних",
   "Upcoming": "Незабаром",
-  "Nothing matches “{text}”.": "Немає збігів із «{text}»."
+  "Nothing matches “{text}”.": "Немає збігів із «{text}».",
+  "Close-up map · {place}": "Мапа зблизька · {place}",
+  "Close-up map": "Мапа зблизька"
 }

@@ -1087,6 +1087,7 @@
   "Data attribution": "إسناد البيانات",
   "Data provided by:": "البيانات مقدَّمة من:",
   "Light aircraft": "طائرة خفيفة",
+  "Light map": "خريطة فاتحة",
   "Glider": "طائرة شراعية",
   "Turboprop": "طائرة بمحرك توربيني مروحي",
   "Airliner": "طائرة ركاب",
@@ -4791,8 +4792,6 @@
   "Airport": "مطار",
   "Reclassify the followed aircraft as TR-3B": "إعادة تصنيف الطائرة المتتبَّعة إلى TR-3B",
   "More details": "مزيد من التفاصيل",
-  "Close-up satellite map · {place}": "خريطة أقمار صناعية عن قرب · {place}",
-  "Close-up satellite map": "خريطة أقمار صناعية عن قرب",
   "How it is changing": "كيف يتغير",
   "Last 24 hours": "آخر 24 ساعة",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4988,7 +4987,6 @@
   "Next station": "المحطة التالية",
   "Previous camera": "الكاميرا السابقة",
   "Next camera": "الكاميرا التالية",
-  "Show all {n}": "عرض الكل ({n})",
   "No cameras within {radius} of the view centre": "لا توجد كاميرات ضمن {radius} من مركز العرض",
   "No cameras here match the search": "لا توجد كاميرات هنا تطابق البحث",
   "VIDEO · STALLED": "الفيديو · متوقف",
@@ -5039,7 +5037,6 @@
   "Alerts": "تنبيهات",
   "Back": "رجوع",
   "{from}–{to} of {total}": "{from}–{to} من {total}",
-  "{range} · {size}/page": "{range} · {size}/صفحة",
   "Pages": "الصفحات",
   "Previous": "السابق",
   "{name} per page, showing {range}": "{name} في الصفحة، المعروض {range}",
@@ -5047,5 +5044,7 @@
   "Open Context to view street-level imagery": "افتح السياق لعرض صور مستوى الشارع",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "تسميات الطبقات المفعّلة: تحدد الكثافة عدد ما يُسمّى منها. خيارات كل طبقة في صفّها ضمن طبقات البيانات",
   "Upcoming": "قادمة",
-  "Nothing matches “{text}”.": "لا شيء يطابق “{text}”."
+  "Nothing matches “{text}”.": "لا شيء يطابق “{text}”.",
+  "Close-up map · {place}": "خريطة عن قرب · {place}",
+  "Close-up map": "خريطة عن قرب"
 }

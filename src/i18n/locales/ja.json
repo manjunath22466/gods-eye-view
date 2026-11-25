@@ -115,6 +115,7 @@
   "Data provided by:": "データ提供：",
   "Close data attribution": "データ出典を閉じる",
   "Light aircraft": "軽飛行機",
+  "Light map": "ライトマップ",
   "Glider": "グライダー",
   "Turboprop": "ターボプロップ機",
   "Airliner": "旅客機",
@@ -4276,8 +4277,6 @@
   "Airport": "空港",
   "Reclassify the followed aircraft as TR-3B": "追跡中の航空機をTR-3Bに再分類",
   "More details": "詳細をもっと見る",
-  "Close-up satellite map · {place}": "衛星写真の拡大マップ · {place}",
-  "Close-up satellite map": "衛星写真の拡大マップ",
   "How it is changing": "変化の様子",
   "Last 24 hours": "過去24時間",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4443,7 +4442,6 @@
   "Next station": "次の局",
   "Previous camera": "前のカメラ",
   "Next camera": "次のカメラ",
-  "Show all {n}": "すべて表示（{n}）",
   "No cameras within {radius} of the view centre": "表示中心から {radius} 以内にカメラはありません",
   "No cameras here match the search": "検索に一致するカメラはここにありません",
   "VIDEO · STALLED": "映像 · 停止中",
@@ -4494,7 +4492,6 @@
   "Alerts": "警報",
   "Back": "戻る",
   "{from}–{to} of {total}": "{from}–{to} / {total}",
-  "{range} · {size}/page": "{range} · 1ページ{size}件",
   "Pages": "ページ",
   "Previous": "前へ",
   "{name} per page, showing {range}": "1ページの{name}、表示中 {range}",
@@ -4502,5 +4499,7 @@
   "Open Context to view street-level imagery": "ストリートレベル画像を見るにはコンテキストを開いてください",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "オンのレイヤーのラベル：密度でラベルを付ける数を決めます。各レイヤー固有のオプションはデータレイヤーのその行にあります",
   "Upcoming": "予定",
-  "Nothing matches “{text}”.": "「{text}」に一致するものはありません。"
+  "Nothing matches “{text}”.": "「{text}」に一致するものはありません。",
+  "Close-up map · {place}": "拡大マップ · {place}",
+  "Close-up map": "拡大マップ"
 }

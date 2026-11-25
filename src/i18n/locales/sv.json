@@ -935,6 +935,7 @@
   "Data attribution": "Datakällor",
   "Data provided by:": "Data från:",
   "Light aircraft": "Lätt flygplan",
+  "Light map": "Ljus karta",
   "Glider": "Segelflygplan",
   "Turboprop": "Turbopropplan",
   "Airliner": "Trafikflygplan",
@@ -4379,8 +4380,6 @@
   "Airport": "Flygplats",
   "Reclassify the followed aircraft as TR-3B": "Klassa om det följda flygplanet som TR-3B",
   "More details": "Fler detaljer",
-  "Close-up satellite map · {place}": "Satellitkarta på nära håll · {place}",
-  "Close-up satellite map": "Satellitkarta på nära håll",
   "How it is changing": "Hur det förändras",
   "Last 24 hours": "Senaste 24 timmarna",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4552,7 +4551,6 @@
   "Next station": "Nästa station",
   "Previous camera": "Föregående kamera",
   "Next camera": "Nästa kamera",
-  "Show all {n}": "Visa alla {n}",
   "No cameras within {radius} of the view centre": "Inga kameror inom {radius} från vyns mitt",
   "No cameras here match the search": "Inga kameror här matchar sökningen",
   "VIDEO · STALLED": "VIDEO · FASTNAT",
@@ -4603,7 +4601,6 @@
   "Alerts": "Varningar",
   "Back": "Tillbaka",
   "{from}–{to} of {total}": "{from}–{to} av {total}",
-  "{range} · {size}/page": "{range} · {size}/sida",
   "Pages": "Sidor",
   "Previous": "Föregående",
   "{name} per page, showing {range}": "{name} per sida, visar {range}",
@@ -4611,5 +4608,7 @@
   "Open Context to view street-level imagery": "Öppna Kontext för att se bilder i gatuhöjd",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Etiketter för lagren som är på: Täthet anger hur många som får en etikett. Varje lagers egna alternativ finns på dess rad i Datalager",
   "Upcoming": "Kommande",
-  "Nothing matches “{text}”.": "Inget matchar ”{text}”."
+  "Nothing matches “{text}”.": "Inget matchar ”{text}”.",
+  "Close-up map · {place}": "Karta på nära håll · {place}",
+  "Close-up map": "Karta på nära håll"
 }

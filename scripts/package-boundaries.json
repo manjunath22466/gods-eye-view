@@ -403,9 +403,25 @@
       "src/ui/labelLayers.js",
       "src/ui/rideFace.js",
       "src/ui/views/panels/NearbyMissions.vue",
-      "src/ui/missionsByTime.js"
+      "src/ui/missionsByTime.js",
+      "src/ui/cardMapStyle.js",
+      "src/ui/cardMapLabels.js",
+      "src/render/vectorBase/expressions.js",
+      "src/render/vectorBase/style.js",
+      "src/render/vectorBase/paint.js",
+      "src/render/vectorBase/index.js",
+      "src/data/installationNames.js",
+      "src/sources/militaryTileGeometry.js",
+      "src/data/tileBudget.js",
+      "src/data/tomtomTiles.js",
+      "src/sources/phaseTiming.js",
+      "src/sources/vectorTiles.js",
+      "src/sources/openFreeMap.js",
+      "src/sources/openFreeMapCardMap.js",
+      "src/ui/cardMap.js",
+      "src/ui/views/panels/CardMapCanvas.vue"
     ],
-    "external": ["vue", "pinia", "vue-i18n"]
+    "external": ["vue", "pinia", "vue-i18n", "pbf", "@mapbox/vector-tile"]
   },
   "i18n": {
     "exports": ["./i18n"],

@@ -1,7 +1,7 @@
-// The card's close-up map: how close it looks by kind of item, tiles that
-// meet without a seam, Esri's place names over the imagery with a credit
-// naming every source on screen, a caption naming the place itself, and an icon centred in its
-// circle. Over happy-dom; the stylesheet is checked where layout matters.
+// The card's close-up map: how close it looks by kind of item, a vector map
+// drawn round the spot with a credit naming its sources on screen, a caption
+// naming the place itself, and an icon centred in its circle. Over
+// happy-dom; the stylesheet is checked where layout matters.
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,24 +15,17 @@ import {
   tileBlock,
 } from './mapTiles.js';
 import {
-  ESRI_IMAGERY_CREDIT,
-  ESRI_IMAGERY_PLACES_CARD_CREDIT,
-  ESRI_IMAGERY_PLACES_CREDIT,
   ESRI_PLACES_TILES,
   ESRI_TILES,
+  OPENFREEMAP_CARD_CREDIT,
+  OPENFREEMAP_CARD_CREDIT_FULL,
 } from '../maps/attribution.js';
+import {
+  cardMapTheme,
+  setCardMapSource,
+  toggleCardMapTheme,
+} from './cardMap.js';
 import CloseUpMap from './views/panels/CloseUpMap.vue';
-
-// Every source the long credit names, each to be read without hovering.
-const MAP_SOURCES = [
-  'Powered by Esri',
-  'Maxar',
-  'Earthstar Geographics',
-  'GIS User Community',
-  'HERE',
-  'Garmin',
-  '© OpenStreetMap contributors',
-];
 
 const withoutComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '');
 const css = withoutComments(
@@ -88,13 +81,12 @@ test('tiles sit whole pixels apart, one tile step from each other, so no seam sh
     assert.ok(centre.left <= 0 && centre.left >= -256);
     assert.ok(centre.top <= 0 && centre.top >= -256);
   }
-  // Each tile is drawn a pixel larger than its step.
-  const rule = css.match(/\.close-up-map__tile\s*\{([^}]*)\}/)?.[1] || '';
-  assert.match(rule, /width:\s*257px/);
-  assert.match(rule, /height:\s*257px/);
+  // The close-up map draws the block on one canvas, so it has no seams.
+  assert.match(css, /\.close-up-map__canvas\s*\{/);
+  assert.doesNotMatch(css, /\.close-up-map__tile\b/);
 });
 
-test('the same block reads any tile service: World Imagery by default, the place names when asked', () => {
+test('the same block reads any tile service (the satellite ground view): World Imagery by default, the place names when asked', () => {
   const imagery = tileBlock(30.2672, -97.7431, 12);
   const names = tileBlock(30.2672, -97.7431, 12, ESRI_PLACES_TILES);
   assert.ok(imagery[4].src.startsWith(ESRI_TILES.split('{z}')[0]));
@@ -142,6 +134,35 @@ test('the caption names an airport and a place from search by themselves; anythi
   assert.equal(cityCaption(null), '');
 });
 
+// A 2D context that draws nothing, and a tile source that records each ask
+// and answers none, so the map asks without the network.
+function useSource(t) {
+  const asked = [];
+  const original = HTMLCanvasElement.prototype.getContext;
+  const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
+  HTMLCanvasElement.prototype.getContext = () => ctx;
+  t.after(() => {
+    HTMLCanvasElement.prototype.getContext = original;
+  });
+  t.after(
+    setCardMapSource({
+      async fetchBounds(box, { zoom, tiles }) {
+        asked.push({ zoom, tiles: tiles.map(({ x, y }) => `${x}/${y}`) });
+        throw new Error('no tiles in this test');
+      },
+    }),
+  );
+  return asked;
+}
+
+// Long enough for a map to compile its style and ask for its tiles.
+const settle = async () => {
+  for (let i = 0; i < 4; i++) {
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
+
 function mount(t, props) {
   document.body.replaceChildren();
   const host = document.body.appendChild(document.createElement('div'));
@@ -151,7 +172,8 @@ function mount(t, props) {
   return (selector) => [...host.querySelectorAll(selector)];
 }
 
-test('the map lays Esri place names over the imagery, at the zoom for its kind, crediting every source on screen', async (t) => {
+test('the map is drawn from vector tiles at the zoom for its kind, crediting its sources on screen', async (t) => {
+  const asked = useSource(t);
   const $$ = mount(t, {
     lat: 37.6213,
     lon: -122.379,
@@ -168,34 +190,14 @@ test('the map lays Esri place names over the imagery, at the zoom for its kind, 
       },
     },
   });
-  await nextTick();
-  const tiles = $$('.close-up-map__tile:not(.close-up-map__tile--labels)');
-  const labels = $$('.close-up-map__tile--labels');
-  assert.equal(tiles.length, 9);
-  assert.equal(labels.length, 9);
-  for (const img of tiles)
-    assert.match(
-      img.getAttribute('src'),
-      /World_Imagery\/MapServer\/tile\/12\//,
-    );
-  for (const img of labels)
-    assert.match(
-      img.getAttribute('src'),
-      /World_Boundaries_and_Places\/MapServer\/tile\/12\//,
-    );
-  const images = $$('.close-up-map__tile');
-  assert.ok(
-    images.indexOf(labels[0]) > images.indexOf(tiles.at(-1)),
-    'names drawn after, so over, the imagery',
-  );
+  await settle();
+  assert.equal($$('img').length, 0, 'no tile images');
+  const [map] = $$('canvas.close-up-map__canvas');
+  assert.ok(map, 'one canvas');
+  assert.equal(asked.at(-1).zoom, 12, "an airport's zoom");
   const [credit] = $$('.close-up-map__credit');
-  assert.equal(credit.textContent, ESRI_IMAGERY_PLACES_CARD_CREDIT);
-  for (const source of MAP_SOURCES)
-    assert.ok(
-      credit.textContent.includes(source),
-      `${source} is credited on screen`,
-    );
-  assert.equal(credit.getAttribute('title'), ESRI_IMAGERY_PLACES_CREDIT);
+  assert.equal(credit.textContent, OPENFREEMAP_CARD_CREDIT);
+  assert.equal(credit.getAttribute('title'), OPENFREEMAP_CARD_CREDIT_FULL);
   assert.equal(
     credit.getAttribute('tabindex'),
     '0',
@@ -206,14 +208,36 @@ test('the map lays Esri place names over the imagery, at the zoom for its kind, 
     null,
     'read out, not hidden',
   );
-  assert.ok(ESRI_IMAGERY_PLACES_CREDIT.startsWith(ESRI_IMAGERY_CREDIT));
-  assert.match(ESRI_IMAGERY_PLACES_CREDIT, /OpenStreetMap contributors/);
+  assert.doesNotMatch(document.body.innerHTML, /arcgisonline|Esri/i);
   const [label] = $$('.close-up-map__label');
   assert.match(
     label.textContent,
-    /San Francisco International Airport, San Francisco, United States/,
+    /^Close-up map · San Francisco International Airport, San Francisco, United States$/,
   );
   assert.equal($$('.close-up-map__icon')[0].textContent, 'flight');
+});
+
+test('the close-up switches styles while keeping its attribution visible', async (t) => {
+  useSource(t);
+  const $$ = mount(t, { lat: 30.2688, lon: -97.7427 });
+  const [toggle] = $$('.close-up-map__theme');
+  t.after(() => {
+    if (cardMapTheme.value !== 'dark') toggleCardMapTheme();
+    globalThis.localStorage?.removeItem('gev.cardMapTheme');
+  });
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  toggle.click();
+  await settle();
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+  assert.equal(cardMapTheme.value, 'toner');
+  assert.equal(
+    $$('.close-up-map__credit')[0].textContent,
+    OPENFREEMAP_CARD_CREDIT,
+  );
+  toggle.click();
+  await settle();
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(cardMapTheme.value, 'dark');
 });
 
 // The rules that apply to a card map's credit, its foot and its caption,
@@ -372,6 +396,7 @@ test('the marker is centred in its circle whatever the mark', () => {
 });
 
 test('a map kept behind another view asks for no new tiles as its item moves, and catches up when shown again', async (t) => {
+  const asked = useSource(t);
   const props = reactive({
     lat: 37.6213,
     lon: -122.379,
@@ -379,46 +404,44 @@ test('a map kept behind another view asks for no new tiles as its item moves, an
     active: true,
     card: { kind: 'airport', place: { airport: { name: 'SFO' } } },
   });
-  const all = mount(t, props);
-  await nextTick();
-  const sources = () =>
-    all('.close-up-map__tile').map((img) => img.getAttribute('src'));
-  const first = sources();
-  assert.equal(first.length, 18, 'imagery and place names');
+  mount(t, props);
+  await settle();
+  assert.equal(asked.length, 1, 'one ask for the block');
+  const first = asked[0];
 
   // Behind the photo or the model, the item crosses several tiles.
   props.active = false;
-  await nextTick();
+  await settle();
   for (const step of [1, 2, 3]) {
     props.lat = 37.6213 + step * 0.2;
     props.lon = -122.379 + step * 0.2;
-    await nextTick();
-    assert.deepEqual(sources(), first, `no new tile URL at step ${step}`);
+    await settle();
+    assert.equal(asked.length, 1, `no new ask at step ${step}`);
   }
 
-  // Shown again: the map is taken where the item is now.
+  // Shown again: the map is drawn where the item is now.
   props.active = true;
-  await nextTick();
-  const now = sources();
-  assert.equal(now.length, 18);
-  assert.notDeepEqual(now, first, 'it caught up');
-  const block = tileBlock(props.lat, props.lon, 12).map((tile) => tile.src);
-  assert.deepEqual(now.slice(0, 9), block);
+  await settle();
+  assert.equal(asked.length, 2);
+  assert.notDeepEqual(asked[1], first, 'it caught up');
+  const block = tileBlock(props.lat, props.lon, 12).map((tile) =>
+    tile.key.split('/').slice(1).join('/'),
+  );
+  assert.deepEqual(asked[1].tiles, block);
 });
 
 test('a map used without the prop is shown and follows its item as before', async (t) => {
+  const asked = useSource(t);
   const props = reactive({
     lat: 30.27,
     lon: -97.74,
     icon: 'place',
     card: { kind: 'airport', place: { airport: { name: 'AUS' } } },
   });
-  const all = mount(t, props);
-  await nextTick();
-  const sources = () =>
-    all('.close-up-map__tile').map((img) => img.getAttribute('src'));
-  const first = sources();
+  mount(t, props);
+  await settle();
   props.lat += 0.5;
-  await nextTick();
-  assert.notDeepEqual(sources(), first);
+  await settle();
+  assert.equal(asked.length, 2);
+  assert.notDeepEqual(asked[1].tiles, asked[0].tiles);
 });

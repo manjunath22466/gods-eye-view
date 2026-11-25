@@ -42,6 +42,7 @@
   "Data provided by:": "הנתונים מסופקים על ידי:",
   "Close data attribution": "סגירת ייחוס הנתונים",
   "Light aircraft": "מטוס קל",
+  "Light map": "מפה בהירה",
   "Glider": "דאון",
   "Turboprop": "מטוס טורבו-פרופ",
   "Airliner": "מטוס נוסעים",
@@ -4482,8 +4483,6 @@
   "Airport": "שדה תעופה",
   "Reclassify the followed aircraft as TR-3B": "סיווג מחדש של כלי הטיס הנעקב כ-TR-3B",
   "More details": "פרטים נוספים",
-  "Close-up satellite map · {place}": "מפת לוויין מקרוב · {place}",
-  "Close-up satellite map": "מפת לוויין מקרוב",
   "How it is changing": "איך זה משתנה",
   "Last 24 hours": "24 השעות האחרונות",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4661,7 +4660,6 @@
   "Next station": "התחנה הבאה",
   "Previous camera": "המצלמה הקודמת",
   "Next camera": "המצלמה הבאה",
-  "Show all {n}": "הצג את כל {n}",
   "No cameras within {radius} of the view centre": "אין מצלמות בטווח {radius} ממרכז התצוגה",
   "No cameras here match the search": "אין כאן מצלמות שתואמות לחיפוש",
   "VIDEO · STALLED": "וידאו · תקוע",
@@ -4712,7 +4710,6 @@
   "Alerts": "התרעות",
   "Back": "חזרה",
   "{from}–{to} of {total}": "{from}–{to} מתוך {total}",
-  "{range} · {size}/page": "{range} · {size}/עמוד",
   "Pages": "עמודים",
   "Previous": "הקודם",
   "{name} per page, showing {range}": "{name} בעמוד, מוצגות {range}",
@@ -4720,5 +4717,7 @@
   "Open Context to view street-level imagery": "פתחו את ההקשר כדי לראות תמונות ברמת הרחוב",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "תוויות של השכבות הפעילות: הצפיפות קובעת כמה מהן מתויגות. האפשרויות של כל שכבה נמצאות בשורה שלה בשכבות הנתונים",
   "Upcoming": "בקרוב",
-  "Nothing matches “{text}”.": "אין התאמות ל“{text}”."
+  "Nothing matches “{text}”.": "אין התאמות ל“{text}”.",
+  "Close-up map · {place}": "מפה מקרוב · {place}",
+  "Close-up map": "מפה מקרוב"
 }

@@ -50,7 +50,7 @@ const callouts = computed(() =>
 // map; anything else drawn with a 3D model (a vessel, a train) shows its
 // photo, its model and the map; a satellite, the ground beneath it; a camera,
 // its latest frame; a street-level photo, the photo itself; anything else on
-// the map, a close-up satellite map of where it is (entityHeroViews.js).
+// the map, a close-up map of where it is (entityHeroViews.js).
 // The views take turns, first to last and round again, each for
 // HERO_AUTOPLAY_MS once it has drawn; picking one, or Pause, stops the turns.
 // The globe, model and cockpit view are the renderer's (`store.previews()`).
@@ -268,8 +268,8 @@ function toggleDock() {
   });
 }
 // Which views have drawn since they last showed: a view's turn is counted
-// only from then. The photo and the close-up map say so as their images
-// load; the cockpit view as its tiles are in, each time it shows; the model
+// only from then. The photo says so when its image loads, the close-up map
+// when its canvas is ready, the cockpit each time its tiles are in, the model
 // once the fleet set it is drawn from has loaded; the route globe draws at
 // once. One that never says so hands over after HERO_READY_WAIT_MS.
 const drawn = reactive(new Set());
@@ -278,9 +278,13 @@ watch(
   () => photo.value?.src,
   () => drawn.delete('photo'),
 );
-function onMapSettled(event) {
-  const images = event.currentTarget?.querySelectorAll?.('img') || [];
-  if ([...images].every((image) => image.complete)) drawn.add('map');
+function onMapState(state) {
+  // Redraws of the current view keep the dwell that began on its first paint.
+  if (state === 'ready') drawn.add('map');
+}
+function onMapEntered(state) {
+  if (state === 'ready') drawn.add('map');
+  else drawn.delete('map');
 }
 function awaitDrawn(view) {
   if (view === 'route') drawn.add('route');
@@ -434,7 +438,7 @@ onBeforeUnmount(() => {
       <RouteGlobe v-if="views.includes('route') && made.has('route')" :key="`route-${card.key}`" class="entity-hero__layer" :class="layerClass('route')" :inert="layerInert('route')" :active="activeFlightPreview === 'route' && playing && onScreen && pageShown" :from="card.route.fromAt" :to="card.route.toAt" :at="{ lat: card.lat, lon: card.lon }" @failed="routeFailed = true" />
       <AircraftModelHero v-if="modelKnown && made.has('model')" :key="card.key" class="entity-hero__layer" :class="layerClass('model')" :inert="layerInert('model')" :active="activeFlightPreview === 'model' && playing && onScreen && pageShown" :subject="card.modelSubject" :heading="card.heading || 0" :callouts="callouts" @failed="modelFailed = true" />
       <FlightCockpitView v-if="views.includes('cockpit') && made.has('cockpit')" :key="`cockpit-${card.key}`" class="entity-hero__layer" :class="layerClass('cockpit')" :inert="layerInert('cockpit')" :active="activeFlightPreview === 'cockpit'" :lat="card.lat" :lon="card.lon" :altitude-m="card.altitudeM" :heading="card.heading" :speed-mps="card.speedMps" @failed="cockpitFailed = true" @ready="onCockpitReady" />
-      <CloseUpMap v-if="views.includes('map') && made.has('map')" :key="`map-${card.key}`" class="entity-hero__layer" :class="layerClass('map')" :inert="layerInert('map')" :active="activeFlightPreview === 'map'" :lat="card.lat" :lon="card.lon" :icon="card.icon" :card="card" @load.capture="onMapSettled" @error.capture="onMapSettled" />
+      <CloseUpMap v-if="views.includes('map') && made.has('map')" :key="`map-${card.key}`" class="entity-hero__layer" :class="layerClass('map')" :inert="layerInert('map')" :active="activeFlightPreview === 'map'" :lat="card.lat" :lon="card.lon" :icon="card.icon" :card="card" @state="onMapState" @entered="onMapEntered" />
       <div v-if="turns || views.includes('model')" class="entity-card__preview-switch" role="group" :aria-label="t('Preview')">
         <UiButton v-if="views.includes('photo')" :pressed="activeFlightPreview === 'photo'" pressed-class="active" :label="t('Photos')" @click="choosePreview('photo')"><UiIcon name="photo_camera" :size="null" /></UiButton>
         <UiButton v-if="views.includes('route')" :pressed="activeFlightPreview === 'route'" pressed-class="active" :label="t('Route')" @click="choosePreview('route')"><UiIcon name="timeline" :size="null" /></UiButton>
