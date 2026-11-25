@@ -1814,5 +1814,7 @@
   "src/layers/installations/rowControls.test.mjs",
   "src/rightRailLayout.test.mjs",
   "src/ui/cameraCredit.js",
-  "src/ui/cameraCredit.test.mjs"
+  "src/ui/cameraCredit.test.mjs",
+  "src/ui/kit/ContextListCard.vue",
+  "src/ui/kit/ContextListCard.test.mjs"
 ]

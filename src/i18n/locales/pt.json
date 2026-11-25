@@ -100,7 +100,6 @@
     "many": "Nada noticiado aqui perto nas últimas {hours} h",
     "other": "Nada noticiado aqui perto nas últimas {hours} h"
   },
-  "Latest news": "Últimas notícias",
   "No news matches these filters in the last {hours} h": {
     "one": "Nenhuma notícia da última {hours} h corresponde a estes filtros",
     "many": "Nenhuma notícia das últimas {hours} h corresponde a estes filtros",
@@ -1075,6 +1074,7 @@
   "Traffic / Transit": "Trânsito / Transporte",
   "Music": "Música",
   "Other": "Outras",
+  "Remaining groups": "Grupos restantes",
   "Directory refresh degraded; showing the previous station catalog.": "A atualização do diretório retornou dados degradados; mostrando o catálogo de estações anterior.",
   "Radio directory coverage is degraded.": "A cobertura do diretório de rádio está degradada.",
   "Directory refresh failed; showing the previous station catalog.": "A atualização do diretório falhou; mostrando o catálogo de estações anterior.",
@@ -2159,7 +2159,6 @@
   "Radio is disabling…": "O rádio está sendo desativado…",
   "Radio lifecycle is uncertain — use Enable or Disable to reconcile": "O ciclo de vida do rádio é incerto — use Ativar ou Desativar para reconciliar",
   "Clear reading": "Limpar leitura",
-  "Observed history": "Histórico observado",
   "news list|Latest": "Mais recentes",
   "Imagery on Esri · Google 3D returns when cleared": "Imagens sobre o Esri · LIMPAR restaura o Google 3D",
   "Point the camera at the ground to use the view": "Aponte a câmera para o chão para usar a vista",
@@ -2203,7 +2202,6 @@
   "← → preview · S shows the focused day": "← → prévia · S mostra o dia em foco",
   "ZOOM IN": "APROXIMAR",
   "Fly in until the view fits the 1,000 km limit": "Aproxime até a vista caber no limite de 1.000 km",
-  "Imagery days, newest first · arrows move, S or A and B pin": "Dias com imagens, do mais recente · as setas movem, S ou A e B fixam",
   "On the map": "No mapa",
   "Mode": "Modo",
   "Imagery opacity": "Opacidade das imagens",
@@ -4742,11 +4740,6 @@
   "Show all {n}": "Mostrar todas ({n})",
   "No cameras within {radius} of the view centre": "Nenhuma câmera a menos de {radius} do centro da vista",
   "No cameras here match the search": "Nenhuma câmera aqui corresponde à pesquisa",
-  "Show {count} more cameras": {
-    "one": "Mostrar mais {count} câmera",
-    "many": "Mostrar mais {count} câmeras",
-    "other": "Mostrar mais {count} câmeras"
-  },
   "VIDEO · STALLED": "VÍDEO · TRAVADO",
   "Docked · loading": "Acoplado · carregando",
   "Docked · stalled": "Acoplado · travado",
@@ -4792,5 +4785,11 @@
   "Weather briefing": "Resumo do tempo",
   "No frame at this time": "Sem imagem neste horário",
   "At map center": "No centro do mapa",
-  "Alerts": "Alertas"
+  "Alerts": "Alertas",
+  "Back": "Voltar",
+  "{from}–{to} of {total}": "{from}–{to} de {total}",
+  "{range} · {size}/page": "{range} · {size}/pág.",
+  "Pages": "Páginas",
+  "Previous": "Anterior",
+  "{name} per page, showing {range}": "{name} por página, mostrando {range}"
 }

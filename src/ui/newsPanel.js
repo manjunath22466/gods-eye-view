@@ -35,9 +35,36 @@ export function createNewsPanel({
   let requestedAt = -1;
   let shownFilters = '';
 
+  function restoreReportFocus(active, report) {
+    const current = document.activeElement;
+    if (
+      current === active ||
+      (current && current !== document.body && !container.contains(current))
+    )
+      return;
+    const next = container.querySelector('.news-card.is-open');
+    if (!next || next.dataset.reportId !== report.dataset.reportId) return;
+    const control = next.contains(active)
+      ? active
+      : [...next.querySelectorAll('button, a[href], video[controls]')].find(
+          (node) =>
+            node.tagName === active.tagName &&
+            node.className === active.className &&
+            node.getAttribute('href') === active.getAttribute('href'),
+        );
+    (control ?? next.querySelector('.news-card__main'))?.focus();
+  }
+
   function render() {
     if (destroyed) return;
+    // A feed refresh can move the open detail between its row and the
+    // lead card. Keep focus on the same action in the selected report.
+    const active = document.activeElement;
+    const report = container.contains(active)
+      ? active.closest?.('.news-card.is-open')
+      : null;
     renderVue(h(NewsFeed, { view, onParams }), container);
+    if (report) restoreReportFocus(active, report);
     const hidden = !view;
     if (panel) set(panel, 'hidden', hidden);
     // The count is the shown section's: Local's list, else the feed.

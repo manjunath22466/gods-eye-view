@@ -1,11 +1,13 @@
 import * as Cesium from 'cesium';
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
+import { nextTick } from 'vue';
 import assert from 'node:assert/strict';
 import { assertSameNode } from '../testSupport/domAssert.mjs';
 import { readFileSync } from 'node:fs';
 import { createRecentImageryPanel } from './recentImagery.js';
 import { nonCrossingBoxes } from '../layers/recentImagery/model.js';
+import { resetListCardMemory } from './kit/ContextListCard.vue';
 import { createRecentImageryLayer } from '../layers/recentImagery/index.js';
 import {
   BOX,
@@ -88,6 +90,7 @@ Object.assign(globalThis.Element.prototype, {
 /** The static rail panel skeleton from views/ContextView.vue. */
 function fakeDocument() {
   document.body.textContent = '';
+  resetListCardMemory();
   Object.defineProperty(document.documentElement, 'clientWidth', {
     configurable: true,
     value: 1200,
@@ -199,13 +202,21 @@ function fixture({ fetchImpl, controller = fakeController() } = {}) {
   const cards = () =>
     root.findAll((node) => node.classList.contains('ri-card'));
   const card = (key) => cards().find((node) => node.dataset.key === key);
+  /** Click a day's row: it previews that day. */
+  const open = (key) =>
+    card(key)
+      .find((node) => node.classList.contains('ri-card-open'))
+      .click();
   const chip = (key, slot) =>
     card(key).find((node) => node.dataset.slot === slot);
   const part = (node, name) =>
     node.find((child) => child.classList.contains(name));
-  const strip = byId('ri-strip');
+  const strip = root.find((node) => node.classList.contains('ri-strip'));
+  // Keys go where the keyboard is: the focused day's row.
   const key = (name, extra = {}) =>
-    strip.dispatch('keydown', { key: name, ...extra });
+    card(layer.getSnapshot().focus?.key)
+      .find((node) => node.classList.contains('ri-card-open'))
+      .dispatch('keydown', { key: name, ...extra });
   /** Enable, select BOX and land the catalog. */
   const ready = async () => {
     layer.enable();
@@ -238,6 +249,7 @@ function fixture({ fetchImpl, controller = fakeController() } = {}) {
     cards,
     card,
     chip,
+    open,
     part,
     strip,
     key,
@@ -287,7 +299,9 @@ test('the readout mounts in the rail body, hides while the layer is off and open
 test('the body is a fixed stack of seven blocks in a fixed order, each with a fixed height in the stylesheet', () => {
   const f = fixture();
   assert.deepEqual(
-    [...f.root.children].map((node) => node.id || node.className),
+    [...f.root.children].map((node) =>
+      node === f.strip ? 'ri-strip' : node.id || node.className,
+    ),
     [
       'ri-actions',
       'ri-notice',
@@ -309,8 +323,6 @@ test('the body is a fixed stack of seven blocks in a fixed order, each with a fi
   };
   assert.match(rule('.recent-imagery-readout .ri-actions-row'), /height: 22px/);
   assert.match(rule('.recent-imagery-readout .ri-line'), /height: 14px/);
-  assert.match(rule('.recent-imagery-readout .ri-strip'), /height: 120px/);
-  assert.match(rule('.recent-imagery-readout .ri-card'), /height: 112px/);
   assert.match(
     rule('.recent-imagery-readout .ri-selection'),
     /grid-template-rows: 26px 20px 20px/,
@@ -375,12 +387,6 @@ test('no control changes place in the tree, no block is hidden and every fixed-h
         'ri-zoom-in',
         readout('.ri-zoom-in'),
         /height: 14px/,
-      ],
-      'ri-strip': [
-        f.byId('ri-strip'),
-        'ri-strip',
-        readout('.ri-strip'),
-        /height: 120px/,
       ],
       'ri-hint': [
         f.byId('ri-hint'),
@@ -588,7 +594,10 @@ test('cards carry thumbnail, date, sensor, cloud, START HERE and PREVIEW; the ch
     true,
     'pinned, not previewed',
   );
-  assert.match(s18.getAttribute('aria-label'), /· shown$/);
+  assert.match(
+    f.part(s18, 'ri-card-open').getAttribute('aria-label'),
+    /· shown$/,
+  );
   // A / B: the same chip slots, relabelled.
   f.root
     .find(
@@ -680,11 +689,14 @@ test('the selection bar reads the mode, both rows and a preview, with × reserve
   assert.equal(f.snap().mode, 'image');
 });
 
-test('strip keys: arrows preview after the debounce, S / A / B pin, Enter previews, repeats are ignored', async () => {
+test('row keys: arrows preview after the debounce and move focus to that row, S / A / B pin, repeats are ignored', async () => {
   const f = fixture();
   await f.ready();
-  f.key('ArrowRight');
+  assert.equal(f.strip.getAttribute('aria-keyshortcuts'), 'A S');
+  f.key('ArrowDown');
   assert.equal(f.snap().focus.key, L16);
+  await nextTick();
+  assertSameNode(document.activeElement, f.part(f.card(L16), 'ri-card-open'));
   f.timers.flush();
   assert.equal(f.snap().preview.key, L16);
   f.key('Home');
@@ -702,25 +714,37 @@ test('strip keys: arrows preview after the debounce, S / A / B pin, Enter previe
   f.key('a');
   assert.equal(f.snap().pins.a.key, null, 'A again unpins');
   f.layer.setMode('ab');
+  assert.equal(f.strip.getAttribute('aria-keyshortcuts'), 'A B');
   f.key('a');
   f.key('ArrowLeft');
   f.key('b');
   assert.deepEqual([f.snap().pins.a.key, f.snap().pins.b.key], [L16, S18]);
   f.key('a', { metaKey: true });
   assert.equal(f.snap().pins.a.key, L16, 'modified keys are not ours');
-  f.layer.setAssignment('a', null);
-  f.layer.setAssignment('b', null);
-  f.key('Enter');
-  assert.equal(f.snap().preview.key, S18, 'Enter previews the focused day');
 });
 
-test('clicks: a card previews and focuses the strip, a chip pins, SELECT BOX toggles the tool, USE VIEW and CLEAR drive the layer', async () => {
+test('a focused day found empty hands focus to the row in its place, and day keys still work there', async () => {
   const f = fixture();
   await f.ready();
-  f.card(L16).click();
+  f.part(f.card(V21), 'ri-card-open').focus();
+  f.thumbnails.probe(V21, 'empty');
+  await nextTick();
+  await nextTick();
+  const row = document.activeElement;
+  assert.ok(row?.dataset?.listKey, 'focus is on the row now in its place');
+  assert.notEqual(row.dataset.listKey, V21, 'the empty day is gone');
+  const before = f.snap().focus.key;
+  row.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+  );
+  assert.notEqual(f.snap().focus.key, before, 'ArrowDown moves on from it');
+});
+
+test('clicks: a row previews its day, a chip pins, SELECT BOX toggles the tool, USE VIEW and CLEAR drive the layer', async () => {
+  const f = fixture();
+  await f.ready();
+  f.open(L16);
   assert.equal(f.snap().preview.key, L16);
-  assert.equal(f.strip.focused, 1);
-  assert.deepEqual(f.strip.focusOptions, { preventScroll: true });
   f.chip(S18, 'a').click();
   assert.equal(f.snap().pins.a.key, S18);
   const selectBox = f.byAction('select-box');
@@ -741,21 +765,19 @@ test('clicks: a card previews and focuses the strip, a chip pins, SELECT BOX tog
   assert.equal(f.byAction('clear').disabled, true);
 });
 
-test('with no box the strip offers to draw one: the action starts the box tool, and the passes then list newest first with the count', async () => {
+test('with no box the list offers to draw one: the action starts the box tool, and the passes then list newest first with the count', async () => {
   const f = fixture();
   f.layer.enable();
   const draw = () => f.byId('ri-draw-area');
   assert.equal(draw().textContent, 'Draw an area to see recent passes ›');
-  assertSameNode(draw().parentNode, f.strip);
-  // A strip with no days is not a list until the passes arrive.
-  assert.equal(f.strip.getAttribute('role'), null);
-  assert.equal(f.strip.getAttribute('tabindex'), '-1');
+  assertSameNode(draw().closest('.ri-strip'), f.strip, 'the empty list');
+  assert.equal(f.strip.hasAttribute('aria-keyshortcuts'), false);
   assert.deepEqual(
     f.presence(),
     { count: null, reason: 'no area' },
     'no passes before a box, and the tab says why',
   );
-  // Enter on the action is the button's own; the strip leaves it alone.
+  // Enter on the action is the button's own; the readout leaves it alone.
   assert.equal(
     draw().dispatch('keydown', { key: 'Enter' }).defaultPrevented,
     false,
@@ -764,7 +786,7 @@ test('with no box the strip offers to draw one: the action starts the box tool, 
   assert.deepEqual(f.tool.calls, ['start']);
   assert.equal(draw(), null);
   assert.equal(
-    f.root.find((node) => node.classList.contains('ri-strip-empty'))
+    f.strip.find((node) => node.classList.contains('context-list-card__state'))
       .textContent,
     'Drag a box on the map (Esc cancels)',
   );
@@ -772,8 +794,6 @@ test('with no box the strip offers to draw one: the action starts the box tool, 
   assert.notEqual(draw(), null, 'a cancelled draw offers the action again');
   await f.ready();
   assert.equal(draw(), null);
-  assert.equal(f.strip.getAttribute('role'), 'listbox');
-  assert.equal(f.strip.getAttribute('tabindex'), '0');
   const cards = f.cards();
   const days = f.snap().candidates.map((candidate) => candidate.day);
   assert.deepEqual(
@@ -791,7 +811,7 @@ test('with no box the strip offers to draw one: the action starts the box tool, 
   }
   assert.deepEqual(f.presence(), { count: cards.length }, 'one per pass');
   // A pass row shows that pass.
-  f.card(L16).click();
+  f.open(L16);
   assert.equal(f.snap().preview.key, L16);
   // Clearing the box brings the action back.
   f.byAction('clear').click();
@@ -799,7 +819,7 @@ test('with no box the strip offers to draw one: the action starts the box tool, 
   assert.deepEqual(f.presence(), { count: null, reason: 'no area' });
 });
 
-test('Escape clears the preview first, then cancels the box tool, then blurs the strip', async () => {
+test("Escape clears the preview first, then cancels the box tool, then is not the readout's", async () => {
   const f = fixture();
   await f.ready();
   f.tool.start();
@@ -808,10 +828,9 @@ test('Escape clears the preview first, then cancels the box tool, then blurs the
   assert.equal(f.tool.isActive(), true);
   f.key('Escape');
   assert.equal(f.tool.isActive(), false);
-  f.key('Escape');
-  assert.equal(f.strip.blurred, 1);
+  assert.equal(f.key('Escape').defaultPrevented, false);
   // From elsewhere in the panel Escape only acts when there is something to undo.
-  f.card(L16).click();
+  f.open(L16);
   const escape = f.byId('ri-opacity').dispatch('keydown', { key: 'Escape' });
   assert.equal(escape.defaultPrevented, true);
   assert.equal(f.snap().preview.key, null);
@@ -827,7 +846,7 @@ test('the readout owns Escape only while it has a preview or the box tool to und
   assert.equal(owns(), false, 'idle');
   f.tool.start();
   assert.equal(owns(), true, 'drawing a box');
-  // Taken on the way down (Context's capture handler): the strip does nothing.
+  // Taken on the way down (Context's capture handler): the readout does nothing.
   const taken = new Event('keydown', { bubbles: true, cancelable: true });
   Object.defineProperty(taken, 'key', { value: 'Escape' });
   taken.preventDefault();
@@ -836,7 +855,7 @@ test('the readout owns Escape only while it has a preview or the box tool to und
   f.key('Escape');
   assert.equal(f.tool.isActive(), false);
   assert.equal(owns(), false);
-  f.card(L16).click();
+  f.open(L16);
   assert.equal(owns(), true, 'previewing a day');
 });
 
@@ -1105,9 +1124,7 @@ test('opacity drives both images; EXPORT downloads the pin or the preview and EX
   );
   // A retained export after teardown neither fetches nor mounts again.
   const fetched = f.fetches.length;
-  const container = f
-    .byId('ri-strip')
-    .closest('.recent-imagery-readout').parentElement;
+  const container = f.strip.closest('.recent-imagery-readout').parentElement;
   f.readout.destroy();
   assert.equal(await f.readout.exportImage('a'), false);
   assert.equal(f.fetches.length, fetched);
@@ -1177,8 +1194,9 @@ test('the body scroll position survives renders even when DOM mutations reset it
   const f = fixture();
   await f.ready();
   f.body.scrollTop = 120;
-  const insert = f.strip.insertBefore.bind(f.strip);
-  f.strip.insertBefore = (...args) => {
+  const list = f.strip.querySelector('ul');
+  const insert = list.insertBefore.bind(list);
+  list.insertBefore = (...args) => {
     f.body.scrollTop = 0;
     return insert(...args);
   };

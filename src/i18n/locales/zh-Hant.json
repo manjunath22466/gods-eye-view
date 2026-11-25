@@ -88,7 +88,6 @@
   "Nothing reported near here in the last {hours} h": {
     "other": "最近 {hours} 小時附近無報道"
   },
-  "Latest news": "最新新聞",
   "No news matches these filters in the last {hours} h": {
     "other": "最近 {hours} 小時沒有符合這些篩選條件的新聞"
   },
@@ -1011,6 +1010,7 @@
   "Traffic / Transit": "交通 / 公共交通",
   "Music": "音樂",
   "Other": "其他",
+  "Remaining groups": "其餘分組",
   "Directory refresh degraded; showing the previous station catalog.": "目錄刷新降級；正在顯示上一次的電臺目錄。",
   "Radio directory coverage is degraded.": "電臺目錄覆蓋已降級。",
   "Directory refresh failed; showing the previous station catalog.": "目錄刷新失敗；正在顯示上一次的電臺目錄。",
@@ -2046,7 +2046,6 @@
   "Radio is disabling…": "電臺正在停用…",
   "Radio lifecycle is uncertain — use Enable or Disable to reconcile": "電臺生命週期狀態不確定——請使用“啟用”或“停用”進行核對",
   "Clear reading": "清除讀數",
-  "Observed history": "觀測歷史",
   "news list|Latest": "最新",
   "Imagery on Esri · Google 3D returns when cleared": "影像顯示在 Esri 底圖上 · 清除後恢復 Google 3D",
   "Point the camera at the ground to use the view": "將相機對準地面才能使用當前視野",
@@ -2088,7 +2087,6 @@
   "← → preview · S shows the focused day": "← → 預覽 · S 顯示當前所選日期",
   "ZOOM IN": "放大",
   "Fly in until the view fits the 1,000 km limit": "拉近直到視野不超過 1,000 km 上限",
-  "Imagery days, newest first · arrows move, S or A and B pin": "影像日期（最新在前）· 方向鍵移動，S、A、B 固定",
   "On the map": "地圖上",
   "Mode": "模式",
   "Imagery opacity": "影像不透明度",
@@ -4514,9 +4512,6 @@
   "Show all {n}": "顯示全部 {n} 個",
   "No cameras within {radius} of the view centre": "視圖中心 {radius} 範圍內沒有攝像頭",
   "No cameras here match the search": "這裡沒有符合搜索的攝像頭",
-  "Show {count} more cameras": {
-    "other": "再顯示 {count} 個攝像頭"
-  },
   "VIDEO · STALLED": "視頻 · 卡住",
   "Docked · loading": "已停靠 · 加載中",
   "Docked · stalled": "已停靠 · 卡住",
@@ -4562,5 +4557,11 @@
   "Weather briefing": "天氣簡報",
   "No frame at this time": "此時間沒有畫面",
   "At map center": "地圖中心",
-  "Alerts": "警報"
+  "Alerts": "警報",
+  "Back": "返回",
+  "{from}–{to} of {total}": "第 {from}–{to} 項，共 {total} 項",
+  "{range} · {size}/page": "{range} · 每頁 {size} 項",
+  "Pages": "頁面",
+  "Previous": "上一頁",
+  "{name} per page, showing {range}": "每頁{name}，當前顯示 {range}"
 }

@@ -1113,8 +1113,8 @@
   background: #c89bff;
 }
 
-.view-context__bar-key [data-tone='4']::before,
-.view-context__bar [data-tone='4'] {
+.view-context__bar [data-tone='4'],
+.view-context__bar-key [data-tone='4']::before {
   background: rgba(199, 214, 222, 0.35);
 }
 
@@ -1348,6 +1348,80 @@
 
 .nearby-lists .camera-list__more {
   justify-content: center;
+}
+
+/* A list card in Context (kit/ContextListCard.vue): a layer's block, its
+   head a heading in the block head's look, then its rows, a pager under
+   them. */
+.context-list-card.nearby-lists {
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.context-list-card .context-list-card__head {
+  margin: 0;
+  font-weight: inherit;
+}
+
+.context-list-card__state {
+  margin: 0.45rem 0 0.1rem;
+  color: rgba(199, 214, 222, 0.6);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+}
+
+/* Previous, where the page is (the page size's control), Next. At either
+   end a button stays in the tab order, dimmed. */
+.context-list-card__pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.nearby-lists .context-list-card__pager .nearby-lists__all {
+  flex: none;
+  width: auto;
+}
+
+.nearby-lists .context-list-card__pager [aria-disabled='true'] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.context-list-card__range {
+  min-width: 0;
+  margin-inline: auto;
+  color: rgba(199, 214, 222, 0.55);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-align: center;
+}
+
+select.context-list-card__range {
+  padding-block: 0.15rem;
+  padding-inline: 0.3rem;
+  color: rgba(225, 236, 242, 0.88);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+select.context-list-card__range:focus-visible {
+  outline: 1px solid #36dcff;
+  outline-offset: 1px;
+}
+
+/* Back to the list, above an item's detail in the list's place. */
+.nearby-lists .context-list-card__back {
+  width: auto;
+  margin-top: 0.4rem;
+  color: #36dcff;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.04rem;
 }
 
 .camera-list__empty {

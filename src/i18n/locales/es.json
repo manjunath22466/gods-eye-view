@@ -100,7 +100,6 @@
     "many": "No hay noticias cerca de aquí en las últimas {hours} h",
     "other": "No hay noticias cerca de aquí en las últimas {hours} h"
   },
-  "Latest news": "Últimas noticias",
   "No news matches these filters in the last {hours} h": {
     "one": "En la última {hours} h no hay noticias que coincidan con estos filtros",
     "many": "En las últimas {hours} h no hay noticias que coincidan con estos filtros",
@@ -723,6 +722,7 @@
   "Traffic / Transit": "Tráfico / Transporte",
   "Music": "Música",
   "Other": "Otros",
+  "Remaining groups": "Grupos restantes",
   "NO STATION AVAILABLE": "NINGUNA EMISORA DISPONIBLE",
   "DISABLE": "DESACTIVAR",
   "RECONCILE": "RECONCILIAR",
@@ -1664,14 +1664,12 @@
   "CH {index} / {total}": "CANAL {index} / {total}",
   "Station unavailable after directory refresh": "Emisora no disponible tras actualizar el directorio",
   "Clear reading": "Borrar lectura",
-  "Observed history": "Historial observado",
   "news list|Latest": "Últimas",
   "S on another day replaces it · × unpins": "S en otro día lo reemplaza · × quita la fijación",
   "← → preview · S shows the focused day": "← → vista previa · S muestra el día enfocado",
   "Recent imagery": "Imágenes recientes",
   "ZOOM IN": "ACERCAR",
   "Fly in until the view fits the 1,000 km limit": "Acércate hasta que la vista quepa en el límite de 1000 km",
-  "Imagery days, newest first · arrows move, S or A and B pin": "Días de imágenes, el más reciente primero · las flechas mueven, S o A y B fijan",
   "On the map": "En el mapa",
   "Mode": "Modo",
   "Imagery on Esri · Google 3D returns when cleared": "Imágenes sobre Esri · BORRAR restaura Google 3D",
@@ -4742,11 +4740,6 @@
   "Show all {n}": "Ver los {n}",
   "No cameras within {radius} of the view centre": "No hay cámaras a menos de {radius} del centro de la vista",
   "No cameras here match the search": "Ninguna cámara de aquí coincide con la búsqueda",
-  "Show {count} more cameras": {
-    "one": "Ver {count} cámara más",
-    "many": "Ver {count} cámaras más",
-    "other": "Ver {count} cámaras más"
-  },
   "VIDEO · STALLED": "VÍDEO · DETENIDO",
   "Docked · loading": "Acoplado · cargando",
   "Docked · stalled": "Acoplado · detenido",
@@ -4792,5 +4785,11 @@
   "Weather briefing": "Resumen del tiempo",
   "No frame at this time": "Sin imagen en este momento",
   "At map center": "En el centro del mapa",
-  "Alerts": "Alertas"
+  "Alerts": "Alertas",
+  "Back": "Volver",
+  "{from}–{to} of {total}": "{from}–{to} de {total}",
+  "{range} · {size}/page": "{range} · {size}/pág.",
+  "Pages": "Páginas",
+  "Previous": "Anterior",
+  "{name} per page, showing {range}": "{name} por página, mostrando {range}"
 }

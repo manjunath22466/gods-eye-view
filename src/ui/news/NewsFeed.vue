@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { formatNumber, t, tn } from '../../i18n/index.js';
+import ContextListCard from '../kit/ContextListCard.vue';
 import UiButton from '../kit/UiButton.vue';
 import UiEmpty from '../kit/UiEmpty.vue';
 import UiSelect from '../kit/UiSelect.js';
@@ -96,15 +97,6 @@ const chosen = computed(() => {
 const chooseWindow = (hours) =>
   setFilter('hours', hours === props.view?.windowChoices?.[0] ? null : hours);
 const selectedId = computed(() => props.view?.selected?.id ?? null);
-// The chosen event leads the panel unless the feed already shows it open.
-const selectedApart = computed(() => {
-  const chosen = props.view?.selected;
-  if (!chosen) return null;
-  const listed = local.value
-    ? props.view.inView.items.some((item) => item.id === chosen.id)
-    : props.view.items.some((item) => item.id === chosen.id);
-  return listed ? null : chosen;
-});
 // What Local reads: the area named, else the radius; neither while the
 // first area is being named, so the radius does not flash before it.
 const areaHead = computed(() => {
@@ -114,13 +106,40 @@ const areaHead = computed(() => {
   if (inView.areaLoading) return '';
   return t('Within {km} km of the view centre', { km: inView.radiusKm });
 });
-const status = computed(() => {
-  const view = props.view;
-  if (!view) return '';
-  if (view.error) return view.error;
-  if (view.loading && !view.items.length) return t('Reading the news…');
-  return '';
+// The shown section's list: Local's, else the Conflicts feed.
+const list = computed(() => (local.value ? props.view.inView : props.view));
+const listState = computed(() => {
+  const { items, loading, error, key } = list.value;
+  if ((local.value && !props.view.inView.active) || key) return 'empty';
+  if (items.length) return 'ready';
+  return error ? 'failed' : loading ? 'loading' : 'empty';
 });
+const empty = computed(() => {
+  const view = props.view;
+  if (local.value && !view.inView.active)
+    return { title: t('Zoom in to see local news') };
+  if (list.value.key) return list.value.key;
+  const hours = { hours: formatNumber(view.windowHours) };
+  return {
+    title: local.value
+      ? tn(
+          view.windowHours,
+          'Nothing reported near here in the last {hours} h',
+          'Nothing reported near here in the last {hours} h',
+          hours,
+        )
+      : tn(
+          view.windowHours,
+          'No news matches these filters in the last {hours} h',
+          'No news matches these filters in the last {hours} h',
+          hours,
+        ),
+  };
+});
+// A failed first read is the list's own state; a failed next page is here.
+const status = computed(() =>
+  props.view?.error && props.view.items.length ? props.view.error : '',
+);
 
 const setFilter = (name, value) =>
   props.onParams({ filters: { [name]: value } });
@@ -201,116 +220,63 @@ const clear = () => props.onParams({ clear: true });
       </div>
     </details>
 
-    <NewsCard
-      v-if="selectedApart"
-      class="news-readout__selected"
-      :item="selectedApart"
-      open
-      :on-choose="choose"
-      :on-clear="clear"
-    />
-
-    <section
-      v-if="local"
-      class="news-readout__section"
-      :aria-label="t('Local')"
+    <ContextListCard
+      id="news"
+      :title="local ? t('Local') : t('Latest', { context: 'news list' })"
+      icon="newspaper"
+      :tone="list.loading ? 'loading' : list.error ? 'stale' : 'nominal'"
+      :items="list.items"
+      :state="listState"
+      :group-by="(item) => item.category"
+      :row-button="false"
+      @order="onParams({ listOrder: $event })"
     >
-      <p v-if="areaHead" class="news-readout__head news-readout__area ui-mono">
-        {{ areaHead }}
-      </p>
-      <UiEmpty
-        v-if="!view.inView.active"
-        class="news-readout__empty"
-        :title="t('Zoom in to see local news')"
-      />
-      <UiEmpty
-        v-else-if="view.inView.key"
-        class="news-readout__empty"
-        :title="view.inView.key.title"
-        :hint="view.inView.key.hint"
-      />
-      <p v-else-if="view.inView.error" class="news-readout__status">
-        {{ view.inView.error }}
-      </p>
-      <UiEmpty
-        v-else-if="!view.inView.items.length && !view.inView.loading"
-        class="news-readout__empty"
-        :title="
-          tn(
-            view.windowHours,
-            'Nothing reported near here in the last {hours} h',
-            'Nothing reported near here in the last {hours} h',
-            { hours: formatNumber(view.windowHours) },
-          )
-        "
-      />
-      <ol
-        v-else
-        class="news-readout__list"
-        :class="{ 'is-stale': view.inView.loading }"
-        :aria-busy="view.inView.loading ? 'true' : 'false'"
-      >
-        <li v-for="item in view.inView.items" :key="item.id">
-          <NewsCard
-            :item="item"
-            :open="item.id === selectedId"
-            :on-choose="choose"
-            :on-clear="clear"
-          />
-        </li>
-      </ol>
-    </section>
-
-    <section
-      v-else
-      class="news-readout__section"
-      :aria-label="t('Latest news')"
-    >
-      <h3 class="news-readout__head ui-mono">{{
-        t('Latest', { context: 'news list' })
-      }}</h3>
-      <UiEmpty
-        v-if="view.key"
-        class="news-readout__empty"
-        :title="view.key.title"
-        :hint="view.key.hint"
-      />
-      <ol
-        v-else-if="view.items.length"
-        class="news-readout__list news-readout__feed"
-      >
-        <li v-for="item in view.items" :key="item.id">
-          <NewsCard
-            :item="item"
-            :open="item.id === selectedId"
-            :on-choose="choose"
-            :on-clear="clear"
-          />
-        </li>
-      </ol>
-      <UiEmpty
-        v-else-if="!view.loading && !view.error"
-        class="news-readout__empty"
-        :title="
-          tn(
-            view.windowHours,
-            'No news matches these filters in the last {hours} h',
-            'No news matches these filters in the last {hours} h',
-            { hours: formatNumber(view.windowHours) },
-          )
-        "
-      />
-      <div class="news-readout__footer">
-        <span class="news-readout__status" role="status">{{ status }}</span>
-        <UiButton
-          v-if="view.hasMore && !view.loading"
-          class="data-toggle-chip"
-          type="button"
-          @click="onParams({ loadMore: true })"
-          >{{ t('Load older news') }}</UiButton
+      <template #filter="{ pageItems }">
+        <p
+          v-if="local && areaHead"
+          class="news-readout__head news-readout__area ui-mono"
         >
-      </div>
-    </section>
+          {{ areaHead }}
+        </p>
+        <NewsCard
+          v-if="
+            view.selected && !pageItems.some((item) => item.id === selectedId)
+          "
+          class="news-readout__selected"
+          :item="view.selected"
+          open
+          :on-choose="choose"
+          :on-clear="clear"
+        />
+      </template>
+      <template #row="{ item }">
+        <NewsCard
+          :item="item"
+          :open="item.id === selectedId"
+          :on-choose="choose"
+          :on-clear="clear"
+        />
+      </template>
+      <template #empty>
+        <UiEmpty
+          class="news-readout__empty"
+          :title="empty.title"
+          :hint="empty.hint"
+        />
+      </template>
+      <template #loading>{{ t('Reading the news…') }}</template>
+      <template #failed>{{ list.error }}</template>
+    </ContextListCard>
+    <div v-if="!local" class="news-readout__footer">
+      <span class="news-readout__status" role="status">{{ status }}</span>
+      <UiButton
+        v-if="view.hasMore && !view.loading"
+        class="data-toggle-chip"
+        type="button"
+        @click="onParams({ loadMore: true })"
+        >{{ t('Load older news') }}</UiButton
+      >
+    </div>
 
     <details class="news-legend">
       <summary>{{ t('How to read the map') }}</summary>

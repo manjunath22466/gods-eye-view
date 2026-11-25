@@ -79,6 +79,7 @@
   "application": {
     "exports": ["./application"],
     "modules": [
+      "src/ui/kit/ContextListCard.vue",
       "src/app/application.js",
       "src/ui/vueRuntime.js",
       "src/ui/views/index.js",
@@ -1080,6 +1081,7 @@
   "layer-panel": {
     "exports": ["./ui/layers", "./ui/layers/feedback"],
     "modules": [
+      "src/ui/kit/ContextListCard.vue",
       "src/i18n/marker.js",
       "src/ui/layers.js",
       "src/ui/layerPanel.js",
@@ -1456,6 +1458,7 @@
   "ui-shell": {
     "exports": ["./ui/shell"],
     "modules": [
+      "src/ui/kit/ContextListCard.vue",
       "src/ui/contextEvents.js",
       "src/ui/cctvEvents.js",
       "src/data/headingDegrees.js",
@@ -4403,6 +4406,7 @@
       "./standalone/catalog"
     ],
     "modules": [
+      "src/ui/kit/ContextListCard.vue",
       "src/data/wikidataCities.js",
       "src/data/local_data/wikidata_places/files.js",
       "src/ui/contextEvents.js",

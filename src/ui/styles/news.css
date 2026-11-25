@@ -187,22 +187,6 @@
 .news-toggle input {
   accent-color: var(--accent);
 }
-.news-readout__section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.news-readout__list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.news-readout__list.is-stale {
-  opacity: 0.5;
-}
 .news-readout__footer {
   display: flex;
   align-items: center;
@@ -435,8 +419,7 @@
   background: var(--news-color);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .news-card,
-  .news-readout__list {
+  .news-card {
     transition:
       background var(--transition-fast),
       border-color var(--transition-fast),

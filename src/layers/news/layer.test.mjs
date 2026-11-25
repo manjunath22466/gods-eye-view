@@ -318,17 +318,47 @@ test('Prev and Next on the Data Layers row step through the listed reports and o
   layer.enable();
   await layer.update();
   await settle();
-  const chip = (id) => layer.getRowControls().chips.find((one) => one.id === id);
+  const chip = (id) =>
+    layer.getRowControls().chips.find((one) => one.id === id);
   assert.ok(chip('previous-report') && chip('next-report'));
   chip('next-report').onClick();
-  assert.equal(layer.getRowControls().feed.selected.id, 'major', 'the first listed report');
+  assert.equal(
+    layer.getRowControls().feed.selected.id,
+    'major',
+    'the first listed report',
+  );
   chip('next-report').onClick();
   assert.equal(layer.getRowControls().feed.selected.id, 'far');
   chip('next-report').onClick();
-  assert.equal(layer.getRowControls().feed.selected.id, 'major', 'round to the first');
+  assert.equal(
+    layer.getRowControls().feed.selected.id,
+    'major',
+    'round to the first',
+  );
   chip('previous-report').onClick();
   assert.equal(layer.getRowControls().feed.selected.id, 'far');
   assert.equal(flights.length, 4, 'each step flies to its report');
+});
+
+test('Prev and Next follow the order the News list card reports', async (t) => {
+  const { layer } = fixture(t, { reduced: true });
+  layer.enable();
+  await layer.update();
+  await settle();
+  // Ids the list no longer shows are skipped.
+  layer.setParams({ listOrder: ['far', 'gone', 'major'] });
+  const chip = (id) =>
+    layer.getRowControls().chips.find((one) => one.id === id);
+  chip('next-report').onClick();
+  assert.equal(
+    layer.getRowControls().feed.selected.id,
+    'far',
+    'the card’s first',
+  );
+  chip('next-report').onClick();
+  assert.equal(layer.getRowControls().feed.selected.id, 'major');
+  chip('previous-report').onClick();
+  assert.equal(layer.getRowControls().feed.selected.id, 'far');
 });
 
 test('a selected report carries the point voice projects to find what is in view', async (t) => {

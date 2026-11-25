@@ -95,7 +95,6 @@
     "one": "Inget rapporterat i närheten senaste {hours} h",
     "other": "Inget rapporterat i närheten senaste {hours} h"
   },
-  "Latest news": "Senaste nyheterna",
   "No news matches these filters in the last {hours} h": {
     "one": "Inga nyheter matchar filtren senaste {hours} h",
     "other": "Inga nyheter matchar filtren senaste {hours} h"
@@ -340,6 +339,7 @@
   "Traffic / Transit": "Trafik / Kollektivtrafik",
   "Music": "Musik",
   "Other": "Övrigt",
+  "Remaining groups": "Återstående grupper",
   "radio|TALK": "PRAT",
   "radio|SAFETY": "BLÅLJUS",
   "radio|AIR / SEA": "FLYG / SJÖ",
@@ -2317,7 +2317,6 @@
   "PAUSE": "PAUSA",
   "RESUME": "FORTSÄTT",
   "Clear reading": "Rensa avläsningen",
-  "Observed history": "Observerad historik",
   "news list|Latest": "Senaste",
   "Imagery on Esri · Google 3D returns when cleared": "Bilder på Esri · Google 3D återkommer när de rensas",
   "Point the camera at the ground to use the view": "Rikta kameran mot marken för att använda vyn",
@@ -2360,7 +2359,6 @@
   "← → preview · S shows the focused day": "← → förhandsvisa · S visar vald dag",
   "ZOOM IN": "ZOOMA IN",
   "Fly in until the view fits the 1,000 km limit": "Flyg närmare tills vyn ryms inom gränsen på 1 000 km",
-  "Imagery days, newest first · arrows move, S or A and B pin": "Bilddagar, senaste först · pilarna flyttar, S eller A och B fäster",
   "On the map": "På kartan",
   "Mode": "Läge",
   "Imagery opacity": "Bildernas opacitet",
@@ -4628,10 +4626,6 @@
   "Show all {n}": "Visa alla {n}",
   "No cameras within {radius} of the view centre": "Inga kameror inom {radius} från vyns mitt",
   "No cameras here match the search": "Inga kameror här matchar sökningen",
-  "Show {count} more cameras": {
-    "one": "Visa {count} kamera till",
-    "other": "Visa {count} kameror till"
-  },
   "VIDEO · STALLED": "VIDEO · FASTNAT",
   "Docked · loading": "Dockad · läser in",
   "Docked · stalled": "Dockad · fastnat",
@@ -4677,5 +4671,11 @@
   "Weather briefing": "Vädersammanfattning",
   "No frame at this time": "Ingen bild vid den här tiden",
   "At map center": "I kartans mitt",
-  "Alerts": "Varningar"
+  "Alerts": "Varningar",
+  "Back": "Tillbaka",
+  "{from}–{to} of {total}": "{from}–{to} av {total}",
+  "{range} · {size}/page": "{range} · {size}/sida",
+  "Pages": "Sidor",
+  "Previous": "Föregående",
+  "{name} per page, showing {range}": "{name} per sida, visar {range}"
 }

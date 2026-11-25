@@ -341,16 +341,13 @@ consumers. They expose `summary.settings`, `summary.actions` and optional
 `readout: true` layer rows render only the toggle and source/meta line; their
 subscriptions still refresh the cards. Cards own configuration and readings.
 
-Weather orders cyclones, wind, then a bordered Observed history group containing
-the frame time and active radar, satellite and lightning cards. The group
-heading and scope name its active products. The frame time shows whenever any
-observed product is enabled and has a frame; the world timeline moves time.
-Exactly one active card is open. Header clicks and newly enabled ids choose it
-(the last new entry wins a batch); refreshes and clock ticks retain it. First
-appearance uses cyclones with storms, otherwise the first card. Disabling the
-open layer falls back to the first remaining card. A WeakMap per document keeps
-explicit choices through body remounts without adding share state. Card opening,
-storm selection and layer enabling remain independent.
+Weather uses `ContextListCard` for active products. Its briefing shows
+conditions at the map center, observed frames, wind and storm alerts when
+the corresponding layers are on. The product rows show a short reading or
+status. Selecting a row opens its coverage, settings and readings under
+Back. The readout owner clears the selection when its product turns off.
+The frame time appears below the briefing when an observed product has a
+frame. The world timeline moves time.
 
 Optional card/badge class names provide feature styling. Card titles use
 `.data-name` typography; meta/time/badges use `.data-toggle-meta` typography;
