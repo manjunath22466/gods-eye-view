@@ -973,7 +973,7 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
           <!-- Every camera within the radius, nearest first: it publishes its
                own tab and the order Prev and Next walk, so it stays in the page. -->
           <div v-show="listShown === 'cctv'" id="context-list-cctv" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-cctv' : undefined">
-            <div class="context-list__body ui-scroll"><CameraList /></div>
+            <div class="context-list__body ui-scroll"><CameraList :shown="contextOpen && activeTab === 'view' && tab === 'lists' && listShown === 'cctv' && contextOnScreen" /></div>
           </div>
         </div>
         </div>

@@ -1,15 +1,16 @@
 /**
  * Recent Imagery readout for the right rail (`#recent-imagery-panel`). It
  * also reports through `onPresence` while the layer is on, so Context shows
- * the layer's list tab only then. The body is a fixed stack in which no block changes height and no control
- * moves, whatever the state: box actions, a notice line, the strip of day
- * cards and its hint line, the selection bar (mode, the two slot rows),
- * opacity, SWAP and export, then a collapsed DETAILS card for every note and
+ * the layer's list tab only then. The body is a stack of blocks: box
+ * actions, a notice line, the days as a Context list card (a page at a time,
+ * the draw-an-area action when there is no box), the hint line, the
+ * selection bar (mode, the two slot rows), opacity, SWAP and export, then a
+ * collapsed DETAILS card for every note and
  * hedge. The adapter computes the view from the layer's snapshot and renders
  * the RecentImageryReadout component; box actions, export and DETAILS are
  * rail-card blocks and cards. Source toggles live on the data-panel row.
  */
-import { h, render as renderVue } from 'vue';
+import { h, nextTick, render as renderVue, watch } from 'vue';
 import {
   formatNumber,
   msg,
@@ -20,6 +21,7 @@ import {
 } from '../i18n/index.js';
 import { createImagerySplit, globeSplitTarget } from './imagerySplit.js';
 import RecentImageryReadout from './recentImagery/RecentImageryReadout.vue';
+import { listCardMemory } from './kit/ContextListCard.vue';
 import { setContextListPresence } from './contextLists.js';
 import {
   PRODUCTS,
@@ -107,6 +109,8 @@ const PLACEHOLDERS = {
   present: msg('Loading'),
 };
 const KEY_STEPS = {
+  ArrowUp: (index) => index - 1,
+  ArrowDown: (index) => index + 1,
   ArrowLeft: (index) => index - 1,
   ArrowRight: (index) => index + 1,
   Home: () => 0,
@@ -175,7 +179,7 @@ function countText(snapshot) {
   return tn(snapshot.candidates.length, '{count} DAY', '{count} DAYS');
 }
 
-/** The one-line hint under the strip: the next thing to do, per state. */
+/** The one-line hint under the list: the next thing to do, per state. */
 function hintText(snapshot) {
   if (snapshot.zoomToFit) return t('Zoom in or draw a smaller box');
   if (!snapshot.box) return t('Select a box or use the view');
@@ -269,7 +273,8 @@ export function createRecentImageryPanel({
     );
   paint();
   const root = container.lastElementChild;
-  const strip = root.querySelector('#ri-strip');
+  // The list card's page and page size: the days on it get thumbnails.
+  const page = listCardMemory('recent-imagery');
   const zoomIn = root.querySelector('#ri-zoom-in');
   const swap = root.querySelector('#ri-swap');
   const opacity = root.querySelector('#ri-opacity');
@@ -289,7 +294,7 @@ export function createRecentImageryPanel({
   }
 
   // ---- box actions ------------------------------------------------------
-  /** The strip's draw action: start the box tool, as SELECT BOX does. */
+  /** The list's draw action: start the box tool, as SELECT BOX does. */
   function onDrawArea() {
     if (destroyed || !tool || tool.isActive()) return;
     exportError = null;
@@ -352,7 +357,7 @@ export function createRecentImageryPanel({
     };
   }
 
-  // ---- strip ------------------------------------------------------------
+  // ---- days -------------------------------------------------------------
   function cardView(candidate, index) {
     const day = displayDay(candidate.day);
     const ab = snapshot.mode === 'ab';
@@ -392,7 +397,6 @@ export function createRecentImageryPanel({
         : '';
     return {
       key: candidate.key,
-      id: `ri-card-${index}`,
       focused,
       pinned: Boolean(candidate.pinned),
       preview: Boolean(candidate.preview),
@@ -425,79 +429,57 @@ export function createRecentImageryPanel({
 
   function stripView() {
     const candidates = snapshot.candidates;
-    // A day that leaves the strip loses its image with its card.
+    // A day that leaves the list loses its image with its row.
     const keys = new Set(candidates.map((candidate) => candidate.key));
     for (const key of imaged) if (!keys.has(key)) imaged.delete(key);
-    // With no box the strip offers the box tool itself; while it draws, the
-    // strip says how.
+    // With no box the list offers the box tool itself; while it draws, the
+    // list says how.
     const draw = !candidates.length && !snapshot.box && !snapshot.toolActive;
+    const failed = Boolean(snapshot.box && snapshot.error);
     return {
       cards: candidates.map(cardView),
+      state: candidates.length
+        ? 'ready'
+        : snapshot.searching
+          ? 'loading'
+          : failed
+            ? 'failed'
+            : 'empty',
+      tone: snapshot.searching ? 'loading' : failed ? 'unavailable' : 'nominal',
       draw: draw
         ? { label: t('Draw an area to see recent passes ›'), disabled: !tool }
         : null,
-      empty: candidates.length
-        ? ''
-        : !snapshot.box
-          ? draw
-            ? ''
-            : t('Drag a box on the map (Esc cancels)')
-          : snapshot.searching
-            ? t('Searching')
-            : snapshot.hiddenCount
-              ? t('Every day is empty here')
-              : !snapshot.sources.hls && !snapshot.sources.viirs
-                ? t('Sources off')
-                : t('No imagery'),
-      activeDescendant: candidates[snapshot.focusIndex]
-        ? `ri-card-${snapshot.focusIndex}`
-        : null,
-      searching: Boolean(snapshot.searching),
+      empty: !snapshot.box
+        ? t('Drag a box on the map (Esc cancels)')
+        : snapshot.hiddenCount
+          ? t('Every day is empty here')
+          : !snapshot.sources.hls && !snapshot.sources.viirs
+            ? t('Sources off')
+            : t('No imagery'),
     };
   }
 
-  /** The strip's day cards by key. */
-  const cardNodes = () =>
-    new Map(
-      [...strip.querySelectorAll('.ri-card')].map((node) => [
-        node.dataset.key,
-        node,
-      ]),
-    );
-
-  /**
-   * Keyboard only: slide the strip until the focused card is in view. Only
-   * `strip.scrollLeft` moves — `scrollIntoView` would also scroll the body.
-   */
-  function scrollFocusedIntoView() {
-    const focus = snapshot.candidates[snapshot.focusIndex];
-    const card = focus ? cardNodes().get(focus.key) : null;
-    const left = Number(card?.offsetLeft) || 0;
-    const width = Number(card?.offsetWidth) || 0;
-    const viewLeft = Number(strip.scrollLeft) || 0;
-    const viewWidth = Number(strip.clientWidth) || 0;
-    if (!width || !viewWidth) return;
-    if (left < viewLeft) strip.scrollLeft = left;
-    else if (left + width > viewLeft + viewWidth)
-      strip.scrollLeft = left + width - viewWidth;
-  }
-
+  /** Tell the layer which days the list's page shows. */
   function reportVisibleRange() {
-    const width = Number(strip.clientWidth) || 0;
-    if (!width || !snapshot.candidates.length) return;
-    const left = Number(strip.scrollLeft) || 0;
-    let first = null;
-    let last = null;
-    const nodes = cardNodes();
-    snapshot.candidates.forEach((candidate, index) => {
-      const card = nodes.get(candidate.key);
-      const start = Number(card?.offsetLeft) || 0;
-      const end = start + (Number(card?.offsetWidth) || 0);
-      if (!card || end < left || start > left + width) return;
-      first ??= index;
-      last = index;
-    });
-    if (first !== null) layer.setVisibleRange(first, last);
+    const total = snapshot.candidates.length;
+    if (destroyed || !total) return;
+    const pages = Math.ceil(total / page.size);
+    const first = Math.min(page.page, pages - 1) * page.size;
+    layer.setVisibleRange(first, Math.min(total, first + page.size) - 1);
+  }
+  const stopPaging = watch(
+    () => [page.page, page.size],
+    () => reportVisibleRange(),
+  );
+
+  /** Keyboard only: turn to the page with day `index` and focus its row. */
+  async function focusRow(index) {
+    page.page = Math.floor(index / page.size);
+    const key = snapshot.candidates[index]?.key;
+    await nextTick();
+    for (const row of root.querySelectorAll('.ri-card'))
+      if (row.dataset.key === key)
+        row.querySelector('.ri-card-open')?.focus({ preventScroll: true });
   }
 
   // ---- selection bar ----------------------------------------------------
@@ -884,14 +866,13 @@ export function createRecentImageryPanel({
   }
 
   // ---- input ------------------------------------------------------------
-  /** Escape clears the preview, then cancels the box tool, then blurs. */
+  /** Escape clears the preview, then cancels the box tool. */
   function escape() {
     if (layer.clearPreview()) return true;
     if (tool?.isActive()) {
       tool.cancel('escape');
       return true;
     }
-    strip.blur();
     return false;
   }
 
@@ -908,13 +889,11 @@ export function createRecentImageryPanel({
     const card = target?.closest?.('.ri-card');
     if (chip && card) {
       if (!chip.disabled) pin(chip.dataset.slot, card.dataset.key);
-      strip.focus({ preventScroll: true });
       return;
     }
-    if (card) {
+    if (card && target.closest('.ri-card-open')) {
       exportError = null;
       layer.preview(card.dataset.key);
-      strip.focus({ preventScroll: true });
       return;
     }
     if (target?.closest?.('.ri-swap') && !swap.disabled) {
@@ -933,26 +912,31 @@ export function createRecentImageryPanel({
     if (event.target === opacity) layer.setAlpha(Number(opacity.value) / 100);
   });
 
-  listen(strip, 'keydown', (event) => {
-    // Keys on the strip's draw action are the button's own.
-    if (event.target !== strip) return;
-    const total = snapshot.candidates.length;
-    const index = snapshot.focusIndex || 0;
-    const focus = snapshot.candidates[index];
+  listen(root, 'keydown', (event) => {
     if (event.key === 'Escape') {
       // An outer handler (Context, on the way down) took this Esc already.
-      if (event.defaultPrevented) return;
-      event.preventDefault();
-      escape();
+      if (
+        !event.defaultPrevented &&
+        (snapshot.preview.key || snapshot.preview.pending || tool?.isActive())
+      ) {
+        event.preventDefault();
+        escape();
+      }
       return;
     }
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      // Enter is a click on the focused card; key repeat must not re-fire.
-      if (focus && !event.repeat) layer.preview(focus.key);
-      return;
-    }
+    // On a day's row: letters pin it, arrows move to the next day. Focus can
+    // rest on the row itself, where the list card puts it after a row is
+    // replaced (a day found empty).
+    const card =
+      event.target?.closest?.('.ri-card') ??
+      event.target?.closest?.('[data-list-key]')?.querySelector?.('.ri-card');
+    if (!card || event.ctrlKey || event.metaKey || event.altKey) return;
+    const total = snapshot.candidates.length;
+    const index = snapshot.candidates.findIndex(
+      (candidate) => candidate.key === card.dataset.key,
+    );
+    const day = snapshot.candidates[index];
+    if (!day) return;
     const letter = String(event.key || '').toLowerCase();
     const slotId =
       letter === 'a' || (letter === 's' && snapshot.mode !== 'ab')
@@ -962,35 +946,17 @@ export function createRecentImageryPanel({
           : null;
     if (slotId) {
       event.preventDefault();
-      if (!event.repeat && focus && focus.thumbnail?.status !== 'empty')
-        pin(slotId, focus.key);
+      if (!event.repeat && day.thumbnail?.status !== 'empty')
+        pin(slotId, day.key);
       return;
     }
     const step = KEY_STEPS[event.key];
-    if (!step || !total) return;
+    if (!step) return;
     event.preventDefault();
-    layer.focus(Math.max(0, Math.min(total - 1, step(index, total))));
-    preserveScroll(scrollFocusedIntoView);
+    const next = Math.max(0, Math.min(total - 1, step(index, total)));
+    layer.focus(next);
+    void focusRow(next);
   });
-
-  listen(root, 'keydown', (event) => {
-    if (
-      event.key === 'Escape' &&
-      event.target !== strip &&
-      !event.defaultPrevented
-    ) {
-      if (
-        snapshot.preview.key ||
-        snapshot.preview.pending ||
-        tool?.isActive()
-      ) {
-        event.preventDefault();
-        escape();
-      }
-    }
-  });
-
-  listen(strip, 'scroll', reportVisibleRange, { passive: true });
 
   // ---- wiring -----------------------------------------------------------
   layer.setToolHandler?.(() => {
@@ -1026,6 +992,7 @@ export function createRecentImageryPanel({
       if (destroyed) return;
       destroyed = true;
       unsubscribe();
+      stopPaging();
       offLocale();
       layer.setToolHandler?.(null);
       split?.destroy();

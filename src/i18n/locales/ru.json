@@ -106,7 +106,6 @@
     "many": "За последние {hours} ч поблизости ничего не сообщалось",
     "other": "За последние {hours} ч поблизости ничего не сообщалось"
   },
-  "Latest news": "Последние новости",
   "No news matches these filters in the last {hours} h": {
     "one": "За последний {hours} ч нет новостей по этим фильтрам",
     "few": "За последние {hours} ч нет новостей по этим фильтрам",
@@ -388,6 +387,7 @@
   "Traffic / Transit": "Трафик / Транспорт",
   "Music": "Музыка",
   "Other": "Другое",
+  "Remaining groups": "Остальные группы",
   "Add the full Starlink broadband shell (thousands of extra points)": "Добавить полную широкополосную оболочку Starlink (тысячи дополнительных точек)",
   "Loading the Starlink shell…": "Загрузка оболочки Starlink…",
   "Starlink {detail} — click to retry": "Starlink: {detail} — нажмите, чтобы повторить",
@@ -1700,14 +1700,12 @@
   "CH {index} / {total}": "КАН. {index} / {total}",
   "Station unavailable after directory refresh": "Станция недоступна после обновления каталога",
   "Clear reading": "Очистить показания",
-  "Observed history": "История наблюдений",
   "news list|Latest": "Последние",
   "S on another day replaces it · × unpins": "S в другой день заменяет его · × открепляет",
   "← → preview · S shows the focused day": "← → просмотр · S показывает выбранный день",
   "Recent imagery": "Свежие снимки",
   "ZOOM IN": "ПРИБЛИЗИТЬ",
   "Fly in until the view fits the 1,000 km limit": "Приблизьтесь, пока вид не уложится в предел 1000 км",
-  "Imagery days, newest first · arrows move, S or A and B pin": "Дни со снимками, сначала новые · стрелки — перемещение, S или A и B — закрепить",
   "On the map": "На карте",
   "Mode": "Режим",
   "Imagery on Esri · Google 3D returns when cleared": "Подложка: Esri · сброс вернёт Google 3D",
@@ -4856,12 +4854,6 @@
   "Show all {n}": "Показать все ({n})",
   "No cameras within {radius} of the view centre": "Нет камер в радиусе {radius} от центра вида",
   "No cameras here match the search": "Здесь нет камер, подходящих под поиск",
-  "Show {count} more cameras": {
-    "one": "Показать ещё {count} камеру",
-    "few": "Показать ещё {count} камеры",
-    "many": "Показать ещё {count} камер",
-    "other": "Показать ещё {count} камеры"
-  },
   "VIDEO · STALLED": "ВИДЕО · ЗАВИСЛО",
   "Docked · loading": "Закреплено · загрузка",
   "Docked · stalled": "Закреплено · зависло",
@@ -4907,5 +4899,11 @@
   "Weather briefing": "Сводка погоды",
   "No frame at this time": "Нет кадра на это время",
   "At map center": "В центре карты",
-  "Alerts": "Оповещения"
+  "Alerts": "Оповещения",
+  "Back": "Назад",
+  "{from}–{to} of {total}": "{from}–{to} из {total}",
+  "{range} · {size}/page": "{range} · {size}/стр.",
+  "Pages": "Страницы",
+  "Previous": "Назад",
+  "{name} per page, showing {range}": "{name} на странице, показаны {range}"
 }

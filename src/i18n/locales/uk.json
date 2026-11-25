@@ -106,7 +106,6 @@
     "many": "За останні {hours} год поблизу нічого не повідомлялося",
     "other": "За останні {hours} год поблизу нічого не повідомлялося"
   },
-  "Latest news": "Останні новини",
   "No news matches these filters in the last {hours} h": {
     "one": "За останню {hours} год немає новин за цими фільтрами",
     "few": "За останні {hours} год немає новин за цими фільтрами",
@@ -1099,6 +1098,7 @@
   "Traffic / Transit": "Рух / Транспорт",
   "Music": "Музика",
   "Other": "Інше",
+  "Remaining groups": "Решта груп",
   "Directory refresh degraded; showing the previous station catalog.": "Каталог оновився з перебоями; показано попередній каталог станцій.",
   "Radio directory coverage is degraded.": "Каталог радіостанцій працює з перебоями.",
   "Directory refresh failed; showing the previous station catalog.": "Не вдалося оновити каталог; показано попередній каталог станцій.",
@@ -2200,7 +2200,6 @@
   "Radio is disabling…": "Радіо вимикається…",
   "Radio lifecycle is uncertain — use Enable or Disable to reconcile": "Стан радіо невизначений — звірте через «Увімкнути» або «Вимкнути»",
   "Clear reading": "Очистити покази",
-  "Observed history": "Історія спостережень",
   "news list|Latest": "Останні",
   "Imagery on Esri · Google 3D returns when cleared": "Підкладка: Esri · скидання поверне Google 3D",
   "Point the camera at the ground to use the view": "Наведіть камеру на землю, щоб вибрати видиму область",
@@ -2245,7 +2244,6 @@
   "← → preview · S shows the focused day": "← → перегляд · S показує вибраний день",
   "ZOOM IN": "НАБЛИЗИТИ",
   "Fly in until the view fits the 1,000 km limit": "Наблизьте карту, щоб видима область вмістилася в межу 1000 км",
-  "Imagery days, newest first · arrows move, S or A and B pin": "Дні зі знімками, спершу нові · стрілки — переміщення, S або A і B — закріпити",
   "On the map": "На карті",
   "Mode": "Режим",
   "Imagery opacity": "Непрозорість знімків",
@@ -4856,12 +4854,6 @@
   "Show all {n}": "Показати всі ({n})",
   "No cameras within {radius} of the view centre": "Немає камер у радіусі {radius} від центру огляду",
   "No cameras here match the search": "Тут немає камер, що відповідають пошуку",
-  "Show {count} more cameras": {
-    "one": "Показати ще {count} камеру",
-    "few": "Показати ще {count} камери",
-    "many": "Показати ще {count} камер",
-    "other": "Показати ще {count} камери"
-  },
   "VIDEO · STALLED": "ВІДЕО · ЗАВИСЛО",
   "Docked · loading": "Закріплено · завантаження",
   "Docked · stalled": "Закріплено · зависло",
@@ -4907,5 +4899,11 @@
   "Weather briefing": "Зведення погоди",
   "No frame at this time": "Немає кадру на цей час",
   "At map center": "У центрі мапи",
-  "Alerts": "Попередження"
+  "Alerts": "Попередження",
+  "Back": "Назад",
+  "{from}–{to} of {total}": "{from}–{to} з {total}",
+  "{range} · {size}/page": "{range} · {size}/стор.",
+  "Pages": "Сторінки",
+  "Previous": "Назад",
+  "{name} per page, showing {range}": "{name} на сторінці, показано {range}"
 }

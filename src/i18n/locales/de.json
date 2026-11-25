@@ -94,7 +94,6 @@
     "one": "In der letzten {hours} h nichts in der Nähe gemeldet",
     "other": "In den letzten {hours} h nichts in der Nähe gemeldet"
   },
-  "Latest news": "Neueste Nachrichten",
   "No news matches these filters in the last {hours} h": {
     "one": "Keine Nachrichten der letzten {hours} h passen zu diesen Filtern",
     "other": "Keine Nachrichten der letzten {hours} h passen zu diesen Filtern"
@@ -374,6 +373,7 @@
   "Traffic / Transit": "Verkehr / ÖPNV",
   "Music": "Musik",
   "Other": "Sonstige",
+  "Remaining groups": "Übrige Gruppen",
   "radio|TALK": "TALK",
   "radio|SAFETY": "SICHERH.",
   "radio|AIR / SEA": "LUFT / SEE",
@@ -2401,7 +2401,6 @@
   "PAUSE": "PAUSE",
   "RESUME": "FORTSETZEN",
   "Clear reading": "Wert ausblenden",
-  "Observed history": "Beobachteter Verlauf",
   "news list|Latest": "Neueste",
   "Imagery on Esri · Google 3D returns when cleared": "Bilder auf Esri · nach LÖSCHEN wieder Google 3D",
   "Point the camera at the ground to use the view": "Kamera auf den Boden richten, um die Ansicht zu verwenden",
@@ -2444,7 +2443,6 @@
   "← → preview · S shows the focused day": "← → Vorschau · S zeigt den gewählten Tag",
   "ZOOM IN": "HINEINZOOMEN",
   "Fly in until the view fits the 1,000 km limit": "Hineinfliegen, bis die Ansicht das Limit von 1.000 km einhält",
-  "Imagery days, newest first · arrows move, S or A and B pin": "Bildtage, neueste zuerst · Pfeile bewegen, S oder A und B fixieren",
   "On the map": "Auf der Karte",
   "Mode": "Modus",
   "Imagery opacity": "Bilddeckkraft",
@@ -4628,10 +4626,6 @@
   "Show all {n}": "Alle {n} anzeigen",
   "No cameras within {radius} of the view centre": "Keine Kameras im Umkreis von {radius} um die Bildmitte",
   "No cameras here match the search": "Keine Kameras hier passen zur Suche",
-  "Show {count} more cameras": {
-    "one": "{count} weitere Kamera anzeigen",
-    "other": "{count} weitere Kameras anzeigen"
-  },
   "VIDEO · STALLED": "VIDEO · STOCKT",
   "Docked · loading": "Angedockt · lädt",
   "Docked · stalled": "Angedockt · stockt",
@@ -4677,5 +4671,11 @@
   "Weather briefing": "Wetterübersicht",
   "No frame at this time": "Kein Bild zu diesem Zeitpunkt",
   "At map center": "In der Kartenmitte",
-  "Alerts": "Warnungen"
+  "Alerts": "Warnungen",
+  "Back": "Zurück",
+  "{from}–{to} of {total}": "{from}–{to} von {total}",
+  "{range} · {size}/page": "{range} · {size}/Seite",
+  "Pages": "Seiten",
+  "Previous": "Zurück",
+  "{name} per page, showing {range}": "{name} pro Seite, angezeigt {range}"
 }

@@ -938,6 +938,7 @@
   "Traffic / Transit": "תנועה / תחבורה",
   "Music": "מוזיקה",
   "Other": "אחר",
+  "Remaining groups": "הקבוצות הנותרות",
   "Directory refresh degraded; showing the previous station catalog.": "רענון המדריך בהידרדרות; מציג את קטלוג התחנות הקודם.",
   "Radio directory coverage is degraded.": "כיסוי מדריך הרדיו מופחת.",
   "Directory refresh failed; showing the previous station catalog.": "רענון המדריך נכשל; מציג את קטלוג התחנות הקודם.",
@@ -2000,7 +2001,6 @@
   "SYNCING": "מסנכרן",
   "READY": "מוכן",
   "Clear reading": "ניקוי הקריאה",
-  "Observed history": "היסטוריה נצפית",
   "news list|Latest": "האחרונות",
   "Imagery on Esri · Google 3D returns when cleared": "צילומים ב-Esri · Google 3D חוזר כשמנקים",
   "Point the camera at the ground to use the view": "כוון את המצלמה אל הקרקע כדי להשתמש בתצוגה",
@@ -2092,7 +2092,6 @@
   "START HERE": "התחלה כאן",
   "Fly in until the view fits the 1,000 km limit": "טוס פנימה עד שהתצוגה תיכנס למגבלה של 1,000 ק\"מ",
   "ZOOM IN": "התקרבות",
-  "Imagery days, newest first · arrows move, S or A and B pin": "ימי צילומים, חדש בראש · החצים מזיזים, S או A ו-B מקבעים",
   "On the map": "על המפה",
   "Mode": "מצב",
   "Imagery opacity": "אטימות הצילומים",
@@ -3496,7 +3495,6 @@
     "two": "לא דווח דבר בסביבה ב־{hours} השעות האחרונות",
     "other": "לא דווח דבר בסביבה ב־{hours} השעות האחרונות"
   },
-  "Latest news": "חדשות אחרונות",
   "No news matches these filters in the last {hours} h": {
     "one": "אין חדשות התואמות למסננים אלה בשעה האחרונה ({hours})",
     "two": "אין חדשות התואמות למסננים אלה ב־{hours} השעות האחרונות",
@@ -4742,11 +4740,6 @@
   "Show all {n}": "הצג את כל {n}",
   "No cameras within {radius} of the view centre": "אין מצלמות בטווח {radius} ממרכז התצוגה",
   "No cameras here match the search": "אין כאן מצלמות שתואמות לחיפוש",
-  "Show {count} more cameras": {
-    "one": "הצג עוד מצלמה {count}",
-    "two": "הצג עוד {count} מצלמות",
-    "other": "הצג עוד {count} מצלמות"
-  },
   "VIDEO · STALLED": "וידאו · תקוע",
   "Docked · loading": "מעוגן · בטעינה",
   "Docked · stalled": "מעוגן · תקוע",
@@ -4792,5 +4785,11 @@
   "Weather briefing": "תקציר מזג אוויר",
   "No frame at this time": "אין תמונה בזמן הזה",
   "At map center": "במרכז המפה",
-  "Alerts": "התרעות"
+  "Alerts": "התרעות",
+  "Back": "חזרה",
+  "{from}–{to} of {total}": "{from}–{to} מתוך {total}",
+  "{range} · {size}/page": "{range} · {size}/עמוד",
+  "Pages": "עמודים",
+  "Previous": "הקודם",
+  "{name} per page, showing {range}": "{name} בעמוד, מוצגות {range}"
 }

@@ -232,6 +232,8 @@ export function createNewsLayer({
     pulseTimer = null,
     pulseFrameOff = null,
     removeCameraListener = null;
+  // The ids of the reports the News list shows, in its order, as it reports them.
+  let listOrder = null;
   let enabled = false,
     destroyed = false,
     loading = false,
@@ -1423,12 +1425,17 @@ export function createNewsLayer({
     clickOff = null;
   }
 
-  /** The reports Prev and Next step through: those the News list shows. */
+  /** The reports Prev and Next step through: those the News list shows, in
+   * the order its card lists them (`listOrder`) when it has said. */
   function newsStepList() {
     const at = now();
-    return local()
+    const list = local()
       ? localReports(NEWS_LOCAL_LIMIT)
       : feed.items.filter((r) => passesFilters(r, filters, at, windowMs));
+    if (!listOrder) return list;
+    const byId = new Map(list.map((r) => [r.id, r]));
+    const ordered = listOrder.map((id) => byId.get(id)).filter(Boolean);
+    return ordered.length ? ordered : list;
   }
   function stepReport(direction) {
     const list = newsStepList();
@@ -1603,6 +1610,7 @@ export function createNewsLayer({
     },
     disable() {
       enabled = false;
+      listOrder = null;
       unavailable = false;
       noAreaRoute = false;
       error = null;
@@ -1759,6 +1767,7 @@ export function createNewsLayer({
         notify();
       }
       if (params.loadMore === true) void loadFeed('append');
+      if (Array.isArray(params.listOrder)) listOrder = params.listOrder;
       if (typeof params.hotspotId === 'string')
         layer.setParams({ filters: { hotspot: params.hotspotId } });
       if (typeof params.reportId === 'string' && findReport(params.reportId)) {

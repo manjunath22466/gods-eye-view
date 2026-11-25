@@ -5,7 +5,7 @@ import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPinia } from 'pinia';
-import { createApp, h, nextTick } from 'vue';
+import { createApp, h, nextTick, reactive } from 'vue';
 import CameraList from './views/panels/CameraList.vue';
 import NearbyLists from './views/panels/NearbyLists.vue';
 import EntityCard from './views/panels/EntityCard.vue';
@@ -23,6 +23,7 @@ import {
   contextSearchOpen,
   contextSearchText,
 } from './contextSearch.js';
+import { resetListCardMemory } from './kit/ContextListCard.vue';
 import { greatCircleKm } from '../geoDistance.js';
 import { CCTV_ACTIVATION_RESULT } from '../cctvFocusRequest.js';
 import { createControls } from '../layers/cctv/controls.js';
@@ -106,6 +107,7 @@ const CAMERAS = [
 function fixture(t, cameras = CAMERAS, { withCard = false } = {}) {
   document.body.replaceChildren();
   resetContextLists();
+  resetListCardMemory();
   const radius = contextRadiusKm.value;
   setContextRadiusKm(100);
   const cctv = cctvModule(cameras);
@@ -118,8 +120,12 @@ function fixture(t, cameras = CAMERAS, { withCard = false } = {}) {
   };
   const pinia = createPinia();
   const host = document.body.appendChild(document.createElement('div'));
+  const list = reactive({ shown: true });
   const app = createApp({
-    render: () => (withCard ? [h(CameraList), h(EntityCard)] : h(CameraList)),
+    render() {
+      const cameraList = h(CameraList, { shown: list.shown });
+      return withCard ? [cameraList, h(EntityCard)] : cameraList;
+    },
   }).use(pinia);
   const store = useEntityCardStore(pinia);
   const chrome = usePanelChromeStore(pinia);
@@ -154,10 +160,14 @@ function fixture(t, cameras = CAMERAS, { withCard = false } = {}) {
   const changeLayers = () =>
     listeners.forEach((listener) => listener({ type: 'visibility' }));
   const names = () =>
-    [...document.querySelectorAll('.camera-list li .nearby-lists__name')].map(
-      (el) => el.textContent,
-    );
-  return { store, cctv, layer, pinia, changeLayers, names };
+    [
+      ...document.querySelectorAll(
+        '[data-list-card="cctv"] li .nearby-lists__name',
+      ),
+    ].map((el) => el.textContent);
+  const setCollapsed = (collapsed) =>
+    chrome.publish(owner, 'global-context-panel', { collapsed });
+  return { store, cctv, layer, pinia, changeLayers, names, list, setCollapsed };
 }
 
 test("the Cameras list has every camera within the radius, nearest first, as Nearby's Cameras group counts and orders them", async (t) => {
@@ -186,7 +196,7 @@ test("the Cameras list has every camera within the radius, nearest first, as Nea
     group.items.map((item) => item.title),
     names(),
   );
-  const first = document.querySelector('.camera-list li');
+  const first = document.querySelector('[data-list-card="cctv"] li');
   assert.match(first.textContent, /Austin · TxDOT/);
   assert.match(first.textContent, /1\.1 km/);
 });
@@ -200,7 +210,7 @@ test('the list narrows to the search, and says why it is empty', async (t) => {
   contextSearchText.value = 'zzz';
   await nextTick();
   assert.match(
-    document.querySelector('.camera-list__empty').textContent,
+    document.querySelector('.context-list-card__state').textContent,
     /No cameras here match the search/,
   );
 });
@@ -210,7 +220,7 @@ test('a row opens the camera on Inspect: the camera is picked and its card shows
   contextListChoice.value = 'cctv';
   contextListsActive.value = true;
   await nextTick();
-  document.querySelectorAll('.camera-list li button')[1].click();
+  document.querySelectorAll('[data-list-card="cctv"] li button')[1].click();
   await nextTick();
   assert.deepEqual(
     cctv.picked,
@@ -230,7 +240,9 @@ test('a row opened from the keyboard hands focus to the card that replaces the l
   contextListChoice.value = 'cctv';
   contextListsActive.value = true;
   await nextTick();
-  const row = document.querySelectorAll('.camera-list li button')[1];
+  const row = document.querySelector(
+    '[data-list-card="cctv"] button[data-list-key="cam2"]',
+  );
   row.focus();
   row.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
   await nextTick();
@@ -257,25 +269,83 @@ test('Prev/Next walk the same list in the same order', async (t) => {
   assert.deepEqual(walked, names());
 });
 
-test('long lists show a page at a time', async (t) => {
-  const many = Array.from({ length: 120 }, (_, i) => step(i / 100));
+test('Prev/Next and auto-hop get the order the card lists, searched', async (t) => {
+  const { cctv } = fixture(t);
+  await nextTick();
+  assert.deepEqual(cctv.state._nearbyArea.order, [
+    'cam1',
+    'cam2',
+    'cam3',
+    'cam4',
+    'cam5',
+  ]);
+  contextSearchOpen.value = true;
+  contextSearchText.value = 'camera 4';
+  await nextTick();
+  await nextTick();
+  assert.deepEqual(cctv.state._nearbyArea.order, ['cam4']);
+});
+
+test("auto-hop ignores a hidden list's search", async (t) => {
+  const { cctv, list } = fixture(t);
+  contextSearchOpen.value = true;
+  contextSearchText.value = 'camera 4';
+  await nextTick();
+  await nextTick();
+  assert.deepEqual(cctv.state._nearbyArea.order, ['cam4']);
+  // Inspect, Pinned, another list or a closed phone sheet hides it.
+  list.shown = false;
+  await nextTick();
+  await nextTick();
+  assert.equal(
+    cctv.state._nearbyArea.order,
+    null,
+    'no order from a hidden list',
+  );
+  assert.equal(
+    cctv.methods.stepNearbyCamera(1, { focus: false })?.cameraId,
+    'cam1',
+    'the walk takes the whole radius, not the hidden search',
+  );
+});
+
+test('a new search restarts the walk; a recentre keeps it', async (t) => {
+  const { cctv, store } = fixture(t);
+  await nextTick();
+  const step = () =>
+    cctv.methods.stepNearbyCamera(1, { focus: false })?.cameraId;
+  assert.equal(step(), 'cam1');
+  // Recentring keeps the walk going from where it is.
+  store.setView({ center: { lat: HERE.lat + 0.001, lon: HERE.lon } });
+  await nextTick();
+  await nextTick();
+  assert.equal(step(), 'cam2', 'the walk goes on after a recentre');
+  // A search that drops the next camera starts a walk over what shows.
+  contextSearchOpen.value = true;
+  contextSearchText.value = 'camera';
+  await nextTick();
+  await nextTick();
+  const shown = cctv.state._nearbyArea.order;
+  assert.equal(
+    cctv.state._cameraWalk,
+    null,
+    'the search change dropped the walk',
+  );
+  assert.equal(step(), shown[(shown.indexOf('cam2') + 1) % shown.length]);
+});
+
+test('long lists show a page at a time, with a breakdown by provider', async (t) => {
+  const many = Array.from({ length: 12 }, (_, i) => step(i / 100));
   fixture(t, many);
   await nextTick();
-  const rows = () => document.querySelectorAll('.camera-list li').length;
-  assert.equal(rows(), 50);
-  const more = document.querySelector('.camera-list__more');
-  assert.match(more.textContent, /Show 50 more cameras/);
-  more.click();
+  const card = () => document.querySelector("[data-list-card='cctv']");
+  const rows = () => card().querySelectorAll('li').length;
+  assert.equal(rows(), 5);
+  assert.ok(card().querySelector('.view-context__bar'), 'the provider bar');
+  card().querySelector('[data-list-next]').click();
   await nextTick();
-  assert.equal(rows(), 100);
-  assert.match(
-    document.querySelector('.camera-list__more').textContent,
-    /Show 20 more cameras/,
-  );
-  document.querySelector('.camera-list__more').click();
-  await nextTick();
-  assert.equal(rows(), 120);
-  assert.equal(document.querySelector('.camera-list__more'), null);
+  assert.equal(rows(), 5);
+  assert.match(card().querySelector('[data-list-range]').textContent, /6–10/);
 });
 
 test('the tab goes when Cameras turns off', async (t) => {
@@ -317,4 +387,51 @@ test("Nearby's Cameras group links to the list while it has more than it shows",
   link.click();
   assert.equal(contextListsActive.value, true);
   assert.equal(contextListChoice.value, 'cctv');
+});
+
+test('closing Context drops the visible Cameras search walk', async (t) => {
+  const { cctv, list, names, setCollapsed } = fixture(t, [
+    { ...step(1), name: 'Pair north' },
+    step(2),
+    { ...step(3), name: 'Pair south' },
+  ]);
+  contextSearchOpen.value = true;
+  contextSearchText.value = 'pair';
+  await nextTick();
+  await nextTick();
+  assert.deepEqual(names(), ['Pair north', 'Pair south']);
+  const next = cctv.methods
+    .getRowControls()
+    .chips.find((chip) => chip.id === 'next-camera');
+  next.onClick();
+  assert.deepEqual(cctv.picked, ['cam1']);
+
+  setCollapsed(true);
+  list.shown = false;
+  await nextTick();
+  await nextTick();
+  assert.equal(cctv.state._nearbyArea, null);
+  next.onClick();
+  assert.deepEqual(cctv.picked, ['cam1', 'cam2']);
+});
+
+test('closing Context drops a walk of its hidden list', async (t) => {
+  const { cctv, list, setCollapsed } = fixture(t, [step(1), step(2), step(3)]);
+  list.shown = false;
+  await nextTick();
+  await nextTick();
+  const area = cctv.state._nearbyArea;
+  assert.ok(area);
+  assert.equal(area.order, null);
+  const next = cctv.methods
+    .getRowControls()
+    .chips.find((chip) => chip.id === 'next-camera');
+  next.onClick();
+  assert.ok(cctv.state._cameraWalk);
+
+  setCollapsed(true);
+  await nextTick();
+  await nextTick();
+  assert.equal(cctv.state._nearbyArea, null);
+  assert.equal(cctv.state._cameraWalk, null);
 });

@@ -1291,7 +1291,11 @@ test('globe view: a count per layer that is on, with its feed state, and no Laye
   ]);
   cards.setView({ center: HERE, heightM: 20_000_000 });
   await nextTick();
-  const tiles = [...document.querySelectorAll('.view-context__block')];
+  const tiles = [
+    ...document.querySelectorAll(
+      '.view-context__block:not(.context-list-card)',
+    ),
+  ];
   assert.equal(tiles.length, 1, 'each layer that is on, once');
   assert.equal(
     $('.view-context__label').textContent,
@@ -2224,7 +2228,8 @@ test('Esc in Recent Imagery’s box tool or preview is the readout’s alone; th
   contextSearchOpen.value = true;
   await nextTick();
   const root = readout.root;
-  const strip = root.querySelector('#ri-strip');
+  // A day's row, where the keyboard is in the list.
+  const strip = root.querySelector('.ri-card-open');
   assert.ok(root.closest('#global-context-panel'), 'the readout is in Context');
   // Previewing a day (the first day shows at once): Esc from elsewhere in
   // the readout clears the preview and nothing else.
@@ -2240,7 +2245,7 @@ test('Esc in Recent Imagery’s box tool or preview is the readout’s alone; th
     false,
     'idle, Esc is not its own',
   );
-  // Drawing a box: Esc on the strip cancels the tool and nothing else.
+  // Drawing a box: Esc on a day’s row cancels the tool and nothing else.
   tool.start();
   await nextTick();
   assert.equal(root.hasAttribute('data-owns-escape'), true);
@@ -2248,7 +2253,7 @@ test('Esc in Recent Imagery’s box tool or preview is the readout’s alone; th
   assert.equal(tool.isActive(), false, 'the box tool is cancelled');
   assert.equal(contextSearchOpen.value, true, 'the search stays open');
   // Nothing of its own left: the next Esc is Context's, which closes the
-  // search, and the strip is not blurred by the same key press.
+  // search, and the row is not blurred by the same key press.
   await nextTick();
   assert.equal(root.hasAttribute('data-owns-escape'), false);
   strip.focus();
@@ -2256,7 +2261,7 @@ test('Esc in Recent Imagery’s box tool or preview is the readout’s alone; th
   strip.addEventListener('blur', () => blurred++);
   assert.equal(escKey(strip), true);
   assert.equal(contextSearchOpen.value, false, 'Context closes the search');
-  assert.equal(blurred, 0, 'the strip keeps focus');
+  assert.equal(blurred, 0, 'the row keeps focus');
   assert.equal(
     cards.card?.identity.id,
     'test01',
@@ -5834,7 +5839,7 @@ test(
       'the Inspector section is gone',
     );
     assert.ok(
-      $('#context-lists .camera-list'),
+      $('#context-list-cctv .context-list-card'),
       'the separate Cameras list stays mounted',
     );
     assert.ok(document.activeElement.matches('.view-context'));
@@ -5962,7 +5967,10 @@ test(
       document.activeElement === $('.view-context__blocks'),
       'focus moves to the globe results when the last matching row leaves',
     );
-    assert.ok(!$('.view-context__block'), 'the unmatched group is gone');
+    assert.ok(
+      !$('.view-context__blocks .view-context__block[data-layer="flights"]'),
+      'the unmatched group is gone',
+    );
     assert.match(
       $('.view-context__blocks [role="status"]')?.textContent ?? '',
       /\b0\b/,

@@ -118,7 +118,6 @@
     "many": "لم يُبلَّغ عن شيء قريب من هنا في آخر {hours} ساعة",
     "other": "لم يُبلَّغ عن شيء قريب من هنا في آخر {hours} ساعة"
   },
-  "Latest news": "آخر الأخبار",
   "No news matches these filters in the last {hours} h": {
     "zero": "لا أخبار تطابق هذه المرشحات في آخر {hours} ساعة",
     "one": "لا أخبار تطابق هذه المرشحات في آخر ساعة ({hours})",
@@ -861,6 +860,7 @@
   "Traffic / Transit": "المرور / النقل",
   "Music": "موسيقى",
   "Other": "أخرى",
+  "Remaining groups": "المجموعات المتبقية",
   "Alternative": "بديلة",
   "Ambient": "أمبيانت",
   "Blues": "بلوز",
@@ -2566,7 +2566,6 @@
   "PAUSE": "إيقاف مؤقت",
   "RESUME": "استئناف",
   "Clear reading": "مسح القراءة",
-  "Observed history": "سجل الأرصاد",
   "news list|Latest": "الأحدث",
   "Imagery on Esri · Google 3D returns when cleared": "الصور على Esri · تعود Google 3D عند المسح",
   "Point the camera at the ground to use the view": "وجّه الكاميرا نحو الأرض لاستخدام العرض",
@@ -2613,7 +2612,6 @@
   "← → preview · S shows the focused day": "← → معاينة · S يعرض اليوم المحدد",
   "ZOOM IN": "تكبير",
   "Fly in until the view fits the 1,000 km limit": "اقترب حتى لا يتجاوز اتساع العرض الحالي حد 1,000 كم",
-  "Imagery days, newest first · arrows move, S or A and B pin": "أيام الصور، الأحدث أولًا · الأسهم للتنقل، وS أو A وB للتثبيت",
   "On the map": "على الخريطة",
   "Mode": "الوضع",
   "Imagery opacity": "عتامة الصور",
@@ -5084,14 +5082,6 @@
   "Show all {n}": "عرض الكل ({n})",
   "No cameras within {radius} of the view centre": "لا توجد كاميرات ضمن {radius} من مركز العرض",
   "No cameras here match the search": "لا توجد كاميرات هنا تطابق البحث",
-  "Show {count} more cameras": {
-    "zero": "عرض {count} كاميرا أخرى",
-    "one": "عرض كاميرا أخرى ({count})",
-    "two": "عرض كاميرتين أخريين ({count})",
-    "few": "عرض {count} كاميرات أخرى",
-    "many": "عرض {count} كاميرا أخرى",
-    "other": "عرض {count} كاميرا أخرى"
-  },
   "VIDEO · STALLED": "الفيديو · متوقف",
   "Docked · loading": "مثبّت · جارٍ التحميل",
   "Docked · stalled": "مثبّت · متوقف",
@@ -5137,5 +5127,11 @@
   "Weather briefing": "موجز الطقس",
   "No frame at this time": "لا توجد صورة في هذا الوقت",
   "At map center": "في مركز الخريطة",
-  "Alerts": "تنبيهات"
+  "Alerts": "تنبيهات",
+  "Back": "رجوع",
+  "{from}–{to} of {total}": "{from}–{to} من {total}",
+  "{range} · {size}/page": "{range} · {size}/صفحة",
+  "Pages": "الصفحات",
+  "Previous": "السابق",
+  "{name} per page, showing {range}": "{name} في الصفحة، المعروض {range}"
 }

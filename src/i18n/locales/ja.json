@@ -88,7 +88,6 @@
   "Nothing reported near here in the last {hours} h": {
     "other": "直近{hours}時間、この付近の報道はありません"
   },
-  "Latest news": "最新ニュース",
   "No news matches these filters in the last {hours} h": {
     "other": "直近{hours}時間で条件に合うニュースはありません"
   },
@@ -1031,6 +1030,7 @@
   "Traffic / Transit": "交通 / 公共交通",
   "Music": "音楽",
   "Other": "その他",
+  "Remaining groups": "残りのグループ",
   "Directory refresh degraded; showing the previous station catalog.": "ディレクトリの更新が不完全です。前回の局カタログを表示しています。",
   "Radio directory coverage is degraded.": "ラジオディレクトリのカバー範囲が不完全です。",
   "Directory refresh failed; showing the previous station catalog.": "ディレクトリの更新に失敗しました。前回の局カタログを表示しています。",
@@ -2075,7 +2075,6 @@
   "Radio is disabling…": "ラジオを無効化しています…",
   "Radio lifecycle is uncertain — use Enable or Disable to reconcile": "ラジオのライフサイクルが不明確です。有効化または無効化で再調整してください",
   "Clear reading": "読み取り値を消去",
-  "Observed history": "観測履歴",
   "news list|Latest": "最新",
   "Imagery on Esri · Google 3D returns when cleared": "画像はEsri上に表示 · 消去するとGoogle 3Dに戻ります",
   "Point the camera at the ground to use the view": "このビューを使うにはカメラを地面に向けてください",
@@ -2117,7 +2116,6 @@
   "← → preview · S shows the focused day": "← → でプレビュー · Sで選択中の日を表示",
   "ZOOM IN": "ズームイン",
   "Fly in until the view fits the 1,000 km limit": "表示が上限の1,000 kmに収まるまで近づいてください",
-  "Imagery days, newest first · arrows move, S or A and B pin": "画像のある日（新しい順） · 矢印キーで移動、SまたはA・Bで固定",
   "On the map": "地図上",
   "Mode": "モード",
   "Imagery opacity": "画像の不透明度",
@@ -4514,9 +4512,6 @@
   "Show all {n}": "すべて表示（{n}）",
   "No cameras within {radius} of the view centre": "表示中心から {radius} 以内にカメラはありません",
   "No cameras here match the search": "検索に一致するカメラはここにありません",
-  "Show {count} more cameras": {
-    "other": "さらに {count} 台のカメラを表示"
-  },
   "VIDEO · STALLED": "映像 · 停止中",
   "Docked · loading": "ドック中 · 読込中",
   "Docked · stalled": "ドック中 · 停止中",
@@ -4562,5 +4557,11 @@
   "Weather briefing": "気象の概要",
   "No frame at this time": "この時刻の画像はありません",
   "At map center": "地図の中心",
-  "Alerts": "警報"
+  "Alerts": "警報",
+  "Back": "戻る",
+  "{from}–{to} of {total}": "{from}–{to} / {total}",
+  "{range} · {size}/page": "{range} · 1ページ{size}件",
+  "Pages": "ページ",
+  "Previous": "前へ",
+  "{name} per page, showing {range}": "1ページの{name}、表示中 {range}"
 }

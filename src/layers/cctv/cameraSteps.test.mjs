@@ -207,6 +207,50 @@ test("with Context's Cameras list, a walk steps through that list in its order",
   assert.deepEqual(r.selected.slice(-2), ['c4', 'c3']);
 });
 
+test("Prev/Next and auto-hop walk the order Context's card lists", () => {
+  const r = rig();
+  // The card lists c1..c4 searched and sorted its own way.
+  r.methods.setNearbyArea({
+    lat: 2,
+    lon: 0,
+    radiusKm: 2.5,
+    order: ['c4', 'c1', 'c3'],
+  });
+  r.chip('next-camera').onClick();
+  r.chip('next-camera').onClick();
+  r.chip('previous-camera').onClick();
+  assert.deepEqual(r.selected, ['c4', 'c1', 'c4']);
+  r.state._autoHop = true;
+  r.state._lastHopAt = 0;
+  r.state._autoHopSec = 1;
+  r.parts.model.currentViewContext = () => 'view';
+  r.parts.navigation.maybeAutoHop(10_000);
+  assert.equal(r.selected.at(-1), 'c1', 'the hop takes the next listed camera');
+});
+
+test('results A/B/C becoming A/C restart the walk; a recentre keeps it', () => {
+  const area = { lat: 2, lon: 0, radiusKm: 2.5 };
+  const narrowed = rig();
+  narrowed.methods.setNearbyArea({ ...area, order: ['c1', 'c2', 'c3'] });
+  narrowed.chip('next-camera').onClick();
+  assert.deepEqual(narrowed.selected, ['c1']);
+  // The search drops B: the next step goes to C, not B.
+  narrowed.methods.setNearbyArea({
+    ...area,
+    order: ['c1', 'c3'],
+    restart: true,
+  });
+  narrowed.chip('next-camera').onClick();
+  assert.deepEqual(narrowed.selected, ['c1', 'c3']);
+  // A recentre re-sorts the list but keeps the walk under way.
+  const moved = rig();
+  moved.methods.setNearbyArea({ ...area, order: ['c1', 'c2', 'c3'] });
+  moved.chip('next-camera').onClick();
+  moved.methods.setNearbyArea({ ...area, lat: 2.1, order: ['c3', 'c1', 'c2'] });
+  moved.chip('next-camera').onClick();
+  assert.deepEqual(moved.selected, ['c1', 'c2']);
+});
+
 test('camerasNear lists nothing while Cameras is off', () => {
   assert.deepEqual(
     rig({ enabled: false }).methods.camerasNear({ lat: 0, lon: 0 }),

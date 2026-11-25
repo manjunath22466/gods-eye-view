@@ -162,15 +162,25 @@ export function createNavigation({
   /**
    * The area Context lists cameras for (its view centre and radius), so a
    * walk steps through the same list; null while Context shows no list.
-   * @param {?{lat: number, lon: number, radiusKm: number}} area
+   * `order` is the list's camera ids as it shows them (searched and sorted),
+   * only while the list is on screen. `restart` drops the walk under way, as
+   * when the list's search changes, it is shown or hidden, or Context opens
+   * or closes (then with no area); a recentre keeps it.
+   * @param {?{lat: number, lon: number, radiusKm: number, order?: string[], restart?: boolean}} area
    */
   function setNearbyArea(area) {
+    if (area?.restart) layerState._cameraWalk = null;
     layerState._nearbyArea =
       Number.isFinite(area?.lat) &&
       Number.isFinite(area?.lon) &&
       Number.isFinite(area?.radiusKm) &&
       area.radiusKm > 0
-        ? { lat: area.lat, lon: area.lon, radiusKm: area.radiusKm }
+        ? {
+            lat: area.lat,
+            lon: area.lon,
+            radiusKm: area.radiusKm,
+            order: Array.isArray(area.order) ? area.order.map(String) : null,
+          }
         : null;
   }
 
@@ -181,6 +191,7 @@ export function createNavigation({
    */
   function walkOrder() {
     const area = layerState._nearbyArea;
+    if (area?.order?.length > 1) return area.order;
     if (area) {
       const listed = camerasNear(area, { radiusKm: area.radiusKm });
       if (listed.length > 1) return listed.map((camera) => camera.id);
@@ -396,7 +407,14 @@ export function createNavigation({
     const viewChanged = viewKey !== layerState._lastViewContext;
     layerState._lastViewContext = viewKey;
 
-    let nextId = viewChanged ? nearestCameraIdToViewer() : null;
+    const listed = layerState._nearbyArea?.order;
+    let nextId = null;
+    if (listed?.length > 1) {
+      // Context lists cameras: the hop walks its list.
+      const index = listed.indexOf(layerState._activeCameraId);
+      nextId = listed[(index + 1) % listed.length];
+      if (!layerState._recordById.has(nextId)) nextId = null;
+    } else if (viewChanged) nextId = nearestCameraIdToViewer();
     if (!nextId || nextId === layerState._activeCameraId) {
       const nextIdx = cctvCycleIndex(
         layerState._records.findIndex(

@@ -187,8 +187,7 @@ html:not([lang='en']) .weather-card [data-line-id='status'] {
   letter-spacing: 0.5px;
 }
 .rail-card [hidden],
-.weather-frame-time[hidden],
-.weather-observed-group[hidden] {
+.weather-frame-time[hidden] {
   display: none !important;
 }
 .weather-frame-time {
@@ -223,20 +222,6 @@ html:not([lang='en']) .rail-card-zero::after {
   white-space: nowrap;
 }
 
-.weather-observed-group {
-  border: 1px solid var(--weather-card-border);
-  border-radius: 6px;
-  padding: 6px;
-  margin-top: 6px;
-  min-width: 0;
-}
-.weather-observed-group > .panel-title {
-  margin: 0;
-}
-.weather-observed-scope {
-  margin-top: 4px;
-  color: var(--text-dim);
-}
 .rail-card-header {
   width: 100%;
   padding: 8px 5px;

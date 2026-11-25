@@ -1,13 +1,13 @@
 <script setup>
 import { computed } from 'vue';
 import { t } from '../../i18n/index.js';
+import ContextListCard from '../kit/ContextListCard.vue';
 import UiButton from '../kit/UiButton.vue';
 import UiCloseButton from '../kit/UiCloseButton.vue';
 import UiSegmented from '../kit/UiSegmented.vue';
 import RailCardBlocks from '../rail/RailCardBlocks.vue';
 import RailCards from '../rail/RailCards.vue';
 import RecentImageryCard from './RecentImageryCard.vue';
-import UiEmpty from '../kit/UiEmpty.vue';
 import UiSlider from '../kit/UiSlider.js';
 
 // Every block exists from the start, in its final order. The owner computes
@@ -65,37 +65,35 @@ const modeOptions = computed(() =>
         :aria-hidden="String(!view.notice.fit)"
         >{{ t('ZOOM IN') }}</UiButton
       ></div
-    ><div
-      id="ri-strip"
-      :class="[
-        'ri-block ri-strip ui-scroll',
-        { searching: view.strip.searching },
-      ]"
-      :tabindex="view.strip.draw ? -1 : 0"
-      :role="view.strip.draw ? undefined : 'listbox'"
-      :aria-orientation="view.strip.draw ? undefined : 'horizontal'"
-      :aria-label="
-        view.strip.draw
-          ? undefined
-          : t('Imagery days, newest first · arrows move, S or A and B pin')
+    ><ContextListCard
+      id="recent-imagery"
+      class="ri-block ri-strip"
+      :title="t('Recent imagery')"
+      icon="satellite_alt"
+      :tone="view.strip.tone"
+      :items="view.strip.cards"
+      :item-key="(card) => card.key"
+      :state="view.strip.state"
+      :aria-keyshortcuts="
+        view.strip.state === 'ready' && view.strip.cards.length
+          ? view.mode === 'ab'
+            ? 'A B'
+            : 'A S'
+          : undefined
       "
-      :aria-keyshortcuts="view.strip.draw ? undefined : 'A B S'"
-      :aria-activedescendant="view.strip.activeDescendant || undefined"
-      ><RecentImageryCard
-        v-for="card in view.strip.cards"
-        :key="card.key"
-        :card="card" /><UiButton
-        v-if="view.strip.draw"
-        id="ri-draw-area"
-        class="data-toggle-chip ri-draw-area"
-        :disabled="Boolean(view.strip.draw.disabled)"
-        @click="onDrawArea"
-        >{{ view.strip.draw.label }}</UiButton
-      ><UiEmpty
-        v-else
-        class="ri-strip-empty"
-        :hidden="view.strip.cards.length > 0"
-        :title="view.strip.empty" /></div
+      :row-button="false"
+      ><template #row="{ item }"><RecentImageryCard :card="item" /></template
+      ><template #loading>{{ t('Searching') }}</template
+      ><template #empty
+        ><UiButton
+          v-if="view.strip.draw"
+          id="ri-draw-area"
+          class="data-toggle-chip ri-draw-area"
+          :disabled="Boolean(view.strip.draw.disabled)"
+          @click="onDrawArea"
+          >{{ view.strip.draw.label }}</UiButton
+        ><template v-else>{{ view.strip.empty }}</template></template
+      ></ContextListCard
     ><div id="ri-hint" class="ri-block ri-line ri-hint" :title="view.hint">{{
       view.hint
     }}</div
