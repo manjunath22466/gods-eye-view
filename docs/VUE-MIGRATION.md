@@ -553,7 +553,7 @@ slot whenever its view is drawn.
    `ContextView` renders the card, the Nearby view and the list tabs;
    ContextControls presents its mode only through its `publish` option,
    which the application leaves unset, so `./ui/context` needs no Vue;
-   `MissionRoster` and `MissionDetail` render the Space Missions roster
+   `NearbyMissions` and `MissionDetail` render the Space Missions roster
    and selected mission that the launches layer publishes through
    `subscribePanel()`; the Contacts panel the awareness layer once handed
    to a view the same way is retired, and Cockpit keeps its Contacts

@@ -978,7 +978,6 @@
   "NADIR": "У НАДИР",
   "Selected Space Mission": "Вибрана космічна місія",
   "Show all missions": "Показати всі місії",
-  "Deselect mission": "Зняти вибір місії",
   "PAYLOAD": "КОРИСНЕ НАВАНТАЖЕННЯ",
   "NAME": "НАЗВА",
   "TYPE": "ТИП",
@@ -3022,13 +3021,10 @@
   "Search any location...": "Пошук місця...",
   "CONTEXT": "КОНТЕКСТ",
   "SPACE MISSIONS": "КОСМІЧНІ МІСІЇ",
-  "Available Space Missions": "Доступні космічні місії",
-  "AVAILABLE MISSIONS": "ДОСТУПНІ МІСІЇ",
   "SELECT A MISSION TO INSPECT": "ВИБЕРІТЬ МІСІЮ ДЛЯ ПЕРЕГЛЯДУ",
   "LOADING 30-DAY MISSION INDEX": "ЗАВАНТАЖЕННЯ ІНДЕКСУ МІСІЙ ЗА 30 ДНІВ",
   "Space Missions unavailable: the mission index could not load. Try again later.": "Режим «Космічні місії» недоступний: не вдалося завантажити індекс місій. Спробуйте пізніше.",
   "30-DAY MISSION INDEX UNAVAILABLE": "ІНДЕКС МІСІЙ ЗА 30 ДНІВ НЕДОСТУПНИЙ",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB — ОГЛЯД · ENTER / SPACE — ВИБІР",
   "Filter stations by station tag": "Фільтрувати станції за тегом",
   "All": "Усі",
   "DRAG TO TUNE": "ТЯГНІТЬ ДЛЯ НАЛАШТУВАННЯ",
@@ -4831,5 +4827,7 @@
   "{name} per page, showing {range}": "{name} на сторінці, показано {range}",
   "Tuner and volume": "Тюнер і гучність",
   "Open Context to view street-level imagery": "Відкрийте «Контекст», щоб побачити вуличні знімки",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Підписи увімкнених шарів: щільність визначає, скільки з них підписано. Власні параметри кожного шару — у його рядку в шарах даних"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Підписи увімкнених шарів: щільність визначає, скільки з них підписано. Власні параметри кожного шару — у його рядку в шарах даних",
+  "Upcoming": "Незабаром",
+  "Nothing matches “{text}”.": "Немає збігів із «{text}»."
 }

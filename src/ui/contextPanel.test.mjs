@@ -2650,39 +2650,31 @@ test('Undo from the keyboard focuses the pin put back, or the Pinned tab', async
   );
 });
 
-// Turning a list layer on from Data Layers selects its list inside Context.
-for (const [layerId, listId] of [
-  ['rocket-launches', 'space-missions'],
-  ['weather-radar', 'weather'],
-]) {
-  test(`turning ${layerId} on from Data Layers shows its list in Context`, async (t) => {
-    const { $, cards, pinia, notifyLayers } = fixture(t, [flightsOn([])]);
-    t.after(resetContextLists);
-    const chrome = usePanelChromeStore(pinia);
-    const owner = chrome.connect({});
-    t.after(() => chrome.detach(owner));
-    chrome.publish(owner, 'global-context-panel', { collapsed: false });
-    chrome.publish(owner, 'data-panel', { collapsed: false });
-    await settleTicks();
-    cards.allLayers();
-    await settleTicks();
-    notifyLayers({
-      type: 'visibility',
-      layerId,
-      enabled: true,
-      origin: 'user',
-    });
-    assert.equal(cards.lastDirectOn?.layerId, layerId);
-    if (listId === 'space-missions')
-      useSpaceMissionsStore(pinia).setEnabled(true);
-    else setContextListPresence(listId, { count: 2 });
-    await settleTicks();
-    assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
-    assert.notEqual($('#context-lists').style.display, 'none');
-    assert.notEqual($(`#context-list-${listId}`).style.display, 'none');
-    assert.equal(chrome.panels['data-panel'].collapsed, false);
+test('turning Weather on from Data Layers shows its list in Context', async (t) => {
+  const { $, cards, pinia, notifyLayers } = fixture(t, [flightsOn([])]);
+  t.after(resetContextLists);
+  const chrome = usePanelChromeStore(pinia);
+  const owner = chrome.connect({});
+  t.after(() => chrome.detach(owner));
+  chrome.publish(owner, 'global-context-panel', { collapsed: false });
+  chrome.publish(owner, 'data-panel', { collapsed: false });
+  await settleTicks();
+  cards.allLayers();
+  await settleTicks();
+  notifyLayers({
+    type: 'visibility',
+    layerId: 'weather-radar',
+    enabled: true,
+    origin: 'user',
   });
-}
+  assert.equal(cards.lastDirectOn?.layerId, 'weather-radar');
+  setContextListPresence('weather', { count: 2 });
+  await settleTicks();
+  assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
+  assert.notEqual($('#context-lists').style.display, 'none');
+  assert.notEqual($('#context-list-weather').style.display, 'none');
+  assert.equal(chrome.panels['data-panel'].collapsed, false);
+});
 
 test('each Lists sub-tab controls a tab panel that names it', async (t) => {
   const { $, pinia } = fixture(t, [flightsOn([])]);
@@ -2697,11 +2689,7 @@ test('each Lists sub-tab controls a tab panel that names it', async (t) => {
   ];
   assert.deepEqual(
     tabs.map((tab) => tab.id),
-    [
-      'context-list-tab-space-missions',
-      'context-list-tab-weather',
-      'context-list-tab-news',
-    ],
+    ['context-list-tab-weather', 'context-list-tab-news'],
   );
   for (const tab of tabs) {
     const pane = document.getElementById(tab.getAttribute('aria-controls'));
@@ -5710,6 +5698,7 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
         observedAt: new Date().toISOString(),
         timeZone: 'America/Chicago',
         utcOffsetSeconds: -21600,
+        source: 'open-meteo',
         temperatureC: 18.4,
         apparentTemperatureC: 17.2,
         weatherCode: 3,
@@ -5728,11 +5717,11 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
   };
   // Denver: a spot no other test reads, so no kept reading answers for it.
   const DENVER = { lat: 39.74, lon: -104.99 };
-  const { $, point } = fixture(
-    t,
-    [flightsOn([flight('near01', DENVER.lat + 0.05, DENVER.lon)])],
-    { brief, fetchImpl },
-  );
+  const flights = flightsOn([flight('near01', DENVER.lat + 0.05, DENVER.lon)]);
+  const { $, point, notifyLayers } = fixture(t, [flights], {
+    brief,
+    fetchImpl,
+  });
   point(DENVER);
   await nextTick();
   assert.match(
@@ -5747,6 +5736,26 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
     /18 °C/,
   );
   assert.match(block.textContent, /feels 17°/);
+  const assertSourceChip = (reading) => {
+    const [chip] = document.querySelectorAll(
+      'a[href="https://open-meteo.com/"]',
+    );
+    assert.equal(
+      document.querySelectorAll('a[href="https://open-meteo.com/"]').length,
+      1,
+    );
+    assert.ok(
+      reading.contains(chip),
+      'the chip is next to the weather reading',
+    );
+    assert.equal(chip.textContent.trim(), 'Open-Meteo');
+    assert.equal(
+      chip.getAttribute('aria-label'),
+      'Weather data by Open-Meteo.com',
+    );
+    assert.equal(chip.getAttribute('translate'), 'no');
+  };
+  assertSourceChip(block.querySelector('.spot-conditions__weather-now'));
   const factsGrid = block.querySelector('.spot-conditions__weather-facts');
   assert.equal(getComputedStyle(factsGrid).display, 'grid');
   const facts = Object.fromEntries(
@@ -5776,6 +5785,15 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
     [],
     'no request of its own',
   );
+
+  flights.enabled = false;
+  notifyLayers();
+  await nextTick();
+  assert.match(
+    $('.view-context__tiles--facts .view-context__tile strong').textContent,
+    /18 °C/,
+  );
+  assertSourceChip($('.view-context__tiles--facts .view-context__tile'));
 });
 
 test('with a layer on, a spot whose weather cannot be read says so', async (t) => {
@@ -6545,7 +6563,7 @@ test('a map overlay gets a tile with its state and how fresh it is, at a city an
   );
 });
 
-test('every layer that is on has a tile at every zoom, a reason in place of a 0, and Space Missions counts its list', async (t) => {
+test('every layer that is on has a tile at every zoom, a reason in place of a 0, and the Missions count heads its list', async (t) => {
   const { $, cards, pinia } = fixture(t, [
     flightsOn([flight('far01', 40.7, -74.0)]),
     {
@@ -6571,7 +6589,13 @@ test('every layer that is on has a tile at every zoom, a reason in place of a 0,
   const missions = useSpaceMissionsStore(pinia);
   missions.setEnabled(true);
   missions.publish({
-    roster: { entries: new Array(23).fill({}) },
+    roster: {
+      entries: Array.from({ length: 23 }, (_, index) => ({
+        id: String(index),
+        index,
+        label: `Mission ${index}`,
+      })),
+    },
     mission: null,
   });
   cards.setView({ center: HERE, heightM: 40_000 });
@@ -6582,8 +6606,8 @@ test('every layer that is on has a tile at every zoom, a reason in place of a 0,
     );
   assert.equal(
     missionTiles('.view-context__tile').length,
-    1,
-    'one Space Missions tile',
+    0,
+    'its list replaces the tile',
   );
   assert.equal(
     Boolean($('.nearby-lists__layer[data-layer="rocket-launches"]')),
@@ -6599,10 +6623,7 @@ test('every layer that is on has a tile at every zoom, a reason in place of a 0,
     $('.view-context__tile[data-layer="bikeshare"] strong').textContent,
     /Zoom in to see bikes/,
   );
-  assert.equal(
-    $('.view-context__tile[data-layer="space-missions"] strong').textContent,
-    '23',
-  );
+  assert.equal($('.nearby-missions h4 strong').textContent, '23');
   cards.setView({ center: HERE, heightM: 18_000_000 });
   await nextTick();
   assert.match(
@@ -6610,18 +6631,15 @@ test('every layer that is on has a tile at every zoom, a reason in place of a 0,
     /Zoom in to see bikes/,
     'the same rule at the globe',
   );
-  assert.equal(
-    $('.view-context__block[data-layer="space-missions"] strong').textContent,
-    '23',
-  );
+  assert.equal($('.nearby-missions h4 strong').textContent, '23');
   assert.equal(
     missionTiles('.view-context__block').length,
-    1,
-    'one Space Missions block',
+    0,
+    'its list replaces the block',
   );
 });
 
-test('Space Missions alone is a layer that is on, and its tile carries the mission index feed state', async (t) => {
+test('Space Missions alone is a layer that is on, and its roster carries the mission index feed state', async (t) => {
   const index = {
     id: 'rocket-launches',
     name: 'Space Missions (30d)',
@@ -6642,15 +6660,15 @@ test('Space Missions alone is a layer that is on, and its tile carries the missi
     'not the nothing-on view',
   );
   assert.doesNotMatch($('.view-context').textContent, /No layers on/);
-  const tile = $('.view-context__tile[data-layer="space-missions"]');
-  assert.ok(tile, 'its one tile');
+  const heading = $('.nearby-missions h4');
+  assert.ok(heading, 'its roster heading');
   assert.doesNotMatch(
-    tile.textContent,
+    heading.textContent,
     /\b0\b/,
     'never a bare 0 for a failed index',
   );
   assert.notEqual(
-    tile.querySelector('.view-context__dot').getAttribute('aria-label'),
+    heading.querySelector('.view-context__dot').getAttribute('aria-label'),
     'Live',
   );
   assert.match(
@@ -6669,7 +6687,7 @@ test('Space Missions alone is a layer that is on, and its tile carries the missi
   );
 });
 
-test('a stale mission index marks the Space Missions tile stale, keeping its count', async (t) => {
+test('a stale mission index marks the roster stale, keeping its count', async (t) => {
   const index = {
     id: 'rocket-launches',
     name: 'Space Missions (30d)',
@@ -6681,15 +6699,21 @@ test('a stale mission index marks the Space Missions tile stale, keeping its cou
   const missions = useSpaceMissionsStore(pinia);
   missions.setEnabled(true);
   missions.publish({
-    roster: { entries: new Array(23).fill({}) },
+    roster: {
+      entries: Array.from({ length: 23 }, (_, index) => ({
+        id: String(index),
+        index,
+        label: `Mission ${index}`,
+      })),
+    },
     mission: null,
   });
   cards.setView({ center: HERE, heightM: 40_000 });
   await nextTick();
-  const tile = $('.view-context__tile[data-layer="space-missions"]');
-  assert.equal(tile.querySelector('strong').textContent, '23');
+  const heading = $('.nearby-missions h4');
+  assert.equal(heading.querySelector('strong').textContent, '23');
   assert.equal(
-    tile.querySelector('.view-context__dot').getAttribute('aria-label'),
+    heading.querySelector('.view-context__dot').getAttribute('aria-label'),
     'Stale',
   );
   assert.ok(
@@ -6698,95 +6722,44 @@ test('a stale mission index marks the Space Missions tile stale, keeping its cou
   );
 });
 
-// Reached from Pinned or not, Missions going off while it is the only list
-// leaves Context on Inspect, and focus on the Lists tab or in its list moves
-// to the Inspect tab.
-test('Space Missions turned off while its list shows: Context goes to Inspect and focus to its tab', async (t) => {
+test('turning off Missions restores focus from its Inspect roster', async (t) => {
   const { $, pinia } = fixture(t, [flightsOn([])]);
-  t.after(resetContextLists);
+  const missions = useSpaceMissionsStore(pinia);
+  const outside = document.body.appendChild(document.createElement('button'));
+  t.after(() => outside.remove());
   const pinned = usePinnedStore(pinia);
-  pinned.pin({
-    key: 'flights:x',
-    kind: 'item',
-    title: 'X',
-    icon: 'flight',
-    identity: { layerId: 'flights', id: 'x' },
-  });
   t.after(() => pinned.unpin('flights:x'));
-  const missions = useSpaceMissionsStore(pinia);
-  for (const focusIn of [
-    '#context-tab-lists',
-    '[data-mission-roster-focus-continuation]',
-    null,
-  ]) {
-    missions.setEnabled(true);
-    missions.publish({
-      roster: { entries: new Array(3).fill({}) },
-      mission: null,
-    });
-    await nextTick();
-    $('#context-tab-pinned').click();
-    await nextTick();
-    $('#context-tab-lists').click();
-    await nextTick();
-    assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
-    assert.match($('#context-tab-lists').textContent, /Missions · 3/);
-    const outside = document.body.appendChild(document.createElement('button'));
-    const focusTarget = focusIn ? $(focusIn) : outside;
-    focusTarget.focus();
-    assert.equal(document.activeElement === focusTarget, true);
-    missions.setEnabled(false);
-    await nextTick();
-    await nextTick();
-    assert.equal($('#context-tab-lists'), null, 'its tab goes');
-    assert.equal(
-      $('#context-tab-inspect').getAttribute('aria-selected'),
-      'true',
-      `Inspect, not Pinned (focus in ${focusIn})`,
-    );
-    if (focusIn)
-      assert.equal(
-        document.activeElement,
-        $('#context-tab-inspect'),
-        `focus moves from ${focusIn} to Inspect`,
+  for (const hasTabs of [false, true]) {
+    if (hasTabs)
+      pinned.pin({
+        key: 'flights:x',
+        kind: 'item',
+        title: 'X',
+        icon: 'flight',
+      });
+    for (const focusInRoster of [true, false]) {
+      missions.setEnabled(true);
+      missions.publish({
+        roster: { entries: [{ id: 'm1', index: 0, label: 'Mission' }] },
+        mission: null,
+      });
+      await settleTicks();
+      const target = focusInRoster
+        ? $('.nearby-missions [data-list-key]')
+        : outside;
+      target.focus();
+      assert.equal(document.activeElement === target, true);
+      missions.setEnabled(false);
+      await settleTicks();
+      assert.equal(Boolean($('.nearby-missions')), false);
+      const fallback =
+        $('#context-tab-inspect') ??
+        $('#global-context-panel .cyber-panel-body');
+      assert.ok(
+        document.activeElement === (focusInRoster ? fallback : outside),
       );
-    else
-      assert.equal(
-        document.activeElement,
-        outside,
-        'focus outside Context stays put',
-      );
-    outside.remove();
+    }
   }
-});
-
-// With no other tab, the tab row goes with the Lists tab: focus moves to
-// Context's body rather than dropping to the page.
-test('Space Missions turned off as the only tab: focus moves to Context’s body', async (t) => {
-  const { $, pinia } = fixture(t, [flightsOn([])]);
-  t.after(resetContextLists);
-  const missions = useSpaceMissionsStore(pinia);
-  missions.setEnabled(true);
-  missions.publish({
-    roster: { entries: new Array(3).fill({}) },
-    mission: null,
-  });
-  await nextTick();
-  $('#context-tab-lists').click();
-  await nextTick();
-  const inside = $('[data-mission-roster-focus-continuation]');
-  inside.focus();
-  assert.equal(document.activeElement === inside, true);
-  missions.setEnabled(false);
-  await nextTick();
-  await nextTick();
-  assert.equal($('#context-tab-inspect'), null, 'no tab row is left');
-  // Compared as a flag: a failing compare of two elements would print both.
-  assert.equal(
-    document.activeElement === $('#global-context-panel .cyber-panel-body'),
-    true,
-    'focus is on Context’s body',
-  );
 });
 
 test('a field layer still loading reads …, not "No value"', async (t) => {

@@ -6,6 +6,9 @@
  */
 export const CONTEXT_NEARBY_EVENT = 'gev:context-nearby';
 
+/** Show Missions in Inspect and keep an active follow available on Back. */
+export const CONTEXT_MISSIONS_EVENT = 'gev:context-missions';
+
 /**
  * Sent on the document when a place is picked: a place row or
  * chip in search, or a voice request that names a place. Only these open a

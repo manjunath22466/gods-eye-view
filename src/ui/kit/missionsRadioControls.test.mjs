@@ -41,11 +41,11 @@ const byId = (markup, name, id) => {
 
 // Each view's UiButtons, UiCloseButtons, UiIcons, UiSelects and UiSliders.
 const VIEWS = {
-  // Replay, the replay's pause, Fly to and Pin; the header's deselect and
-  // the replay's Cancel close; the rocket and the three actions' glyphs.
-  'panels/MissionDetail.vue': [4, 2, 4, 0, 1],
-  // A mission's row.
-  'panels/MissionRoster.vue': [1, 0, 0, 0, 0],
+  // Replay, the replay's pause, Fly to and Pin; the replay's Cancel close;
+  // the rocket and the three actions' glyphs. Back is the list card's.
+  'panels/MissionDetail.vue': [4, 1, 4, 0, 1],
+  // Its rows and pager are the kit's list card.
+  'panels/NearbyMissions.vue': [0, 0, 0, 0, 0],
   'panels/MissionReplayOverlay.vue': [0, 0, 0, 0, 0],
   'panels/AwarenessDirection.vue': [0, 0, 0, 0, 0],
   // Connect, Locate, Change device, FM, ADS-B, Tune and the two seeks.

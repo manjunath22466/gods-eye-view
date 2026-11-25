@@ -11,12 +11,14 @@ import UiCloseButton from '../../kit/UiCloseButton.vue';
 import UiIcon from '../../kit/UiIcon.vue';
 import CloseUpMap from './CloseUpMap.vue';
 
-// The selected space mission, in Context's Missions list, in the shape of
+// The selected space mission, in its list card in Context's Inspect view
+// (NearbyMissions.vue, whose Back lets it go), in the shape of
 // the item card: a top image (the launch site's close-up map, or the replay
 // while one runs), the name with its status, Replay · Fly to · Pin, the key
-// figures as tiles, and the payloads and stages folded under More details.
+// figures as tiles, and the payloads and stages under More details, open
+// for each mission as it shows.
 // The launches layer presents it and hides it while none is selected; the
-// roster beside it hides while it shows. Buttons call the layer's panel
+// missions list it was picked from hides while it shows. Buttons call the layer's panel
 // commands. Stepping between missions is the Data Layers row's.
 const { mission: m, layer } = storeToRefs(useSpaceMissionsStore());
 const pinned = usePinnedStore();
@@ -53,18 +55,6 @@ function togglePin() {
   else pinned.pin(pin);
 }
 
-// Closing from the keyboard hands focus to the mission's row in the roster,
-// which shows again once the card hides; a pointer close leaves focus be.
-async function close(event) {
-  const id = m.value?.id;
-  const byKeyboard = event?.detail === 0;
-  layer.value?.deselectMission();
-  if (!byKeyboard || !id) return;
-  await nextTick();
-  const host = root.value?.parentElement;
-  const row = [...(host?.querySelectorAll('[data-mission-roster-id]') ?? [])].find((item) => item.dataset.missionRosterId === id);
-  row?.focus();
-}
 
 // Each newly presented selection returns Context, which holds the Missions
 // list, to the top.
@@ -97,7 +87,6 @@ watch(
         <h3 class="entity-card__title" data-mission-title>{{ m?.title }}</h3>
         <span v-if="m?.status" class="mission-card__status" data-mission-status>{{ m.status }}</span>
       </div>
-      <UiCloseButton class="entity-card__close" data-mission-close glyph="icon" :title="t('Show all missions')" :label="t('Deselect mission')" @click="close" />
     </header>
 
     <div v-if="m" class="entity-card__actions mission-card__actions">
@@ -131,8 +120,10 @@ watch(
       </div>
     </div>
 
-    <!-- Keyed by the mission, so every new pick starts folded. -->
-    <details v-if="m" :key="`more:${m.id}`" class="entity-card__section entity-card__more" data-mission-more>
+    <!-- Open for each mission as it shows (the key makes it new), so its
+         payloads and stages are in view; folding it lasts while the same
+         mission stays. -->
+    <details v-if="m" :key="`more:${m.id}`" class="entity-card__section entity-card__more" data-mission-more open>
       <summary class="entity-card__more-title">{{ t('More details') }}</summary>
       <dl class="entity-card__facts">
         <div v-if="m.site" class="entity-card__fact">

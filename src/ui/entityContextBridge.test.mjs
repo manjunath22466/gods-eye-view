@@ -1641,6 +1641,25 @@ test('the first Inspector read includes a manager attached during bridge setup',
   assert.equal(f.countStore.state.counts.flights.count, 17);
 });
 
+test('Missions leaves the last known Satellite count alone while it owns the row', async (t) => {
+  const f = inspectorFixture(t);
+  await f.openAndRead();
+  const satelliteCount = (count, lastUpdate) =>
+    enabled('satellites', { count, lastUpdate, scope: 'worldwide' });
+  f.setRows([satelliteCount(100, 1)]);
+  await nextTick();
+  assert.equal(f.countStore.state.counts.satellites.count, 100);
+
+  f.missions.setEnabled(true);
+  f.setRows([satelliteCount(25, 2)]);
+  await nextTick();
+  assert.equal(f.countStore.state.counts.satellites.count, 100);
+
+  f.missions.setEnabled(false);
+  await nextTick();
+  assert.equal(f.countStore.state.counts.satellites.count, 25);
+});
+
 test('counts admit only the settled Inspector state, and Directions does not fill it', async (t) => {
   const f = inspectorFixture(t);
   await nextTick();

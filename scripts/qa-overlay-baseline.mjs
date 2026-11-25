@@ -635,7 +635,7 @@ async function prepareMission(page) {
   const state = await readLayerState(page, 'rocket-launches');
   if (!(state?.stats?.count > 0)) return `Mission feed unavailable (${state?.stats?.error || 'no missions'})`;
   const selected = await page.evaluate(() => {
-    const button = document.querySelector('[data-mission-roster-index="0"]');
+    const button = document.querySelector('[data-list-card="space-missions"] button[data-list-index="0"]');
     if (!button) return false;
     button.click();
     return true;

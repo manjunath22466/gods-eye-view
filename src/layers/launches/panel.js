@@ -1,3 +1,4 @@
+import { isFollowing } from '../../data/followed.js';
 import { toCartographicRadians } from '../../geo/ellipsoid.js';
 import {
   formatDate,
@@ -301,6 +302,7 @@ export function createPanel({ state: layerState, services, parts, source }) {
         const label = parts.overlays
           .shortMissionLabel(launch.name, 27)
           .toUpperCase();
+        const launchAt = Date.parse(launch.launchTime ?? '');
         return {
           index,
           id: String(launch.id ?? ''),
@@ -309,6 +311,8 @@ export function createPanel({ state: layerState, services, parts, source }) {
           ariaLabel: t('Select {mission}', { mission: label }),
           provider: launch.provider || t('UNSPECIFIED OPERATOR'),
           date: launch.launchTime?.slice(0, 10) || t('DATE UNAVAILABLE'),
+          // In ms, or null: Inspect lists missions by launch time.
+          launchAt: Number.isFinite(launchAt) ? launchAt : null,
         };
       });
     return {
@@ -378,11 +382,12 @@ export function createPanel({ state: layerState, services, parts, source }) {
     if (republish) publishPanel();
   }
 
-  function selectMissionAt(index) {
+  function selectMissionAt(index, { keepFollow = false } = {}) {
     const launch = layerState._launches[index];
     if (!launch) return;
     parts.selection.setSelectedMission(launch.id, true);
-    parts.selection.focusMission(launch);
+    if (!keepFollow || !isFollowing(layerState._viewer))
+      parts.selection.focusMission(launch);
   }
 
   function clearMissionRosterPreviewState() {
@@ -420,7 +425,7 @@ export function createPanel({ state: layerState, services, parts, source }) {
         layerState._launches,
         launch.id,
       );
-      if (currentLaunch)
+      if (currentLaunch && !isFollowing(layerState._viewer))
         parts.policyHelpers.previewMissionFromRoster(currentLaunch);
     }, 140);
   }

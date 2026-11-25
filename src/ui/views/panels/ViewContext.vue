@@ -22,9 +22,10 @@ import EntityMark from './EntityMark.vue';
 import SunDial from './SunDial.vue';
 import UiSlider from '../../kit/UiSlider.js';
 import NearbyLists from './NearbyLists.vue';
+import NearbyMissions from './NearbyMissions.vue';
 import AltitudeGraph from './AltitudeGraph.vue';
 import SuggestedLayers from './SuggestedLayers.vue';
-import { CONTEXT_EXEMPT, MISSIONS_LAYER, inspectorHasLayers, inspectorLayerRows, presentLayerRow, shownApart } from '../../layerRowState.js';
+import { CONTEXT_EXEMPT, MISSIONS_LAYER, MISSIONS_LIST_LAYERS, inspectorHasLayers, inspectorLayerRows, presentLayerRow, shownApart } from '../../layerRowState.js';
 import { COUNT_TILE_LAYERS } from '../../layerCounts.js';
 import { useLayerCountsStore } from '../../stores/layerCounts.js';
 import { usePinnedStore } from '../../stores/pinned.js';
@@ -168,9 +169,6 @@ const FEED_WORDS = {
 // These scenes count the incident itself rather than the separate evidence
 // and place rows they contribute to Nearby.
 const INCIDENT_SCENES = new Set(['bhote-koshi-2026', 'bhote-koshi-locator']);
-// Space Missions keeps its own list (the roster), not the layer manager's:
-// while it is on, its one tile counts that list, and the Space Missions
-// layer's own row (rocket-launches) gets no second tile or Nearby group.
 const missions = useSpaceMissionsStore();
 const TILE_ICONS = {
   cctv: 'videocam',
@@ -206,6 +204,7 @@ const layerRows = computed(() =>
     };
   }),
 );
+const missionsFeed = computed(() => layerRows.value.find(({ id }) => id === MISSIONS_LAYER));
 // The layers that get a tile or block of their own.
 const liveLayers = computed(() => layerRows.value.filter((layer) => layer.id !== 'cctv' && !shownApart(layer.id, missions.enabled)));
 const layerById = computed(() => Object.fromEntries(liveLayers.value.map((layer) => [layer.id, layer])));
@@ -285,7 +284,7 @@ const lists = computed(() => {
     radiusKm: contextRadiusKm.value,
     limit: contextNeedle.value ? 12 : 3,
     query: contextNeedle.value,
-    excludeLayers: [...CONTEXT_EXEMPT, 'cctv', ...(missions.enabled ? [MISSIONS_LAYER] : []), ...nonItemIds.value],
+    excludeLayers: [...CONTEXT_EXEMPT, 'cctv', ...(missions.enabled ? MISSIONS_LIST_LAYERS : []), ...nonItemIds.value],
   });
 });
 // A count tile per layer: what it has within the radius, or, at globe view,
@@ -305,38 +304,18 @@ watch([onIds, () => store.managerVersion], ([ids, manager], [, previousManager])
     for (const id of cache.keys())
       if (!enabled.has(id)) cache.delete(id);
 });
-// The Space Missions tile counts the roster, worldwide at every zoom, with
-// the feed state of the layer's mission index: a failed index reads its
-// state, never "0 · Live".
-const missionTile = computed(() => {
-  if (!missions.enabled) return null;
-  const count = missions.roster?.entries?.length;
-  const feed = layerRows.value.find((layer) => layer.id === MISSIONS_LAYER);
-  const troubled = feed && !['nominal', 'loading'].includes(feed.tone);
-  return {
-    id: 'space-missions',
-    name: t('Space Missions'),
-    icon: 'rocket_launch',
-    tone: troubled ? feed.tone : Number.isFinite(count) ? 'nominal' : 'loading',
-    toneText: troubled ? feed.toneText : Number.isFinite(count) ? t('Live') : t('Loading'),
-    count: Number.isFinite(count) ? count : null,
-    statusText: troubled && !count ? feed.toneText : '',
-    worldwide: true,
-  };
-});
 const tiles = computed(() => {
   if (!store.inspector.shown) return [];
   if (globeView.value)
-    return [
-      ...liveLayers.value.map((layer) => {
+    return liveLayers.value
+      .map((layer) => {
         // Fields, overlays and incident scenes use their state here.
         if (INCIDENT_SCENES.has(layer.id) || layerKind(layer.id) !== 'items') return { ...layer, count: null, state: stateText(layer) };
         if (layer.total !== null) lastCounts.set(layer.id, layer.total);
         else if (layer.updatedAt === null) lastCounts.delete(layer.id);
         return { ...layer, count: lastCounts.get(layer.id) ?? null, bar: kindBar(layer.id) };
-      }),
-      ...(missionTile.value ? [missionTile.value] : []),
-    ].sort((a, b) => (b.count ?? -1) - (a.count ?? -1));
+      })
+      .sort((a, b) => (b.count ?? -1) - (a.count ?? -1));
   // Every layer with items gets a tile, also with none of them within the
   // radius (0, or why it holds none), so a layer that is on never goes
   // missing.
@@ -355,7 +334,7 @@ const tiles = computed(() => {
     }),
     // Still loading with nothing in: … rather than 0.
     count: list.count === 0 && layerById.value[list.layerId]?.total === null ? null : list.count,
-  })), ...quiet, ...(missionTile.value ? [missionTile.value] : [])];
+  })), ...quiet];
 });
 // A 0 from a layer that says why it holds nothing reads as that reason.
 const countText = (tile) => (tile.count === null ? '…' : tile.count === 0 && tile.statusText ? tile.statusText : formatNumber(tile.count));
@@ -550,7 +529,7 @@ const emptyFacts = computed(() => {
       ? t('{n} °C', { n: formatNumber(Math.round(now.temperatureC)) })
       : weatherFailed.value ? t('No weather reading here.') : '…',
     title: now ? t(look.value.label) : '',
-    weatherCredit: now?.source === 'open-meteo' && Number.isFinite(now.temperatureC),
+    openMeteo: now?.source === 'open-meteo' && Number.isFinite(now.temperatureC),
     age: Number.isFinite(now?.temperatureC) ? weatherAge.value : '',
     busy: !Number.isFinite(now?.temperatureC) && !weatherFailed.value,
   });
@@ -608,6 +587,9 @@ function openSuggested() {
     <!-- A layer whose list is Context's nothing-picked content (Radio's
          stations) comes right under the place. -->
     <slot name="lead" />
+    <!-- Space Missions on: its list, by launch time and at every zoom, is
+         the main content (missions are not near anything). -->
+    <NearbyMissions :feed="missionsFeed" />
 
     <!-- Nothing on: a few facts, and a pointer to Data Layers. Any layer on,
          Radio included, has its own content instead. -->
@@ -631,7 +613,7 @@ function openSuggested() {
           <span class="view-context__tile-name">{{ fact.label }}</span>
           <strong>{{ fact.value }}</strong>
           <small v-if="fact.age" class="view-context__tile-age">{{ fact.age }}</small>
-          <a v-if="fact.weatherCredit" class="view-context__weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener">{{ t('Weather data by Open-Meteo.com') }}</a>
+          <a v-if="fact.openMeteo" class="ui-chip view-context__weather-source" href="https://open-meteo.com/" target="_blank" rel="noopener" :aria-label="t('Weather data by Open-Meteo.com')" translate="no">Open-Meteo</a>
         </div>
       </div>
       <!-- The sun dial fills the globe view while no layer is on. -->
@@ -655,7 +637,7 @@ function openSuggested() {
           <div class="spot-conditions__weather-now">
             <strong>{{ weatherNow.temperature }}</strong>
             <span>{{ weatherNow.conditions }}<template v-if="weatherNow.stale"> · {{ weatherNow.stale }}</template></span>
-            <a v-if="weather?.source === 'open-meteo'" class="view-context__weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener">{{ t('Weather data by Open-Meteo.com') }}</a>
+            <a v-if="weather?.source === 'open-meteo'" class="ui-chip view-context__weather-source" href="https://open-meteo.com/" target="_blank" rel="noopener" :aria-label="t('Weather data by Open-Meteo.com')" translate="no">Open-Meteo</a>
           </div>
           <dl v-if="weatherNow.facts.length" class="spot-conditions__weather-facts">
             <div v-for="fact in weatherNow.facts" :key="fact.label">
@@ -682,7 +664,7 @@ function openSuggested() {
       <!-- Globe view: each layer once, its name, count and feed state, and
            what its count is made of. -->
       <div v-if="globeView" class="view-context__blocks" tabindex="-1">
-        <p v-if="contextNeedle && !globeTiles.length" class="view-context__empty" role="status">{{ tn(0, '{n} results', '{n} results', { n: formatNumber(0) }) }}</p>
+        <p v-if="contextNeedle && !globeTiles.length && !missions.enabled && !layerRows.some(layer => layer.id === 'cctv')" class="view-context__empty" role="status">{{ tn(0, '{n} results', '{n} results', { n: formatNumber(0) }) }}</p>
         <div v-for="tile in globeTiles" :key="tile.id" class="view-context__block" :data-layer="tile.id" tabindex="-1">
           <div class="view-context__block-head">
             <i class="view-context__dot" :class="`view-context__dot--${tile.tone}`" role="img" :aria-label="tile.toneText" :title="tile.toneText"></i>

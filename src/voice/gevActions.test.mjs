@@ -21,7 +21,7 @@ import {
 } from '../navigationPolicy.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
-import { CONTEXT_NEARBY_EVENT } from '../ui/contextEvents.js';
+import { CONTEXT_MISSIONS_EVENT, CONTEXT_NEARBY_EVENT } from '../ui/contextEvents.js';
 import {
   controlCctv,
   controlRadio as runControlRadio,
@@ -4968,9 +4968,27 @@ function spaceMissionsVoiceRig({
   return { calls, runner };
 }
 
+/** Count the requests for Context's Inspect view (Space Missions' list). */
+function countMissionsReveal() {
+  let count = 0;
+  const listener = () => (count += 1);
+  globalThis.document?.addEventListener?.(CONTEXT_MISSIONS_EVENT, listener);
+  return {
+    get count() {
+      return count;
+    },
+    stop: () =>
+      globalThis.document?.removeEventListener?.(
+        CONTEXT_MISSIONS_EVENT,
+        listener,
+      ),
+  };
+}
+
 test('set_context_mode space-missions switches the layer on and shows its list in Context', async () => {
   for (const mode of ['space-missions', 'missions', 'space mission']) {
     resetContextLists();
+    const nearby = countMissionsReveal();
     const { calls, runner } = spaceMissionsVoiceRig();
     const result = await runner('set_context_mode', { mode });
     assert.equal(result.ok, true, mode);
@@ -4992,8 +5010,10 @@ test('set_context_mode space-missions switches the layer on and shows its list i
     assert.deepEqual(calls.panels, [
       ['global-context-panel', false, { explicit: true }],
     ]);
-    assert.equal(contextListsActive.value, true, 'Context shows its list');
-    assert.equal(contextListChoice.value, 'space-missions');
+    // Its list is Inspect's: Context is asked for Inspect, not a list tab.
+    assert.equal(nearby.count, 1, mode);
+    assert.equal(contextListsActive.value, false);
+    nearby.stop();
   }
   resetContextLists();
 });
@@ -8409,7 +8429,8 @@ test('closing a retired list panel closes nothing, as for the other retired pane
 
 test('set_panel_open for the Space Missions panel turns the layer on if needed and shows its list in Context', async () => {
   // Off: voice turns Space Missions on (only that layer switches), then
-  // shows Context's Missions list and says it turned the layer on.
+  // shows Context's Missions list (Inspect) and says it turned the layer on.
+  const nearby = countMissionsReveal();
   const { calls, runner, state } = listPanelRig();
   const opened = await runner('set_panel_open', {
     panelId: 'space-missions-panel',
@@ -8426,8 +8447,8 @@ test('set_panel_open for the Space Missions panel turns the layer on if needed a
     ['global-context-panel', false, { explicit: true }],
     ['reveal', 'global-context-panel'],
   ]);
-  assert.equal(contextListsActive.value, true);
-  assert.equal(contextListChoice.value, 'space-missions');
+  assert.equal(nearby.count, 1, 'Inspect, where its list is');
+  assert.equal(contextListsActive.value, false);
 
   // Already on: nothing is switched, and the actual list shows.
   const again = listPanelRig({ missionsOn: true });
@@ -8441,10 +8462,7 @@ test('set_panel_open for the Space Missions panel turns the layer on if needed a
     ['global-context-panel', false, { explicit: true }],
     ['reveal', 'global-context-panel'],
   ]);
-  assert.equal(
-    shownList(listsOn(contextListPresence), contextListChoice.value),
-    'space-missions',
-  );
+  assert.equal(nearby.count, 2);
 
   // The Cockpit owns the screen: nothing switches or opens, and the reply
   // says the layer is still off without promising the list for later.
@@ -8461,6 +8479,8 @@ test('set_panel_open for the Space Missions panel turns the layer on if needed a
   assert.deepEqual(underCockpit.calls, []);
   assert.equal(underCockpit.state.missionsOn, undefined);
   assert.equal(contextListsActive.value, false);
+  assert.equal(nearby.count, 2, 'nothing asked under the Cockpit');
+  nearby.stop();
   resetContextLists();
 });
 
@@ -8523,6 +8543,7 @@ test('Missions aliases await activation before confirming or changing the visibl
         settle = resolve;
       });
       const { runner, calls } = listPanelRig({ starting: true, settlement });
+      const nearby = countMissionsReveal();
       setContextListPresence('weather', { count: 3 });
       contextListChoice.value = 'weather';
       contextListsActive.value = true;
@@ -8540,14 +8561,13 @@ test('Missions aliases await activation before confirming or changing the visibl
         shownList(listsOn(contextListPresence), contextListChoice.value),
         'weather',
       );
+      assert.equal(nearby.count, 0, 'nothing shown before it is on');
       settle(succeeded);
       const result = await pending;
       assert.equal(result.ok, succeeded, action);
-      assert.equal(contextListsActive.value, true);
-      assert.equal(
-        shownList(listsOn(contextListPresence), contextListChoice.value),
-        succeeded ? 'space-missions' : 'weather',
-      );
+      // Its list is Inspect's: Context is asked for it once it is on.
+      assert.equal(nearby.count, succeeded ? 1 : 0, action);
+      nearby.stop();
       if (!succeeded)
         assert.deepEqual(calls, [
           ['setEnabled', 'rocket-launches', true, 'voice'],

@@ -768,7 +768,20 @@
   margin-top: 0.6rem;
 }
 
-.view-context__weather-credit,
+.view-context__weather-source {
+  align-self: start;
+  justify-self: start;
+  color: var(--text-primary);
+  font-size: 0.65rem;
+  text-decoration: none;
+  text-transform: none;
+}
+
+.view-context__weather-source:hover,
+.view-context__weather-source:focus-visible {
+  text-decoration: underline;
+}
+
 .entity-card__weather-credit {
   color: inherit;
   font-size: 0.65rem;
@@ -1109,7 +1122,8 @@
   list-style: none;
 }
 
-.nearby-lists button {
+/* A card shown in a list card's place keeps its own action buttons. */
+.nearby-lists button:where(:not(.entity-card__action)) {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -1128,8 +1142,8 @@
   cursor: pointer;
 }
 
-.nearby-lists button:hover,
-.nearby-lists button:focus-visible {
+.nearby-lists button:where(:not(.entity-card__action)):hover,
+.nearby-lists button:where(:not(.entity-card__action)):focus-visible {
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -1149,6 +1163,7 @@
 }
 
 .nearby-lists__badge {
+  --status-badge-background: transparent;
   flex: none;
   padding: 0.05rem 0.3rem;
   color: #36dcff;

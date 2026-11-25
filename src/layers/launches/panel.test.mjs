@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPanel } from './panel.js';
+import { bindRenderer } from '../../render/rendererOf.js';
 import { createState } from './state.js';
 
 function fixture() {
@@ -76,8 +77,15 @@ test('the panel publishes only once the layer starts presenting', () => {
       ariaLabel: 'Select MISSION A',
       provider: 'SpaceX',
       date: '2026-11-01',
+      launchAt: Date.parse('2026-11-01T10:00:00Z'),
     },
   ]);
+  // A launch without a time has no launchAt, and lists last in Inspect.
+  state._launches = [launch('b', { launchTime: null })];
+  panel.renderMissionRoster();
+  const [undated] = views.at(-1).roster.entries;
+  assert.equal(undated.launchAt, null);
+  assert.equal(undated.date, 'DATE UNAVAILABLE');
   const late = [];
   panel.subscribePanel((view) => late.push(view));
   assert.equal(late[0], views.at(-1));
@@ -107,6 +115,26 @@ test('an unchanged roster keeps its view and the preview; a changed one drops it
   panel.commands.rosterFocus(0);
   assert.equal(state._hoveredRosterLaunchId, 'b');
   panel.clearMissionPanel();
+});
+
+test('a followed camera stays put while browsing the roster, and layer selection still focuses', async (t) => {
+  const { state, panel, calls } = fixture();
+  state._viewer = {};
+  state._launches = [launch('a')];
+  t.after(
+    bindRenderer(state._viewer, { camera: { followed: { key: 'flights:a' } } }),
+  );
+  panel.createMissionPanel();
+  panel.renderMissionRoster();
+
+  panel.commands.rosterFocus(0);
+  assert.equal(state._hoveredRosterLaunchId, 'a');
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  assert.deepEqual(calls, [['overlays']]);
+  panel.commands.selectMissionAt(0, { keepFollow: true });
+  assert.deepEqual(calls.at(-1), ['select', 'a', true]);
+  panel.commands.selectMissionAt(0);
+  assert.deepEqual(calls.at(-1), ['focus-mission', 'a']);
 });
 
 test('the selected mission is presented with its rows and returns to the top', () => {

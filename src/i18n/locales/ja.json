@@ -919,7 +919,6 @@
   "NADIR": "直下に戻す",
   "Selected Space Mission": "選択中の宇宙ミッション",
   "Show all missions": "すべてのミッションを表示",
-  "Deselect mission": "ミッションの選択を解除",
   "PAYLOAD": "ペイロード",
   "NAME": "名称",
   "TYPE": "種別",
@@ -2783,13 +2782,10 @@
   "Search any location...": "場所を検索…",
   "CONTEXT": "コンテキスト",
   "SPACE MISSIONS": "宇宙ミッション",
-  "Available Space Missions": "利用可能な宇宙ミッション",
-  "AVAILABLE MISSIONS": "利用可能なミッション",
   "SELECT A MISSION TO INSPECT": "ミッションを選択して詳細を表示",
   "LOADING 30-DAY MISSION INDEX": "30日間のミッション一覧を読込中",
   "Space Missions unavailable: the mission index could not load. Try again later.": "宇宙ミッションを利用できません：ミッション一覧を読み込めませんでした。後でもう一度お試しください。",
   "30-DAY MISSION INDEX UNAVAILABLE": "30日間のミッション一覧を取得できません",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "Tabでプレビュー · Enter / Spaceで選択",
   "Filter stations by station tag": "局タグで局を絞り込み",
   "All": "すべて",
   "DRAG TO TUNE": "ドラッグで選局",
@@ -4504,5 +4500,7 @@
   "{name} per page, showing {range}": "1ページの{name}、表示中 {range}",
   "Tuner and volume": "チューナーと音量",
   "Open Context to view street-level imagery": "ストリートレベル画像を見るにはコンテキストを開いてください",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "オンのレイヤーのラベル：密度でラベルを付ける数を決めます。各レイヤー固有のオプションはデータレイヤーのその行にあります"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "オンのレイヤーのラベル：密度でラベルを付ける数を決めます。各レイヤー固有のオプションはデータレイヤーのその行にあります",
+  "Upcoming": "予定",
+  "Nothing matches “{text}”.": "「{text}」に一致するものはありません。"
 }

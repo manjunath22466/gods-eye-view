@@ -1,3 +1,4 @@
+import { isFollowing } from '../../data/followed.js';
 import {
   MAX_POST_TLE_RETRIES,
   POST_TLE_RETRY_DELAY_MS,
@@ -131,30 +132,28 @@ export function createIngestion({
         !manager.isEffectivelyEnabled('rocket-launches'))
     )
       return;
-    // A saved state kept by a restore that could not finish (Satellites was
-    // busy) is still the one from before the mission: keep it, and switch
-    // Satellites on for the mission again. A Satellites switch the person
-    // made since (restoreVisibility false) settled its visibility, so it
-    // is taken as it is now; its params are still the saved ones.
+    // A busy restore may still own its temporary display change. Keep the
+    // saved choices, but take a settled explicit switch as the new visibility.
     const kept = layerState._satelliteStateBeforeMission;
-    if (kept?.restoreVisibility === false)
+    if (!kept || kept.restoreVisibility === false) {
+      const enabled = manager.isEnabled('satellites');
+      const { showPoints, showOrbits } =
+        parts.policyHelpers.satelliteParamsAfterSpaceMissions(
+          kept?.display ?? manager.getLayerParams('satellites'),
+        );
       layerState._satelliteStateBeforeMission = {
-        enabled: manager.isEnabled('satellites'),
-        params: kept.params,
+        enabled,
+        display: enabled ? null : { showPoints, showOrbits },
       };
-    else if (!kept)
-      layerState._satelliteStateBeforeMission = {
-        enabled: manager.isEnabled('satellites'),
-        params: parts.policyHelpers.satelliteParamsAfterSpaceMissions(
-          manager.getLayerParams('satellites'),
-        ),
-      };
-    manager.setLayerParams(
-      'satellites',
-      parts.policyHelpers.satelliteParamsForSpaceMissions(
-        layerState._satelliteStateBeforeMission.params,
-      ),
-    );
+      if (enabled && kept?.display)
+        manager.setLayerParams('satellites', kept.display);
+    }
+    if (layerState._satelliteStateBeforeMission.display) {
+      const { showPoints, showOrbits } =
+        parts.policyHelpers.satelliteParamsForSpaceMissions();
+      manager.setLayerParams('satellites', { showPoints, showOrbits });
+    }
+    if (manager.isEnabled('satellites')) return;
     const activation = Promise.resolve(manager.setEnabled('satellites', true));
     layerState._satelliteActivationPromise = activation;
     try {
@@ -205,11 +204,13 @@ export function createIngestion({
       );
     layerState._satelliteStateBeforeMission = null;
     layerState._satelliteActivationPromise = null;
-    manager.setLayerParams(
-      'satellites',
-      parts.policyHelpers.satelliteParamsAfterSpaceMissions(snapshot.params),
-    );
-    if (!restoreVisibility) return;
+    if (snapshot.display)
+      manager.setLayerParams('satellites', snapshot.display);
+    if (
+      !restoreVisibility ||
+      (snapshot.enabled && manager.isEnabled('satellites'))
+    )
+      return;
     const restored = await manager.setEnabled('satellites', snapshot.enabled);
     if (
       restored === false ||
@@ -268,9 +269,13 @@ export function createIngestion({
         parts.selection.setSelectedMission(null, false);
       } else {
         parts.selection.setSelectedMission(layerState._selectedLaunchId, true);
-        // The cockpit holds the camera: a mission picked there is not flown
-        // to when its orbit arrives.
-        if (layerState._focusAfterActiveLookup && !cockpitActive()) {
+        // The camera can pick up a follow or enter Cockpit while the orbit
+        // is loading. Refresh the mission while leaving that view in place.
+        if (
+          layerState._focusAfterActiveLookup &&
+          !cockpitActive() &&
+          !isFollowing(layerState._viewer)
+        ) {
           parts.selection.focusMission(
             launches.find(
               (launch) => launch.id === layerState._selectedLaunchId,

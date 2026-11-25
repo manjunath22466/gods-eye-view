@@ -72,7 +72,7 @@ import { useLiveStore } from './stores/live.js';
 import { useStationStore } from './stores/station.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
 import { SpaceMissionsControls } from './spaceMissionsControls.js';
-import { showContextList } from './contextLists.js';
+import { CONTEXT_MISSIONS_EVENT } from './contextEvents.js';
 import { useMissionReplayStore } from './stores/missionReplay.js';
 import { useStreetLevelPhotoStore } from './stores/streetLevelPhoto.js';
 import { useDockedStore } from './stores/docked.js';
@@ -1125,14 +1125,16 @@ export class StyleManager extends ShellFacade {
       store: useSpaceMissionsStore(applicationPinia()),
       actions: {
         isCockpitActive: () => Boolean(this.cockpitView?.active),
-        // Its list is a tab in Context: open Context on it, and on a phone
-        // the Context sheet.
-        showMissions: () => {
-          showContextList('space-missions');
+        // Open Context (on a phone, its sheet) and show the Missions list
+        // or globe pick in Inspect. Context keeps an existing follow.
+        showMissions: (detail) => {
           this.setPanelCollapsed('global-context-panel', false, {
             explicit: true,
           });
           this.revealPanel('global-context-panel');
+          globalThis.document?.dispatchEvent?.(
+            new CustomEvent(CONTEXT_MISSIONS_EVENT, { detail }),
+          );
         },
       },
     });

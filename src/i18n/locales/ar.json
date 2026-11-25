@@ -460,8 +460,6 @@
   "Enable cockpit weather effects": "تفعيل مؤثرات الطقس في القمرة",
   "CONTEXT": "السياق",
   "Reclassify as TR-3B": "إعادة التصنيف إلى TR-3B",
-  "Available Space Missions": "المهام الفضائية المتاحة",
-  "AVAILABLE MISSIONS": "المهام المتاحة",
   "SELECT A MISSION TO INSPECT": "اختر مهمة لفحصها",
   "LOADING 30-DAY MISSION INDEX": "جارٍ تحميل فهرس مهام 30 يومًا",
   "Space Missions unavailable: the mission index could not load. Try again later.": "المهام الفضائية غير متاحة: تعذّر تحميل فهرس المهام. أعد المحاولة لاحقًا.",
@@ -882,7 +880,6 @@
   "LAUNCH SITE": "موقع الإطلاق",
   "LAUNCH SITE · {site}": "موقع الإطلاق · {site}",
   "Show all missions": "عرض كل المهام",
-  "Deselect mission": "إلغاء تحديد المهمة",
   "PAYLOAD": "الحمولة",
   "NAME": "الاسم",
   "TYPE": "النوع",
@@ -1060,7 +1057,6 @@
   "SNOW SHOWERS": "زخات ثلج",
   "THUNDERSTORM": "عاصفة رعدية",
   "MIXED CONDITIONS": "أحوال متباينة",
-  "TAB PREVIEWS · ENTER / SPACE SELECTS": "TAB للمعاينة · ENTER / SPACE للاختيار",
   "awaiting usable AIS positions…": "بانتظار مواضع AIS صالحة…",
   "awaiting first AIS message…": "بانتظار أول رسالة AIS…",
   "EST. DOWNRANGE": "تقدير على امتداد المسار",
@@ -5049,5 +5045,7 @@
   "{name} per page, showing {range}": "{name} في الصفحة، المعروض {range}",
   "Tuner and volume": "الموالف ومستوى الصوت",
   "Open Context to view street-level imagery": "افتح السياق لعرض صور مستوى الشارع",
-  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "تسميات الطبقات المفعّلة: تحدد الكثافة عدد ما يُسمّى منها. خيارات كل طبقة في صفّها ضمن طبقات البيانات"
+  "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "تسميات الطبقات المفعّلة: تحدد الكثافة عدد ما يُسمّى منها. خيارات كل طبقة في صفّها ضمن طبقات البيانات",
+  "Upcoming": "قادمة",
+  "Nothing matches “{text}”.": "لا شيء يطابق “{text}”."
 }

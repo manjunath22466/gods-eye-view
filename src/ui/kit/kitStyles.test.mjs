@@ -218,7 +218,6 @@ test('the kit’s skins load before the feature stylesheets that restyle them', 
   for (const [kit, feature] of [
     ['.ui-chip,', '.gev-voice-card-chip {'],
     ['.ui-empty,', '.scene-shot-empty {'],
-    ['.ui-empty,', '#space-mission-panel-host .space-mission-roster-empty {'],
     ['.ui-button--icon,', '#command-dock .panel-collapse-btn'],
     ['.ui-close-button,', '.data-toggle-chip {'],
     ['.ui-close-button,', '.geo-import-action {'],

@@ -10,7 +10,12 @@ import {
 } from './streetLevelEvents.js';
 import { onScreen } from '../data/locate.js';
 import { clickCard } from '../data/pickRegistry.js';
-import { followedOf, isFollowing, onFollowChanged } from '../data/followed.js';
+import {
+  followedOf,
+  isFollowing,
+  onFollowChanged,
+  stopFollowing,
+} from '../data/followed.js';
 import { fromDegreesInto } from '../geo/ellipsoid.js';
 import { inputFor } from '../input/dispatcher.js';
 import {
@@ -217,7 +222,8 @@ export function installEntityContext({
     // layers' selections stay as they are.
     const layer = getDataManager()?.layers?.get?.(card.layerId);
     try {
-      layer?.module?.stopTracking?.({ origin: 'user' });
+      if (card.layerId === 'rail') stopFollowing(viewer);
+      else layer?.module?.stopTracking?.({ origin: 'user' });
     } catch {
       // A layer going away meanwhile has nothing left to let go of.
     }
