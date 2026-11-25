@@ -64,7 +64,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // visual style; set_cyber_sonar is excluded above).
     // The Space Missions panel adds one panel target.
     // Fire Perimeters queries add lastGrowthTime.
-    '2be49b7634a7b74b756a68cf80835ee36411e087edb549eb39f1ce7310afe60f',
+    '4e42bd450e6ac7462c06dbe0684f848d0a7867a6fe9b7e9d7f4b86874afc0e90',
   );
 });
 
@@ -198,6 +198,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'provider-settings',
         'utilities-panel',
         'space-missions-panel',
+        'street-level-panel',
       ].includes(id),
   );
   for (const tool of legacy) {

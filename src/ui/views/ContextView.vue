@@ -1,5 +1,11 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue';
+import { useStreetLevelStore } from '../stores/streetLevel.js';
+import { placeStreetLevelViewer, registerStreetLevelViewerHome } from '../streetLevelViewerPlacement.js';
+import StreetLevelPhotoViewer from './panels/StreetLevelPhotoViewer.vue';
+import { isContextRailModeCovered } from '../mobileSheets.js';
+import { STREET_LEVEL_LAYER } from '../streetLevelEvents.js';
+import StreetLevelViewer from './panels/StreetLevelViewer.vue';
 import { storeToRefs } from 'pinia';
 import { t } from '../../i18n/index.js';
 import RailPanel from '../rail/RailPanel.vue';
@@ -9,7 +15,7 @@ import { useBhoteKoshiPanelStore } from '../stores/bhoteKoshiPanel.js';
 import { useContextStore } from '../stores/context.js';
 import { useDisplayStore } from '../stores/display.js';
 import { usePanelChromeStore } from '../stores/panelChrome.js';
-import { useEntityCardStore } from '../stores/entityCard.js';
+import { sayWords, useEntityCardStore } from '../stores/entityCard.js';
 import { useSceneStore } from '../stores/scenes.js';
 import AwarenessPanel from './panels/AwarenessPanel.vue';
 import BhoteKoshiPanel from './panels/BhoteKoshiPanel.vue';
@@ -37,7 +43,7 @@ const entry = computed(() =>
   cockpitEntryFace(cockpit.value?.entryKind, cockpit.value?.entryFace),
 );
 // While the Bhote Koshi event is on, its panel is the rail's only content.
-const { panel: bhotePanel } = storeToRefs(useBhoteKoshiPanelStore());
+const { visiblePanel: bhotePanel } = storeToRefs(useBhoteKoshiPanelStore());
 // The Scene runtime chip SceneControls presents while a scene plays.
 const { panel: scenePanel } = storeToRefs(useSceneStore());
 const sceneRuntime = computed(() => scenePanel.value?.runtime ?? '');
@@ -56,12 +62,20 @@ const contactsMatchCard = computed(() => {
       String(subject.id) === String(card.identity.id),
   );
 });
+let mirroringContact = false;
 watch(
   [() => contactsSubject.value?.layerId, () => contactsSubject.value?.id],
   ([layerId, id]) => {
     if (!['flights', 'military'].includes(layerId) || !id || contactsMatchCard.value) return;
-    // Contacts has already picked whom to follow. Only update the Inspector.
-    entityCards.select({ layerId, id, label: awareness.value?.subjectLabel }, { follow: false });
+    // Contacts already owns tracking. Only a deliberate choice reveals the
+    // Inspector and withdraws the unrelated photo.
+    const selectedByUser = awareness.value?.subjectOrigin === 'user';
+    mirroringContact = !selectedByUser;
+    try {
+      entityCards.select({ layerId, id, label: awareness.value?.subjectLabel }, { follow: false, reveal: selectedByUser });
+    } finally {
+      mirroringContact = false;
+    }
   },
 );
 
@@ -87,11 +101,11 @@ onMounted(() => {
   if (body && globalThis.MutationObserver) {
     // Keep rail visibility current and undock when phone layout or Cockpit starts.
     bodyWatch = new MutationObserver(() => {
-      railCovered.value = isRailCovered();
+      railCovered.value = isContextRailModeCovered();
       if (docked.value && (body.classList.contains('mobile-shell') || body.classList.contains('cockpit-mode'))) setDocked(false);
     });
-    bodyWatch.observe(body, { attributeFilter: ['class', 'data-assistant-docked'] });
-    railCovered.value = isRailCovered();
+    bodyWatch.observe(body, { attributeFilter: ['class'] });
+    railCovered.value = isContextRailModeCovered();
   }
   globalThis.document?.addEventListener('visibilitychange', updatePageVisibility);
   updatePageVisibility();
@@ -116,9 +130,10 @@ watch(availableTabs, (tabs) => {
     globalThis.document?.body.classList.toggle(`ctx-tab-${tab.id}`, tabs.some((x) => x.id === tab.id));
   if (activeTab.value === 'props' && !tabs.length) activeTab.value = 'view';
 });
-// Picking something shows its card.
-watch(entityCard, (next, prev) => {
-  if (next && next?.key !== prev?.key) activeTab.value = 'view';
+// Picking something shows its card. A street-level photo's card moving on
+// to the next image is the same card: its tab stays.
+watch([() => entityCard.value?.key, () => entityCards.selectionGeneration()], ([key, generation], [previous, priorGeneration]) => {
+  if (key && key !== previous && generation !== priorGeneration) activeTab.value = 'view';
 });
 // The two tabs swap with the arrow keys, and focus follows (tabs pattern).
 function switchTab() {
@@ -151,7 +166,7 @@ function toggleSearch() {
   void nextTick(() => searchInput.value?.focus());
 }
 const searchHint = computed(() =>
-  entityCard.value ? t('Search {name} and nearby', { name: entityCard.value.title }) : t('Search what is in view'),
+  entityCard.value ? t('Search {name} and nearby', { name: sayWords(entityCard.value.titleWords, entityCard.value.title) }) : t('Search what is in view'),
 );
 
 // Expanded, Context becomes a full-height column over the right edge of the
@@ -165,25 +180,14 @@ function setDocked(next) {
   const body = globalThis.document?.body;
   body?.classList.toggle('context-docked', next);
 }
-// These modes hide the rail or its Context panel without changing disclosure.
-function isRailCovered() {
-  const body = globalThis.document?.body;
-  return Boolean(
-    body?.classList.contains('ui-clean-view') ||
-    body?.classList.contains('recording-mode') ||
-    body?.classList.contains('stories-mode') ||
-    body?.classList.contains('ui-embed') ||
-    body?.dataset.assistantDocked === 'true',
-  );
-}
-const railCovered = ref(isRailCovered());
+const railCovered = ref(isContextRailModeCovered());
 const pageVisible = ref(globalThis.document?.visibilityState !== 'hidden');
 function updatePageVisibility() {
   pageVisible.value = globalThis.document?.visibilityState !== 'hidden';
 }
 // A reply can arrive before the observer or visibility event updates Vue.
 const readInspectorVisibility = () =>
-  !isRailCovered() && globalThis.document?.visibilityState !== 'hidden';
+  !isContextRailModeCovered() && !bhotePanel.value && globalThis.document?.visibilityState !== 'hidden';
 // Only an open panel reads what is picked and in view; closed, it does no work.
 const contextOpen = computed(() => chromePanels.value['global-context-panel']?.collapsed === false);
 const inspectorMount = ref(null);
@@ -205,16 +209,21 @@ const inspectorTab = ref(null);
 let keyboardOrigin = null;
 // Keep keyboard focus with the selected card, then return it to the originating row.
 async function focusKeyboardSelection(rowKey) {
-  const cardKey = entityCard.value?.key;
+  const generation = entityCards.selectionGeneration();
   await nextTick();
+  const cardKey = entityCard.value?.key;
   const close = inspectorTab.value?.querySelector('.entity-card__close');
-  if (!cardKey || entityCard.value?.key !== cardKey || !close) return;
-  keyboardOrigin = { rowKey, cardKey };
+  if (!cardKey || entityCards.selectionGeneration() !== generation || !close) return;
+  keyboardOrigin = { rowKey, cardKey, generation };
   close.focus();
 }
 watch(() => entityCard.value?.key, async (key, previous) => {
   const origin = keyboardOrigin;
   if (!origin || key === origin.cardKey) return;
+  if (key && origin.generation === entityCards.selectionGeneration()) {
+    origin.cardKey = key;
+    return;
+  }
   keyboardOrigin = null;
   if (key || previous !== origin.cardKey || !inspectorTab.value?.contains(document.activeElement)) return;
   await nextTick();
@@ -235,6 +244,31 @@ watch(
     if (collapsed && docked.value) setDocked(false);
   },
 );
+// Re-evaluate the viewer slot after Context changes surfaces.
+const streetLevel = useStreetLevelStore();
+watch([() => entityCard.value?.key, activeTab, contextOpen, () => streetLevel.expanded, () => streetLevel.view?.viewer?.openingPaidPhoto], () => {
+  // The Inspector's v-show directive can update after the post-flush watcher.
+  void nextTick(placeStreetLevelViewer);
+}, { flush: 'post' });
+// Picking a different item (not another photo's card) closes the photo,
+// whether it shows on a card, waits in its home with no card, or is still
+// loading, so a late load cannot open after the pick. It runs inside the
+// pick, before anything else reacts to it.
+const pickClosesPhoto = (card) => card != null && card.layerId !== STREET_LEVEL_LAYER;
+watch(
+  () => entityCard.value?.key,
+  () => {
+    if (!mirroringContact && pickClosesPhoto(entityCard.value)) streetLevel.act('withdrawPhoto');
+  },
+  { flush: 'sync' },
+);
+// The photo card's × closes the photo. Another photo's card, a click on open
+// ground or map Escape cancels only a photo still loading for that card; a
+// photo already showing goes back to its offscreen home and stays open.
+watch(entityCard, (next, previous) => {
+  if (previous?.layerId !== STREET_LEVEL_LAYER || next?.key === previous.key || pickClosesPhoto(next)) return;
+  streetLevel.act('closePhoto', previous.identity?.id, { pendingOnly: !entityCards.wasDismissed(previous.key) });
+});
 </script>
 
 <template>
@@ -309,6 +343,7 @@ watch(
           <AwarenessPanel v-if="!contactsMatchCard" />
         </section>
         <div v-if="contextOpen" v-show="activeTab === 'view'" id="context-tab-view" ref="inspectorTab" role="tabpanel" aria-labelledby="context-tab-btn-view" :class="{ 'context-searching': contextSearchOpen && contextSearchText.trim() }">
+          <div v-if="streetLevel.view?.viewer?.openingPaidPhoto" id="sl-viewer-loading-slot" class="sl-hero__slot"></div>
           <EntityCard :with-contacts="contactsMatchCard" />
           <AwarenessPanel v-if="contactsMatchCard" compact />
           <ViewContext v-if="viewContextPresent" @vue:mounted="inspectorMount = Symbol()" @vue:before-unmount="inspectorMount = null" @keyboard-selection="focusKeyboardSelection" />
@@ -319,5 +354,9 @@ watch(
     <BhoteKoshiPanel />
   </aside>
 
+  <div :ref="registerStreetLevelViewerHome" class="sl-viewer-home" aria-hidden="true" inert>
+    <StreetLevelViewer />
+    <StreetLevelPhotoViewer />
+  </div>
   <div id="scene-runtime" :class="{ active: !!sceneRuntime }">{{ sceneRuntime }}</div>
 </template>

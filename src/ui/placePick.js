@@ -201,6 +201,7 @@ export function installPlacePick({
     // A pick made while the place was looked up (an aircraft clicked, say)
     // is newer than this one: the place card does not replace it.
     const selectionAtPick = store.selectionGeneration();
+    const ownsPick = store.claimDeferredPick();
     const found = await placeForSearch(
       {
         query: detail.airport || detail.query || label,
@@ -212,7 +213,7 @@ export function installPlacePick({
       },
       { dataManager: getDataManager?.() },
     ).catch(() => null);
-    if (stopped || mine !== generation || !found) return;
+    if (stopped || mine !== generation || !ownsPick() || !found) return;
     // The caller may also have started another action while this resolved.
     if (detail.isCurrent?.() === false) return;
     if (store.selectionGeneration() !== selectionAtPick) return;

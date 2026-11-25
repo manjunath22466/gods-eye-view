@@ -320,7 +320,7 @@ const distance = (n) => {
           <UiButton @click="store.open(alert.identity)">
             <UiIcon :name="alert.icon" :size="null" />
             <span class="spot-conditions__row-main">
-              <span class="spot-conditions__row-title">{{ alert.title }}</span>
+              <span class="spot-conditions__row-title">{{ sayWords(alert.titleWords, alert.title) }}</span>
               <span class="spot-conditions__row-detail">{{ sayWords(alert.words, alert.text) }}</span>
             </span>
             <span class="spot-conditions__row-meta">{{ distance(alert.distanceKm) }}</span>

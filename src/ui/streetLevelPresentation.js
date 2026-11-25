@@ -1,3 +1,4 @@
+import { streetPhotoAttribution } from './streetPhotoCredit.js';
 import {
   formatNumber,
   isolate,
@@ -8,8 +9,6 @@ import {
 } from '../i18n/index.js';
 import { keyGuidanceText, keyRequirementText } from './keyGuidance.js';
 import { roundHeadingDegrees } from '../data/headingDegrees.js';
-
-// Street Level UI state to panel strings and flags. Pure, so it is testable.
 
 const DAY_MS = 86_400_000;
 
@@ -82,27 +81,6 @@ function keyGuidance(state) {
     [...new Set(needs)].join('; '),
     state.keyAlternatives || [],
   );
-}
-
-function presentStatus(state) {
-  const pressed = state.enabled === true;
-  const title = pressed
-    ? t('Turn Street Level off')
-    : t('Turn Street Level on');
-  if (state.keyRejected)
-    return { text: t('KEY REJECTED'), tone: 'warn', pressed, title };
-  if (state.keyRequired)
-    return {
-      text: t('KEY REQUIRED'),
-      tone: 'warn',
-      pressed,
-      title: keyGuidance(state) || title,
-    };
-  if (state.coverage.loading)
-    return { text: t('LOADING'), tone: 'busy', pressed, title };
-  return pressed
-    ? { text: t('ON'), tone: 'on', pressed, title }
-    : { text: t('OFF'), tone: '', pressed, title };
 }
 
 // Provider refusals with a number stay English data (kartaview and panoramax
@@ -178,23 +156,27 @@ function presentViewer(state) {
   if (street.isPano) right.push('360°');
   if (Number.isFinite(street.bearing))
     right.push(`${roundHeadingDegrees(street.bearing)}°`);
-  if (street.capturedAt)
-    right.push(formatDate(street.capturedAt, street.capturedAtPrecision));
+  // The photo card has its own date. Expanded and embedded viewers use this one.
+  const date = street.capturedAt
+    ? formatDate(street.capturedAt, street.capturedAtPrecision)
+    : '';
   const left = [];
   // A provider address mixes Latin and the page language ("602 Congress Ave,
   // أوستن"); each part is isolated so a house number stays with its street
   // in right-to-left text. A no-op in left-to-right languages.
   if (street.title) left.push(street.title.split(', ').map(isolate).join(', '));
-  if (street.creator)
-    left.push(t('Image by {creator}', { creator: street.creator }));
-  if (street.license) left.push(street.license);
+  left.push(...streetPhotoAttribution(street));
+  const photo = state.acceptedPhoto ?? null;
   return {
     open: street.open === true,
-    loading: street.loading === true && !street.imageId,
+    photo,
+    loading: street.loading === true && !photo,
+    openingPaidPhoto: street.opening === true && state.billedPhoto === true,
     renderMode: street.renderMode === 'fill' ? 'fill' : 'letterbox',
     renderModes: street.renderModes !== false,
     captionLeft: left.join(' · '),
     captionRight: right.join(' · '),
+    captionDate: date,
     link: street.externalUrl || null,
     linkLabel: street.providerLabel
       ? `${translateKnown(street.providerLabel)} ↗`
@@ -311,15 +293,13 @@ function coverageCountLine(coverage) {
 }
 
 /** @param {{now?: number}} [options] Clock for the SINCE readout. */
-export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
+export function presentStreetLevel(state, { now = Date.now() } = {}) {
   const keyRequired = state.keyRequired === true;
   const filter = state.filter || { pano: 'all', sinceDays: 0 };
   // A missing key says how to add it; a rejected key's own error names the fix.
   const keyMissing = keyRequired && state.keyRejected !== true;
   return {
     enabled: state.enabled === true,
-    keyRequired,
-    status: presentStatus(state),
     controlsDisabled: keyRequired || (state.providers || []).length === 0,
     providers: presentProviders(state),
     error: keyMissing
@@ -330,7 +310,7 @@ export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
             state.coverage.error ||
             '',
         ) || null,
-    filter: { pano: filter.pano, sinceDays: Number(filter.sinceDays) || 0 },
+    filter: { pano: filter.pano },
     filterControls: {
       pano: state.filterControls?.pano !== false,
       since: state.filterControls?.since !== false,

@@ -1535,6 +1535,62 @@
   margin: 0;
 }
 
+/* The accepted photo uses the viewer; other states can show its still. */
+.sl-hero__slot .sl-viewer-wrap {
+  border-radius: 10px;
+}
+
+.sl-hero__still {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: #05080b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.sl-hero__still img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sl-hero__glyph {
+  color: rgba(199, 214, 222, 0.45);
+  font-size: 2.2rem;
+}
+
+/* While the card's photo loads, or why it could not open, with Retry. */
+.sl-hero__state {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 1.6rem 0 0;
+  padding: 0 12px;
+  color: rgba(232, 251, 255, 0.85);
+  font-size: 0.62rem;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.sl-hero__foot {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .entity-hero__placeholder {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -2187,6 +2243,7 @@
   [data-hero='model'],
   [data-hero='satellite'],
   [data-hero='photo'],
+  [data-hero='place-street'],
   [data-hero='map']
 ) {
   height: 168px;
@@ -2412,7 +2469,8 @@
   bottom: 38px;
 }
 
-.map-credit {
+.map-credit,
+.sl-hero__credit {
   display: block;
   align-self: stretch;
   box-sizing: border-box;
@@ -3249,6 +3307,14 @@
 .place-details__estimate {
   text-decoration: none;
   cursor: help;
+}
+
+.entity-hero__place-street {
+  padding: 0;
+  font: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
 /* Esc moves focus to the panel body so the next Esc reaches it; no ring. */

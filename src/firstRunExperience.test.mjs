@@ -1083,11 +1083,17 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   delete camera.pitchDeg;
   camera.direction.description =
     'Required for pan/tilt/rotate; orbit/rotate_globe default right.';
-  // The Space Missions panel is a later, separate set_panel_open target.
-  const panels = legacyTools.find((tool) => tool.name === 'set_panel_open')
-    .parameters.properties.panelId;
-  assert.ok(panels.enum.includes('space-missions-panel'));
-  panels.enum = panels.enum.filter((id) => id !== 'space-missions-panel');
+  // Restore the legacy panel list and wording before checking the mission pin.
+  const panel = legacyTools.find((tool) => tool.name === 'set_panel_open');
+  const panels = panel.parameters.properties.panelId;
+  for (const id of ['space-missions-panel', 'street-level-panel'])
+    assert.ok(panels.enum.includes(id));
+  panels.enum = panels.enum.filter(
+    (id) => id !== 'space-missions-panel' && id !== 'street-level-panel',
+  );
+  const streetLevel = 'Street Level/Street View panel=street-level-panel; ';
+  assert.ok(panel.description.startsWith(streetLevel));
+  panel.description = panel.description.slice(streetLevel.length);
   const block = JSON.stringify(legacyTools);
   // Re-derived for the voice layer manifest (generated layer enums, alias and
   // field hints), point-and-ask's pointer/referent arguments and the prompt

@@ -42,8 +42,8 @@ test('the entity card hand-writes no button; each is a UiButton', () => {
   assert.equal(card.match(/<UiButton\b/g)?.length, 5);
   assert.equal(card.match(/<UiCloseButton\b/g)?.length, 1);
   // Photos, Route, 3D, Cockpit view, Map, Play/Pause, a satellite's
-  // Play/Pause and TR-3B.
-  assert.equal(preview.match(/<UiButton\b/g)?.length, 8);
+  // Play/Pause, a place's Street View photo and TR-3B.
+  assert.equal(preview.match(/<UiButton\b/g)?.length, 9);
   // A camera's bigger view and More info; its popup closes with a
   // UiCloseButton.
   assert.equal(camera.match(/<UiButton\b/g)?.length, 2);

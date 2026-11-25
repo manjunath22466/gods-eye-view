@@ -562,6 +562,7 @@ export class LayerPanel {
           : `${item.label} ${formatCount(item.count)}`,
     }));
     const infoText = controls?.info ? String(controls.info) : '';
+    const alert = controls?.alert;
     const segmented = controls?.segmented || null;
     const slider = controls?.slider || null;
     const range = controls?.range || null;
@@ -572,6 +573,7 @@ export class LayerPanel {
         chips.length === 0 &&
         legend.length === 0 &&
         !infoText &&
+        !alert &&
         !segmented &&
         !slider &&
         !range,
@@ -580,6 +582,7 @@ export class LayerPanel {
       slider,
       range,
       legend,
+      alert,
       info: row.info
         ? { text: infoText, title: controls?.infoTitle || '' }
         : null,
@@ -630,7 +633,7 @@ export class LayerPanel {
   }
 
   // A row slider (e.g. the Active Fires minimum-FRP filter) maps its position
-  // to params through the live descriptor on every tick.
+  // to params through the current descriptor.
   _moveSlider(id, sliderId, value, generation = this._generation) {
     if (this._destroyed || this._generation !== generation) return;
     const slider = this._rowControlsFor(id)?.slider;

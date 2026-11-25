@@ -195,7 +195,8 @@ async function serveFixtures(page, fixture) {
       : { status: 204, body: '' };
   };
   cdp.on('Fetch.requestPaused', ({ requestId, request }) => {
-    const answer = answerFor(request.method, new URL(request.url));
+    const address = new URL(request.url);
+    const answer = answerFor(request.method, address);
     const done = answer
       ? cdp.send('Fetch.fulfillRequest', {
           requestId,
@@ -210,7 +211,7 @@ async function serveFixtures(page, fixture) {
         })
       : cdp.send('Fetch.continueRequest', { requestId });
     // A page that navigated or closed meanwhile has no request to answer.
-    done.catch(() => {});
+    void done.catch(() => {});
   });
 }
 
@@ -226,20 +227,14 @@ function newFixture(overrides = {}) {
 }
 
 /** Load without the opening so its flight cannot move the camera during
- * the gate's own moves, then dismiss the first-run dialog. */
+ * the gate's own moves, with the welcome dialog disabled through the app. */
 async function boot(page, url) {
   const address = new URL(url);
   address.searchParams.set('intro', '0');
+  address.searchParams.set('welcome', '0');
   await page.goto(address.href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.__godsEyeView?.dataManager), {
     timeout: 150_000,
-  });
-  await page.keyboard.press('Escape');
-  await page.evaluate(() => {
-    for (const el of document.querySelectorAll(
-      '#first-run-launcher, [class*=first-run]',
-    ))
-      el.remove();
   });
 }
 
@@ -284,12 +279,108 @@ const getUI = (page) =>
       .module.getUIState(),
   );
 
-const statusIs = (page, text) =>
-  page.waitForFunction(
-    (want) => document.getElementById('sl-status').textContent === want,
-    { timeout: 30_000 },
-    text,
+const LAYER_ROW = '[data-layer-id="street-level"]';
+const LAYER_TOGGLE = `${LAYER_ROW} .data-toggle-btn`;
+const CONTEXT_PANEL = '#global-context-panel';
+const PHOTO_CARD = '#entity-card[data-layer="street-level"]';
+const PHOTO_VIEW = `${CONTEXT_PANEL}:not(.collapsed) ${PHOTO_CARD} #sl-viewer-wrap`;
+const PHOTO_CLOSE = `${PHOTO_CARD} .entity-card__close`;
+
+// The Data Layers row shows status and provider errors.
+const statusIs = async (page, status) => {
+  await uiUntil(
+    page,
+    (u, want) => {
+      if (want === 'KEY REQUIRED') return u.keyRequired;
+      if (want === 'KEY REJECTED') return u.keyRejected;
+      if (want === 'OFF') return !u.enabled;
+      return (
+        u.enabled && !u.keyRequired && !u.keyRejected && !u.coverage.loading
+      );
+    },
+    status,
   );
+  // The row publishes on the next animation frame; a settled provider alone
+  // does not prove its visible controls have caught up.
+  await page.waitForFunction(
+    (want) => {
+      const row = document.querySelector('[data-layer-id="street-level"]');
+      const button = row?.querySelector('.data-toggle-btn');
+      if (!button || button.getAttribute('aria-busy') === 'true') return false;
+      const filters = [
+        ...row.querySelectorAll('[data-segmented-id="sl-pano"] button'),
+      ];
+      const info = row.querySelector('.data-toggle-controls-info');
+      const alert = row.querySelector(
+        '.data-toggle-controls-alert[role="status"]',
+      );
+      if (want === 'OFF')
+        return (
+          !button.classList.contains('active') &&
+          (!info || info.hidden || !info.textContent) &&
+          !alert?.textContent
+        );
+      if (!button.classList.contains('active') || !filters.length) return false;
+      if (want === 'KEY REJECTED')
+        return (
+          filters.every((item) => item.disabled) &&
+          /rejected MAPILLARY_CLIENT_TOKEN/.test(alert?.textContent || '')
+        );
+      if (want === 'KEY REQUIRED')
+        return (
+          filters.every((item) => item.disabled) &&
+          /MAPILLARY_CLIENT_TOKEN/.test(
+            row.textContent +
+              [...row.querySelectorAll('[data-chip-id]')]
+                .map((item) => item.title)
+                .join(' '),
+          )
+        );
+      return filters.every((item) => !item.disabled);
+    },
+    { timeout: 30_000 },
+    status,
+  );
+};
+
+const panoIs = async (page, value) => {
+  await uiUntil(page, (u, want) => u.filter.pano === want, value);
+  await page.waitForFunction(
+    (want) => {
+      const button = document.querySelector(
+        `[data-layer-id="street-level"] [data-chip-id="sl-pano-${want}"]`,
+      );
+      return (
+        button?.getAttribute('aria-checked') === 'true' &&
+        document.activeElement === button
+      );
+    },
+    { timeout: 10_000 },
+    value,
+  );
+};
+
+const readLayerControls = (page) =>
+  page.$eval(LAYER_ROW, (row) => {
+    const filters = [
+      ...row.querySelectorAll('[data-segmented-id="sl-pano"] button'),
+    ];
+    const alert = row.querySelector(
+      '.data-toggle-controls-alert[role="status"]',
+    );
+    return {
+      active: row
+        .querySelector('.data-toggle-btn')
+        .classList.contains('active'),
+      filtersPresent: filters.length > 0,
+      filtersDisabled:
+        filters.length > 0 && filters.every((button) => button.disabled),
+      error: alert?.textContent || '',
+      providerTitles: [
+        ...row.querySelectorAll('[data-chip-id^="sl-provider-"]'),
+      ].map((button) => button.title),
+    };
+  });
 
 const waitForCoverage = (page) =>
   uiUntil(
@@ -310,21 +401,13 @@ const waitForCoverage = (page) =>
 const press = (page, selector) =>
   page.$eval(selector, (control) => control.click());
 
-/** Expand the strip; a panel state stored by an earlier page may have done so. */
-async function expandPanel(page) {
-  const collapsed = await page.$eval('#street-level-panel', (node) =>
+/** Open Data Layers and wait for the Street Level toggle. */
+async function openStreetLevelRow(page) {
+  const collapsed = await page.$eval('#data-panel', (node) =>
     node.classList.contains('collapsed'),
   );
-  if (collapsed)
-    await press(
-      page,
-      '.panel-collapse-btn[data-collapse-target="street-level-panel"]',
-    );
-  await page.waitForFunction(
-    () =>
-      getComputedStyle(document.getElementById('sl-body')).display === 'flex',
-    { timeout: 10_000 },
-  );
+  if (collapsed) await press(page, '[data-rail-item="data-panel"]');
+  await page.waitForSelector(LAYER_TOGGLE, { visible: true, timeout: 10_000 });
 }
 
 /** A keyless bundle opens on the first keyless source with live controls. */
@@ -335,12 +418,10 @@ async function assertKeylessDefault(page) {
     }),
   );
   await uiUntil(page, litAlone, 'kartaview');
-  const shown = await page.evaluate(() => ({
-    status: document.getElementById('sl-status').textContent,
-    disabled: document.getElementById('sl-controls').disabled,
-  }));
-  assert.notEqual(shown.status, 'KEY REQUIRED');
-  assert.equal(shown.disabled, false, 'controls stay live');
+  const shown = await readLayerControls(page);
+  assert.equal(shown.active, true);
+  assert.equal(shown.filtersPresent, true, 'row filters are present');
+  assert.equal(shown.filtersDisabled, false, 'row filters stay live');
 }
 
 async function assertKeyRequired(page) {
@@ -350,14 +431,13 @@ async function assertKeyRequired(page) {
     }),
   );
   await statusIs(page, 'KEY REQUIRED');
-  const shown = await page.evaluate(() => ({
-    disabled: document.getElementById('sl-controls').disabled,
-    hint: document.getElementById('sl-error').hidden
-      ? ''
-      : document.getElementById('sl-error').textContent,
-  }));
-  assert.equal(shown.disabled, true, 'controls are gated');
-  assert.match(shown.hint, /MAPILLARY_CLIENT_TOKEN/, 'names the key to add');
+  const shown = await readLayerControls(page);
+  assert.equal(shown.filtersDisabled, true, 'row filters are gated');
+  assert.match(
+    `${shown.error} ${shown.providerTitles.join(' ')}`,
+    /MAPILLARY_CLIENT_TOKEN/,
+    'names the key to add',
+  );
 }
 
 /**
@@ -365,9 +445,13 @@ async function assertKeyRequired(page) {
  * `prefix`, scanning `box` ({x, y, w, h} in canvas pixels; default: a row
  * across the middle) every `step` px; null when nothing matches.
  */
-const findPick = (page, prefix, { box = null, step = 3 } = {}) =>
+const findPick = (
+  page,
+  prefix,
+  { box = null, step = 3, exclude = null } = {},
+) =>
   page.evaluate(
-    (want, area, stride) => {
+    (want, area, stride, excluded) => {
       const { scene } = window.__godsEyeView.viewer;
       const rect = scene.canvas.getBoundingClientRect();
       const { x, y, w, h } = area || {
@@ -381,7 +465,7 @@ const findPick = (page, prefix, { box = null, step = 3 } = {}) =>
           // A drawn item's pick id names its draw set and its own id.
           const picked = scene.pick({ x: px, y: py })?.id;
           const id = typeof picked === 'string' ? picked : picked?.id;
-          if (typeof id === 'string' && id.startsWith(want))
+          if (typeof id === 'string' && id.startsWith(want) && id !== excluded)
             return {
               x: rect.left + px,
               y: rect.top + py,
@@ -394,6 +478,7 @@ const findPick = (page, prefix, { box = null, step = 3 } = {}) =>
     prefix,
     box,
     step,
+    exclude,
   );
 
 /**
@@ -404,11 +489,11 @@ const findPick = (page, prefix, { box = null, step = 3 } = {}) =>
 async function findPickUntil(
   page,
   prefix,
-  { timeout = 30_000, box = null, step } = {},
+  { timeout = 30_000, box = null, step, exclude = null } = {},
 ) {
   const deadline = Date.now() + timeout;
   for (;;) {
-    const hit = await findPick(page, prefix, { box, step });
+    const hit = await findPick(page, prefix, { box, step, exclude });
     if (hit || Date.now() >= deadline) return hit;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -453,7 +538,10 @@ async function main() {
       (await puppeteer.executablePath()),
     defaultViewport: VIEWPORT,
     protocolTimeout: 300_000,
-    args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader'],
+    args:
+      process.platform === 'linux'
+        ? ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader']
+        : [],
   });
   let count = 0;
   const skips = [];
@@ -509,11 +597,11 @@ async function main() {
     check,
   }) =>
     step(
-      `${name}: its chip draws keyless coverage and its credit, a line opens its photo, × closes it`,
+      `${name}: its chip draws keyless coverage and its credit, a line opens its photo, closing its Context card closes it`,
       async ({ skipped }) => {
         reset();
         await park(page, at);
-        await press(page, `#sl-provider-chips [data-chip-id="${id}"]`);
+        await press(page, `${LAYER_ROW} [data-chip-id="sl-provider-${id}"]`);
         await uiUntil(page, litAlone, id);
         await waitForCoverage(page);
         await page.waitForFunction(
@@ -544,13 +632,56 @@ async function main() {
           return skipped(`no ${name} photo near the line`);
         assert.equal(street.error, null, `viewer error: ${street.error}`);
         assert.equal(street.providerId, id);
+        await page.waitForSelector(PHOTO_VIEW, {
+          visible: true,
+          timeout: 10_000,
+        });
+        assert.ok(
+          (await page.$eval(
+            '#sl-viewer',
+            (node) => node.getBoundingClientRect().width,
+          )) > 200,
+          'photo is visible in its Context card',
+        );
         assert.equal(
           await page.$eval('#sl-viewer-wrap', (node) => node.hidden),
           false,
         );
         if (fixtures)
           check(street, line.id.slice(linePrefix.length).split('~')[0]);
-        await press(page, '#sl-viewer-close');
+        if (fixtures && id === 'panoramax') {
+          const photo = panoramaxPictures().find(
+            (item) => item.id === street.imageId,
+          );
+          assert.ok(photo, 'the open image is in the fixture sequence');
+          const delta = photo.index + 1 < photo.count ? 1 : -1;
+          const target = panoramaxPictures().find(
+            (item) =>
+              item.sequenceId === photo.sequenceId &&
+              item.index === photo.index + delta,
+          );
+          assert.ok(target, 'the photo has an adjacent fixture image');
+          await page.click('#sl-viewer-expand');
+          await page.waitForFunction(
+            () => document.fullscreenElement?.id === 'sl-viewer-wrap',
+          );
+          await page.click(
+            delta === 1 ? '.sl-photo-step-next' : '.sl-photo-step-prev',
+          );
+          await uiUntil(
+            page,
+            (u, wanted) => u.street.imageId === wanted && !u.street.loading,
+            target.id,
+          );
+          assert.equal(
+            await page.evaluate(() => document.fullscreenElement?.id),
+            'sl-viewer-wrap',
+            'stepping keeps the same viewer in native fullscreen',
+          );
+          await page.evaluate(() => document.exitFullscreen());
+          await page.waitForSelector(PHOTO_VIEW, { visible: true });
+        }
+        await press(page, PHOTO_CLOSE);
         await uiUntil(
           page,
           (u) => !u.street.open && u.sequence.selectedId === null,
@@ -562,9 +693,9 @@ async function main() {
       },
     );
   let page = null;
+  const fixture = newFixture();
 
   try {
-    const fixture = newFixture();
     page = await open('main', fixtures && fixture);
     const { configured } = await page.evaluate(() =>
       fetch('/api/mapillary/status').then((res) => res.json()),
@@ -576,7 +707,7 @@ async function main() {
         'fixture runs need a server started with MAPILLARY_CLIENT_TOKEN (CI uses a dummy one)',
       );
 
-    await expandPanel(page);
+    await openStreetLevelRow(page);
     if (!configured && litAlone(await getUI(page), 'mapillary')) {
       // A keyed bundle behind a server without the token keeps Mapillary.
       await step('keyless server: KEY REQUIRED gates the controls', () =>
@@ -590,7 +721,10 @@ async function main() {
       await step(
         'keyless server: the MAPILLARY chip explains its key instead of switching',
         async () => {
-          await press(page, '#sl-provider-chips [data-chip-id="mapillary"]');
+          await press(
+            page,
+            `${LAYER_ROW} [data-chip-id="sl-provider-mapillary"]`,
+          );
           await new Promise((resolve) => setTimeout(resolve, 500));
           assert.ok(litAlone(await getUI(page), 'kartaview'));
         },
@@ -608,10 +742,7 @@ async function main() {
           );
           await waitForCoverage(page);
           await statusIs(page, 'ON');
-          assert.equal(
-            await page.$eval('#sl-controls', (node) => node.disabled),
-            false,
-          );
+          assert.equal((await readLayerControls(page)).filtersDisabled, false);
           await page.waitForFunction(
             () =>
               document.body.innerHTML.includes('Mapillary</a> contributors'),
@@ -621,33 +752,25 @@ async function main() {
       );
 
       await fixtureStep(
-        'a rejected key reads KEY REJECTED and clears when switched off',
+        'a rejected key names its fix, gates filters and clears when switched off',
         async () => {
           fixture.rejected = true;
-          await press(page, '#sl-status');
+          await press(page, LAYER_TOGGLE);
           await statusIs(page, 'OFF');
-          await press(page, '#sl-status');
+          await press(page, LAYER_TOGGLE);
           await statusIs(page, 'KEY REJECTED');
-          const shown = await page.evaluate(() => ({
-            error: document.getElementById('sl-error').textContent,
-            hidden: document.getElementById('sl-error').hidden,
-            disabled: document.getElementById('sl-controls').disabled,
-          }));
+          const shown = await readLayerControls(page);
           assert.match(shown.error, /rejected MAPILLARY_CLIENT_TOKEN/);
-          assert.equal(shown.hidden, false);
-          assert.equal(shown.disabled, true);
-          await press(page, '#sl-status');
+          assert.equal(shown.filtersDisabled, true);
+          await press(page, LAYER_TOGGLE);
           await statusIs(page, 'OFF');
           assert.equal(
-            await page.$eval(
-              '#sl-error',
-              (node) => node.hidden || !node.textContent,
-            ),
-            true,
+            (await readLayerControls(page)).error,
+            '',
             'no stale error while off',
           );
           fixture.rejected = false;
-          await press(page, '#sl-status');
+          await press(page, LAYER_TOGGLE);
           await waitForCoverage(page);
           await statusIs(page, 'ON');
         },
@@ -656,8 +779,14 @@ async function main() {
       await park(page);
       await waitForCoverage(page);
       await step(
-        'a line selects its sequence, and a cone opens its photo with a caption',
+        'a line selects its sequence and a cone opens its photo in Context',
         async () => {
+          const collapsed = await page.$eval(CONTEXT_PANEL, (node) =>
+            node.classList.contains('collapsed'),
+          );
+          if (!collapsed)
+            await press(page, '[data-rail-item="global-context-panel"]');
+          await page.waitForSelector(`${CONTEXT_PANEL}.collapsed`);
           // Fixtures answer lookups for the photo sequence only.
           const line = await findPickUntil(
             page,
@@ -667,11 +796,20 @@ async function main() {
           await page.mouse.click(line.x, line.y);
           await uiUntil(
             page,
-            (u) => u.sequence.selectedId && !u.sequence.loading,
+            (u) =>
+              u.sequence.selectedId &&
+              !u.sequence.loading &&
+              u.street.open &&
+              !u.street.loading,
+            null,
+            90_000,
           );
+          const lineImageId = (await getUI(page)).street.imageId;
+          assert.ok(lineImageId, 'the line opened a photo');
           // Cones clamp to the ground: on a slow GPU (CI's SwiftShader) they
           // can take a few frames after the selection to become pickable.
           const cone = await findPickUntil(page, 'mly:img:', {
+            exclude: `mly:img:${lineImageId}`,
             box: {
               x: Math.max(0, line.local.x - 150),
               y: Math.max(0, line.local.y - 150),
@@ -680,12 +818,18 @@ async function main() {
             },
             step: 8,
           });
-          assert.ok(cone, 'an image cone near the selected line');
+          assert.ok(
+            cone,
+            'a cone for a different photo near the selected line',
+          );
+          const coneImageId = cone.id.slice('mly:img:'.length);
+          assert.notEqual(coneImageId, lineImageId);
           await page.mouse.click(cone.x, cone.y);
           await uiUntil(
             page,
-            (u) => (u.street.imageId && !u.street.loading) || u.street.error,
-            null,
+            (u, id) =>
+              (u.street.imageId === id && !u.street.loading) || u.street.error,
+            coneImageId,
             90_000,
           );
           const { street } = await getUI(page);
@@ -693,21 +837,15 @@ async function main() {
           await page.waitForSelector('#sl-viewer .mapillary-dom', {
             timeout: 60_000,
           });
-          await page.waitForFunction(
-            () =>
-              document.getElementById('sl-image-when').textContent.trim()
-                .length > 0,
-            { timeout: 30_000 },
+          assert.equal(street.open, true);
+          await page.waitForSelector(PHOTO_CARD, { visible: true });
+          assert.equal(
+            await page.$eval(CONTEXT_PANEL, (node) =>
+              node.classList.contains('collapsed'),
+            ),
+            false,
+            'a map photo opens Context on its card',
           );
-          const view = await page.evaluate(() => ({
-            hidden: document.getElementById('sl-viewer-wrap').hidden,
-            width: document.getElementById('sl-viewer').getBoundingClientRect()
-              .width,
-            link: document.getElementById('sl-image-link').href,
-          }));
-          assert.equal(view.hidden, false);
-          assert.ok(view.width > 200, `viewer width ${view.width}`);
-          assert.match(view.link, /mapillary\.com\/app\/\?pKey=/);
           if (fixtures) {
             assert.ok(
               fixture.images.some((image) => image.id === street.imageId),
@@ -724,9 +862,92 @@ async function main() {
       );
 
       await step(
+        'explicitly opening Street Level brings a settled photo back from Properties',
+        async () => {
+          const imageId = (await getUI(page)).street.imageId;
+          // Properties exists only when an enabled layer has managed settings.
+          const enabledDirections = await page.evaluate(async () => {
+            const manager = window.__godsEyeView.dataManager;
+            if (manager.isEnabled('directions')) return false;
+            await manager.setEnabled('directions', true, { origin: 'user' });
+            return true;
+          });
+          const properties = '#context-tab-btn-props';
+          await page.waitForSelector(properties, { visible: true });
+          await page.click(properties);
+          await page.waitForSelector(`${properties}[aria-selected="true"]`);
+          await page.waitForSelector(PHOTO_VIEW, { hidden: true });
+          const result = await page.evaluate(() =>
+            window.__godsEyeView.voiceCommands.runner('set_panel_open', {
+              panelId: 'street-level-panel',
+              open: true,
+            }),
+          );
+          assert.equal(result.ok, true, result.error);
+          assert.equal(result.panelId, 'global-context-panel');
+          // The hidden viewer home also has a width and a loaded provider node.
+          // Wait for the real viewer to be placed on the visible photo card.
+          await page.waitForSelector(
+            '#context-tab-btn-view[aria-selected="true"]',
+          );
+          await page.waitForSelector(`${PHOTO_VIEW} #sl-viewer`, {
+            visible: true,
+            timeout: 30_000,
+          });
+          if (fixtures) {
+            const capture = fixture.images.find(
+              (image) => image.id === imageId,
+            )?.capturedAt;
+            assert.ok(
+              Number.isFinite(capture),
+              'the fixture photo has a capture date',
+            );
+            await page.waitForFunction(
+              (selector, timestamp) => {
+                const date = new Intl.DateTimeFormat(
+                  document.documentElement.lang || 'en',
+                  {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    timeZone: 'UTC',
+                  },
+                ).format(timestamp);
+                return document
+                  .querySelector(selector)
+                  ?.textContent.includes(date);
+              },
+              { timeout: 30_000 },
+              `${PHOTO_CARD} .entity-card__source-line`,
+              capture,
+            );
+          }
+          const view = await page.$eval(PHOTO_VIEW, (node) => ({
+            hidden: node.hidden,
+            width: node.querySelector('#sl-viewer').getBoundingClientRect()
+              .width,
+            link: node.querySelector('#sl-image-link').href,
+          }));
+          assert.equal(view.hidden, false);
+          assert.ok(view.width > 200, `viewer width ${view.width}`);
+          assert.match(view.link, /mapillary\.com\/app\/\?pKey=/);
+          assert.equal((await getUI(page)).street.imageId, imageId);
+          if (enabledDirections) {
+            await page.evaluate(() =>
+              window.__godsEyeView.dataManager.setEnabled('directions', false, {
+                origin: 'user',
+              }),
+            );
+          }
+        },
+      );
+
+      await step(
         'FIT/FILL keeps native selection, keyboard focus and persistence with a photo open',
         async () => {
-          await page.click('[data-sl-render="fill"]');
+          const fill = `${PHOTO_VIEW} [data-sl-render="fill"]`;
+          await page.waitForSelector(fill, { visible: true });
+          await page.click(fill);
           await uiUntil(page, (u) => u.street.renderMode === 'fill');
           assert.equal(
             await page.evaluate(() =>
@@ -737,11 +958,14 @@ async function main() {
           await page.keyboard.press('Home');
           await uiUntil(page, (u) => u.street.renderMode === 'letterbox');
           assert.deepEqual(
-            await page.$eval('[data-sl-render="letterbox"]', (node) => ({
-              selected: node.getAttribute('aria-checked'),
-              tabIndex: node.tabIndex,
-              focused: document.activeElement === node,
-            })),
+            await page.$eval(
+              `${PHOTO_VIEW} [data-sl-render="letterbox"]`,
+              (node) => ({
+                selected: node.getAttribute('aria-checked'),
+                tabIndex: node.tabIndex,
+                focused: document.activeElement === node,
+              }),
+            ),
             { selected: 'true', tabIndex: 0, focused: true },
           );
           await page.keyboard.press('End');
@@ -749,29 +973,41 @@ async function main() {
         },
       );
 
-      await step('× closes the photo and deselects its sequence', async () => {
-        await press(page, '#sl-viewer-close');
-        await uiUntil(
-          page,
-          (u) => !u.street.open && u.sequence.selectedId === null,
-        );
-        assert.equal(
-          await page.$eval('#sl-viewer-wrap', (node) => node.hidden),
-          true,
-        );
-      });
+      await step(
+        'closing the Context card closes the photo and deselects its sequence',
+        async () => {
+          await press(page, PHOTO_CLOSE);
+          await uiUntil(
+            page,
+            (u) => !u.street.open && u.sequence.selectedId === null,
+          );
+          assert.equal(
+            await page.$eval('#sl-viewer-wrap', (node) => node.hidden),
+            true,
+          );
+        },
+      );
 
       await step(
-        'panorama segments keep native arrow and Home navigation',
+        'panorama row segments keep arrow navigation, wrapping and focus',
         async () => {
-          await page.click('[data-sl-pano="flat"]');
-          await uiUntil(page, (u) => u.filter.pano === 'flat');
+          await page.click(`${LAYER_ROW} [data-chip-id="sl-pano-flat"]`);
+          await panoIs(page, 'flat');
           await page.keyboard.press('ArrowRight');
-          await uiUntil(page, (u) => u.filter.pano === 'all');
-          await page.keyboard.press('End');
-          await uiUntil(page, (u) => u.filter.pano === 'flat');
-          await page.keyboard.press('Home');
-          await uiUntil(page, (u) => u.filter.pano === 'all');
+          await panoIs(page, 'all');
+          await page.keyboard.press('ArrowLeft');
+          await panoIs(page, 'flat');
+          await page.keyboard.press('ArrowRight');
+          await panoIs(page, 'all');
+          assert.equal(
+            await page.$eval(
+              `${LAYER_ROW} [data-chip-id="sl-pano-all"]`,
+              (node) =>
+                node === document.activeElement &&
+                node.getAttribute('aria-checked') === 'true',
+            ),
+            true,
+          );
           await waitForCoverage(page);
         },
       );
@@ -809,7 +1045,7 @@ async function main() {
         },
       });
       // Back to Mapillary, where the next page and a reload expect it.
-      await press(page, '#sl-provider-chips [data-chip-id="mapillary"]');
+      await press(page, `${LAYER_ROW} [data-chip-id="sl-provider-mapillary"]`);
       await uiUntil(page, litAlone, 'mapillary');
       await park(page);
 
@@ -991,8 +1227,8 @@ async function main() {
               0,
               'no Street View request before the press',
             );
-            await expandPanel(page);
-            await press(page, '#sl-nearest-btn');
+            await openStreetLevelRow(page);
+            await press(page, `${LAYER_ROW} [data-chip-id="sl-open-nearest"]`);
             await uiUntil(
               page,
               (u) => (u.street.imageId && !u.street.loading) || u.street.error,
@@ -1018,7 +1254,10 @@ async function main() {
             );
             // Back to Mapillary: the keyless page restores the saved layer
             // and expects its KEY REQUIRED.
-            await press(page, '#sl-provider-chips [data-chip-id="mapillary"]');
+            await press(
+              page,
+              `${LAYER_ROW} [data-chip-id="sl-provider-mapillary"]`,
+            );
             await uiUntil(page, litAlone, 'mapillary');
           } finally {
             page.off('request', onRequest);
@@ -1035,7 +1274,7 @@ async function main() {
             'keyless',
             newFixture({ configured: false }),
           );
-          await expandPanel(keyless);
+          await openStreetLevelRow(keyless);
           await assertKeyRequired(keyless);
           await collectRenderErrors(keyless, 'keyless');
           await keyless.close();
@@ -1066,8 +1305,12 @@ async function main() {
       `${count} steps: ${count - skips.length} ok, ${skips.length} skipped`,
     );
   } catch (error) {
+    if (fixtures)
+      console.error(
+        `Fixture requests at failure: ${JSON.stringify({ calls: [...fixture.calls], unknown: fixture.unknown })}`,
+      );
     const dir = await saveFailureArtifacts({
-      dir: 'qa-artifacts/street-level',
+      dir: process.env.QA_ARTIFACTS_DIR || 'qa-artifacts/street-level',
       browser,
       monitors,
       error,

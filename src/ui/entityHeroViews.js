@@ -42,28 +42,32 @@ export function heroModelReady(subject, { set = null, loading = null } = {}) {
 
 /**
  * The kind of top image a card has.
+ * - 'place-street': a place with a street-level photo a short walk away;
  * - 'flight': an aircraft with a photo, a route or a model;
  * - 'model': anything else drawn with a fleet model (a vessel, a train);
  * - 'photo', 'satellite' (the ground beneath it: the fleet has no satellite
- *   models), 'camera', 'map', or 'none'.
- * @param {{kind?: string, layerId?: string,
+ *   models), 'camera', 'street', 'map', or 'none'.
+ * @param {{kind?: string, layerId?: string, placeStreet?: boolean,
  *   photo?: boolean, route?: boolean, model?: boolean, position?: boolean, mapped?: boolean}} item
  * @returns {string}
  */
 export function heroKindOf({
   kind,
   layerId,
+  placeStreet,
   photo,
   route,
   model,
   position,
   mapped = position,
 }) {
+  if (placeStreet) return 'place-street';
   if (kind === 'aircraft' && (photo || route || model)) return 'flight';
   if (model) return 'model';
   if (kind === 'vessel' && photo) return 'photo';
   if (layerId === 'satellites' && position) return 'satellite';
   if (layerId === 'cctv') return 'camera';
+  if (layerId === 'street-level') return 'street';
   // Use a close-up only where the imagery covers the item's position.
   if (mapped) return 'map';
   return 'none';

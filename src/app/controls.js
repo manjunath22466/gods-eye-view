@@ -5,6 +5,7 @@ import { initCockpitCloudEffects } from '../cockpitCloudEffects.js';
 import { createViewSky } from '../viewSky.js';
 import { findGlobe } from '../render/rendererOf.js';
 import { useDisplayStore } from '../ui/stores/display.js';
+import { usePortalTargetsStore } from '../ui/stores/portalTargets.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
 import { t } from '../i18n/index.js';
 
@@ -91,5 +92,10 @@ export function createApplicationControls({
     ? t('Restoring shared view...')
     : t('Loading');
 
-  return { styleManager, weatherEffects, cockpitCloudEffects };
+  return {
+    styleManager,
+    weatherEffects,
+    cockpitCloudEffects,
+    portal: usePortalTargetsStore(applicationPinia()),
+  };
 }

@@ -240,8 +240,8 @@ export function layoutRightPanelRail({
   );
   // Every panel starts level with the left rail, open or not, so the two
   // rails line up in every HUD layout (Minimal has no top-right readout to
-  // push this column down) and switching between Context, CCTV and Street
-  // Level does not move it. Only the two above also stretch to the bottom.
+  // push this column down) and switching between Context and CCTV does not
+  // move it. Only the two above also stretch to the bottom.
   const layout = resolveHudRailLayout({
     viewportHeight,
     panelHeight: naturalHeight,

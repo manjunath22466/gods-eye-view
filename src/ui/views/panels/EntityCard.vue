@@ -1,7 +1,8 @@
 <script setup>
+import { STREET_LEVEL_LAYER } from '../../streetLevelEvents.js';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { formatDate, formatNumber, getLocale, msg, t } from '../../../i18n/index.js';
+import { formatDate, formatNumber, getLocale, msg, t, translateKnown } from '../../../i18n/index.js';
 import { contextAgeText, durationText } from '../../contextTime.js';
 import { approximatePosition } from '../../distanceText.js';
 import { factFigure, factLabel, factValue, sayWords, useEntityCardStore } from '../../stores/entityCard.js';
@@ -25,7 +26,8 @@ import { satelliteSwath } from '../../satelliteSwath.js';
 import ItemCharts from './ItemCharts.vue';
 import EntityMark from './EntityMark.vue';
 import { markKind } from '../../entityMark.js';
-import { PLACE_LAYER } from '../../placeCard.js';
+import { roundHeadingDegrees } from '../../../data/headingDegrees.js';
+import { PLACE_LAYER, spotCoordinates } from '../../placeCard.js';
 import PlaceDetails from './PlaceDetails.vue';
 import UiButton from '../../kit/UiButton.vue';
 import UiCloseButton from '../../kit/UiCloseButton.vue';
@@ -90,6 +92,13 @@ const sourceLine = computed(() => {
   void tick.value;
   const current = card.value;
   if (!current) return null;
+  // A street-level photo: whose imagery it is and when it was taken.
+  if (current.layerId === STREET_LEVEL_LAYER && current.identity?.id.startsWith('near:'))
+    return { tone: 'aged', text: translateKnown(current.title) };
+  if (streetPhoto.value) {
+    const text = [streetPhoto.value.provider, streetPhoto.value.captured].filter(Boolean).join(' · ');
+    return text ? { tone: 'aged', text } : null;
+  }
   // A decoded still can be a cached frame or a fallback without a capture time.
   if (camera.value) {
     const owner = camera.value.credit !== shownSource.value ? camera.value.credit : '';
@@ -113,7 +122,7 @@ const sourceLine = computed(() => {
 
 const position = computed(() => {
   const current = card.value;
-  if (!Number.isFinite(current?.lat) || !Number.isFinite(current?.lon)) return '';
+  if (locationWithheld.value || !Number.isFinite(current?.lat) || !Number.isFinite(current?.lon)) return '';
   if (current.obscured) return t('Location obscured to a 0.2° cell');
   const lat = `${Math.abs(current.lat).toFixed(3)}°${current.lat >= 0 ? 'N' : 'S'}`;
   const lon = `${Math.abs(current.lon).toFixed(3)}°${current.lon >= 0 ? 'E' : 'W'}`;
@@ -168,6 +177,39 @@ const launchFacts = computed(() => {
   ].filter((fact) => fact.value);
 });
 
+// A street-level photo: its source and capture date on the
+// source line; source, date, heading and whether it is flat or 360° under
+// More details. Its record is the layer's (layers/streetLevel/photos.js),
+// kept while its layer is off so its card still describes it.
+const streetPhoto = computed(() => {
+  void tick.value;
+  const current = card.value;
+  if (current?.layerId !== STREET_LEVEL_LAYER || !current.identity?.id) return null;
+  const record = store.layerModule(STREET_LEVEL_LAYER)?.photo?.(current.identity.id);
+  if (!record) return null;
+  const at = record.capturedAt;
+  const captured = Number.isFinite(at)
+    ? formatDate(at, { year: 'numeric', month: 'short', ...(record.capturedAtPrecision === 'month' ? {} : { day: 'numeric' }), timeZone: 'UTC' })
+    : '';
+  return {
+    provider: record.provider ? translateKnown(record.provider) : '',
+    captured,
+    dateLabel: record.capturedAtSource === 'added' ? t('Added') : t('Captured'),
+    heading: Number.isFinite(record.headingDeg) ? `${formatNumber(roundHeadingDegrees(record.headingDeg))}° ${t(compassName(record.headingDeg))}` : '',
+    type: record.pano ? t('360° panorama') : t('Flat photo'),
+  };
+});
+const streetFacts = computed(() => {
+  const found = streetPhoto.value;
+  if (!found) return [];
+  return [
+    { label: t('Provider'), value: found.provider },
+    { label: found.dateLabel, value: found.captured },
+    { label: t('Heading'), value: found.heading },
+    { label: t('Image type'), value: found.type },
+  ].filter((fact) => fact.value && (!contextNeedle.value || matchesContextSearch(fact.label, fact.value, fact.value)));
+});
+
 // A camera: where it is and what it sees (city, field of view, range) as
 // figures; which way it faces, how often its frame refreshes and who runs it
 // stand in for any of those it lacks. The rest goes under More details, with
@@ -205,7 +247,7 @@ const cameraFields = computed(() => {
 });
 const cameraTiles = computed(() => cameraFields.value.tiles);
 const extraFacts = computed(() => {
-  const facts = [...launchFacts.value, ...cameraFields.value.facts];
+  const facts = [...streetFacts.value, ...launchFacts.value, ...cameraFields.value.facts];
   if (!contextNeedle.value) return facts;
   for (const tile of cameraFields.value.tiles) facts.push({ label: tile.label, value: tile.number });
   return facts.filter((fact) => matchesContextSearch(fact.label, fact.value));
@@ -244,6 +286,9 @@ const tiles = computed(() => {
 const subtitle = computed(() => {
   const current = card.value;
   if (!current) return '';
+  // A street-level photo: where it was taken (its road is its name).
+  if (current.layerId === STREET_LEVEL_LAYER)
+    return spotCoordinates(current.lat, current.lon, (n) => formatNumber(n, { maximumFractionDigits: 5 }));
   // A camera: where it is, then its position.
   if (camera.value) {
     const at = Number.isFinite(current.lat) && Number.isFinite(current.lon) ? `${formatNumber(current.lat, { maximumFractionDigits: 4 })}, ${formatNumber(current.lon, { maximumFractionDigits: 4 })}` : '';
@@ -257,6 +302,8 @@ const subtitle = computed(() => {
 // The Context search narrows them to the ones whose name or value holds its
 // text, and looks through every fact, the figures included.
 const gridFacts = computed(() => {
+  // A street-level photo's record fields are its own facts (streetFacts).
+  if (card.value?.layerId === STREET_LEVEL_LAYER) return [];
   const facts = card.value?.facts || [];
   if (contextNeedle.value) return facts.filter((fact) => matchesContextSearch(factLabel(fact), factValue(fact), fact.value));
   const shown = new Set([...tiles.value.map((tile) => tile.field), ...(card.value?.reading ? card.value.headline || [] : [])]);
@@ -372,10 +419,12 @@ const rideFace = computed(() => {
 
 // A new item starts at the top of the panel, not wherever the last one was
 // scrolled to.
+const detailsKey = ref(card.value?.key);
 watch(
-  () => card.value?.key,
-  async (key, previous) => {
-    if (!key || key === previous) return;
+  [() => card.value?.key, () => store.selectionGeneration()],
+  async ([key, generation], [previous, priorGeneration]) => {
+    if (!key || key === previous || generation === priorGeneration) return;
+    detailsKey.value = key;
     await nextTick();
     document
       .getElementById('entity-card')
@@ -417,7 +466,7 @@ watch(
               <span v-if="card.obscured && position" class="entity-card__source-line entity-card__where">{{ position }}</span>
             </div>
             <UiButton v-if="away && card.moving" class="entity-card__find" data-entity-find :label="t('Find it')" :title="t('Find it')" :disabled="finding === 'finding'" @click="store.locate()"><UiIcon name="my_location" :size="null" /></UiButton>
-            <UiCloseButton class="entity-card__close" glyph="icon" :label="t('Close card')" :title="t('Close card')" @click="store.clear()" />
+            <UiCloseButton class="entity-card__close" glyph="icon" :label="t('Close card')" :title="t('Close card')" @click="store.clear({ dismiss: true })" />
           </header>
 
           <div v-if="card.warnings?.length" class="entity-card__warning" role="alert">
@@ -509,7 +558,7 @@ watch(
           <!-- Facts only, folded; a search opens it to show what matches.
                Keyed by the item, so every new pick starts folded. -->
           <UiEmpty v-if="contextNeedle && !gridFacts.length && !extraFacts.length" class="entity-card__no-match" :title="t('Nothing in this item’s details matches “{text}”.', { text: contextSearchText.trim() })" />
-          <details v-if="contextNeedle ? gridFacts.length || extraFacts.length : hasMore" :key="`more:${card.key}`" class="entity-card__section entity-card__more" :open="!!contextNeedle">
+          <details v-if="contextNeedle ? gridFacts.length || extraFacts.length : hasMore" :key="`more:${detailsKey}`" class="entity-card__section entity-card__more" :open="!!contextNeedle">
             <summary class="entity-card__more-title">{{ contextNeedle ? t('Matching details') : t('More details') }}</summary>
             <dl class="entity-card__facts">
               <div v-for="fact in gridFacts" :key="fact.field" class="entity-card__fact">

@@ -307,6 +307,30 @@ function panelChrome(store) {
   });
 }
 
+test('opening a desktop right panel explicitly claims the rail while Context stays collapsed', (t) => {
+  document.body.innerHTML = `
+    <aside id="right-context-rail">
+      <div id="global-context-panel" data-panel-id="global-context-panel" class="collapsed"></div>
+      <div id="cctv-panel" data-panel-id="cctv-panel" class="collapsed"></div>
+    </aside>`;
+  const store = usePanelChromeStore(createPinia());
+  const chrome = panelChrome(store);
+  t.after(() => chrome.destroy());
+  chrome._rightPanelStack = document.getElementById('right-context-rail');
+  for (const id of ['global-context-panel', 'cctv-panel'])
+    followPanelState(store, id, document.getElementById(id));
+  const revision = store.rightRailOpenRevision;
+  chrome.setPanelCollapsed('cctv-panel', false, { restore: true });
+  assert.equal(store.rightRailOpenRevision, revision);
+  chrome.setPanelCollapsed('cctv-panel', false, { explicit: true });
+  assert.equal(store.rightRailOpenRevision, revision + 1);
+  assert.ok(
+    document
+      .getElementById('global-context-panel')
+      .classList.contains('collapsed'),
+  );
+});
+
 test('PanelChrome takes clicks only once initialized, pins only dock trays, and detaches on destroy', () => {
   document.body.innerHTML = `
     <div id="data-panel" class="collapsed"><button class="panel-collapse-btn" data-collapse-target="data-panel"></button></div>

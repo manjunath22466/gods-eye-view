@@ -477,16 +477,28 @@ slot whenever its view is drawn.
    keep their imperative entry points until their owners are components:
    the rail cards and card blocks (`src/ui/rail/`) render through
    Vue's synchronous `render()` behind `createRailCards()` and
-   `createRailCardBlocks()`. Order: Scenes (done: `SceneOptions` and
+   `createRailCardBlocks()`. A control that moves between panels can keep one
+   mounted tree in a Teleport. `PortalSlot` registers a destination for its
+   lifetime. The owner supplies whether the slot is visible and an optional
+   focus fallback. An enabled Teleport always receives a DOM element, even
+   for the embed overlay. At home, the disabled Teleport keeps its children
+   and uses `'body'` for server rendering. The source repairs focus only when
+   a move sent focus to the page body, trying the moved control and then the
+   slot and source fallbacks. A viewer keeps its provider host connected and
+   retains its media nodes through the move.
+
+   Order: Scenes (done: `SceneOptions` and
    `SceneShotList` over the `gev-scenes` store; the panel's buttons, status
    line, progress bar and the runtime chip render the panel SceneControls
    presents there, and the buttons and file chooser call its actions), Weather (done: the owner
    renders `WeatherReadout` from the view it computes), Recent imagery
    (done: `RecentImageryReadout` and its day cards, the same way),
-   Street level (done: `StreetLevelPanel` renders the `gev-street-level`
-   store that `StreetLevelControls` publishes to; the controls keep their
-   listeners, EXPAND, focus and resizing; `StreetLevelPhotoViewer`, beside
-   it in the layer panels, teleports into the viewer host the photo viewer
+   Street level (done: the standalone panel is retired; `StreetLevelViewer`
+   renders the open photo from the `gev-street-level` store that
+   `StreetLevelControls` publishes to, and Context moves it onto the photo's
+   card (`StreetViewHero`), while the filters render on the layer's Data
+   Layers row; the controls keep their listeners, EXPAND, focus and
+   resizing; `StreetLevelPhotoViewer` teleports the photo viewer into its host
    KartaView and Panoramax mount there, which `createPhotoViewer()`
    presents through the layer's `subscribePhotoViewer()` and the
    application shell publishes to the `gev-street-level-photo` store, so

@@ -40,6 +40,11 @@ export const usePanelChromeStore = defineStore('gev-panel-chrome', () => {
    * first presents it, and it keeps its markup's classes until then.
    */
   const panels = shallowRef(Object.freeze({}));
+  const rightRailOpenRevision = shallowRef(0);
+
+  function claimRightRail(token) {
+    if (owns(token)) rightRailOpenRevision.value++;
+  }
   /** @type {{handlers: PanelChromeHandlers}|null} */
   let owner = null;
 
@@ -96,5 +101,14 @@ export const usePanelChromeStore = defineStore('gev-panel-chrome', () => {
     owner?.handlers[name]?.(panelId);
   }
 
-  return { panels, connect, owns, publish, detach, act };
+  return {
+    panels,
+    rightRailOpenRevision,
+    claimRightRail,
+    connect,
+    owns,
+    publish,
+    detach,
+    act,
+  };
 });

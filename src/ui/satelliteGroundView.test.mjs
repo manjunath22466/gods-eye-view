@@ -233,7 +233,11 @@ test('the credit is the card maps’ shared credit, not the cockpit’s', () => 
     'no rules of its own',
   );
   assert.match(rule('.map-foot') || '', /\bbottom:/);
-  assert.match(rule('.map-credit') || '', /background:/);
+  const credit = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(
+    ([, selector]) =>
+      selector.split(',').some((part) => part.trim() === '.map-credit'),
+  );
+  assert.match(credit?.[2] || '', /background:/);
   assert.doesNotMatch(
     css,
     /\.satellite-ground__credit\s*,/,

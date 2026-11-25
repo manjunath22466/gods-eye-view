@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUpdate, onUpdated, ref } from 'vue';
-import { useEntityCardStore } from '../../stores/entityCard.js';
+import { sayWords, useEntityCardStore } from '../../stores/entityCard.js';
 import { focusInCard } from '../../cardFocus.js';
 import { formatNumber, t } from '../../../i18n/index.js';
 import { shownLayerName } from '../../layerNames.js';
@@ -134,7 +134,7 @@ onUpdated(() => {
                 :aria-hidden="null"
               />
               <EntityMark class="nearby-lists__mark" :layer="list.layerId" :kind="markKind(list.layerId, item.identity?.record)" :icon="list.icon" :size="16" />
-              <span class="nearby-lists__name" :title="item.title">{{ item.title }}</span>
+              <span class="nearby-lists__name" :title="sayWords(item.titleWords, item.title)">{{ sayWords(item.titleWords, item.title) }}</span>
               <span v-if="index === 0" class="nearby-lists__badge">{{ t('Nearest') }}</span>
               <span class="nearby-lists__meta">{{ distance(item.distanceKm, approximate || approximatePosition(item.identity?.record)) }}</span>
             </UiButton>

@@ -11,7 +11,7 @@ export function readShellElements(document = globalThis.document) {
     _dataPanel: document.getElementById('data-panel'),
     _scenePanel: document.getElementById('scene-panel'),
     _cctvPanel: document.getElementById('cctv-panel'),
-    _streetLevelPanel: document.getElementById('street-level-panel'),
+    _streetLevelViewer: document.getElementById('sl-viewer-root'),
     _radioPanel: document.getElementById('radio-panel'),
     _cockpitUtilityControls: document.getElementById(
       'cockpit-utility-controls',

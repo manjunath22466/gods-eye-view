@@ -1102,6 +1102,11 @@ html:not([lang='en']) .data-row-list-text {
   overflow-wrap: anywhere;
 }
 
+.data-toggle-controls-alert:empty {
+  position: absolute;
+  padding: 0;
+}
+
 /* Optional per-layer one-of-many switch (Active Fires confidence). The shared
    .gev-segmented surface, sized to the chip row. */
 .data-toggle-controls .data-toggle-segmented {

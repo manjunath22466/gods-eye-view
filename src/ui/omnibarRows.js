@@ -964,7 +964,11 @@ const guideRow = (key, guide, label, icon = 'east', flags = {}) => ({
  * it offers, and what may go to the place service.
  * @param {{layers?: Array<object>, isEntity?: (text: string) => boolean}} options
  */
-export function createOmnibar({ layers = [], isEntity = () => false } = {}) {
+export function createOmnibar({
+  layers = [],
+  isEntity = () => false,
+  entityTitle = (item) => item.title,
+} = {}) {
   const { matchLayers, matchLayersLoosely, all } = createLayerIndex(layers);
   const cache = new Map();
 
@@ -1137,15 +1141,18 @@ export function createOmnibar({ layers = [], isEntity = () => false } = {}) {
     const callsign = CALLSIGN.test(line.replace(/\s+/g, ''));
     const rows = entities(line.replace(/\s+/g, callsign ? '' : ' '), {
       limit: callsign ? 5 : 3,
-    }).map((found) => ({
-      key: `entity:${found.key}`,
-      kind: 'entity',
-      icon: found.icon,
-      identity: found.identity,
-      exact: found.title.toLowerCase() === line.toLowerCase(),
-      label: found.title,
-      hint: found.layerName,
-    }));
+    }).map((found) => {
+      const label = entityTitle(found);
+      return {
+        key: `entity:${found.key}`,
+        kind: 'entity',
+        icon: found.icon,
+        identity: found.identity,
+        exact: label.toLowerCase() === line.toLowerCase(),
+        label,
+        hint: found.layerName,
+      };
+    });
     if (!rows.length) return list;
     const place = list.findIndex((item) => item.kind === 'place');
     const exact = rows.filter((row) => row.exact);

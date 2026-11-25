@@ -14,6 +14,7 @@ import { holdRootClass, vRootClass } from './rail/rootClass.js';
 import { assertSameNode } from '../testSupport/domAssert.mjs';
 import { createTestVoiceUi } from '../testSupport/voiceUi.mjs';
 import { worldClock } from '../time/worldClock.js';
+import { useEntityCardStore } from './stores/entityCard.js';
 import { useFirstRunStore } from './stores/firstRun.js';
 import { useHudStore } from './stores/hud.js';
 import { useWorldTimeStore } from './stores/worldTime.js';
@@ -125,6 +126,30 @@ test('the Omnibar holds has-omnibar, its results and focus inside it', async (t)
   );
   unmount();
   assert.ok(!on('has-omnibar') && !on('omnibar-has-results'));
+});
+
+test('closing a street-level photo from the Omnibar dismisses its card', async (t) => {
+  const { pinia } = mount(t, Omnibar);
+  const cards = useEntityCardStore(pinia);
+  t.after(() => cards.clear());
+  assert.ok(
+    cards.select({
+      layerId: 'street-level',
+      id: 'mapillary:a',
+      label: 'Test road',
+      lat: 48,
+      lon: 2,
+    }),
+  );
+  const key = cards.card.key;
+  document.getElementById('gev-omnibar-input').focus();
+  await settle();
+  const close = document.querySelector('.omnibar-item--sel-close');
+  assert.ok(close);
+  close.click();
+  await settle();
+  assert.equal(cards.card, null);
+  assert.equal(cards.wasDismissed(key), true);
 });
 
 test('the dock holds dock-has-voice and assistant-voice-mode with its voice control', async (t) => {

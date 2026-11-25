@@ -155,6 +155,9 @@ export const SHARE_VIEW_PANELS = freezeAll([
     pinnable: false,
     collapsed: false,
   },
+  // The Street Level panel is retired (a photo's card opens in Context, its
+  // filters are on its Data Layers row); its code stays reserved so old
+  // links decode, and its state is ignored on restore.
   {
     number: 5,
     id: 'street-level-panel',

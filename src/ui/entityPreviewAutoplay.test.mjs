@@ -29,6 +29,7 @@ afterEach(() => {
 const STUBS = {
   AircraftModelHero: true,
   CctvPreview: true,
+  StreetViewHero: true,
   CloseUpMap: true,
   FlightCockpitView: true,
   FeedDot: true,

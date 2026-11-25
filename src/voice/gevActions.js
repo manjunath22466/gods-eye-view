@@ -1,5 +1,7 @@
 import { announceCameraReselection } from '../ui/cctvEvents.js';
+import { nextTick } from 'vue';
 import { PLACE_PICK_EVENT } from '../ui/contextEvents.js';
+import { isContextRailCovered } from '../ui/mobileSheets.js';
 import { isFollowing, stopFollowing } from '../data/followed.js';
 import { interruptGlobeRotation } from '../cameraVerbs.js';
 import { normalizeDisplayText } from '../data/displayText.js';
@@ -22,6 +24,11 @@ import { useProviderSettingsStore } from '../ui/stores/providerSettings.js';
 import { layerFinderFor } from '../ui/layerFinderFilter.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
 import { useEntityCardStore } from '../ui/stores/entityCard.js';
+import { useStreetLevelStore } from '../ui/stores/streetLevel.js';
+import {
+  announceStreetLevelPhoto,
+  streetLevelCardKey,
+} from '../ui/streetLevelEvents.js';
 import {
   distance as chordM,
   fromRadians,
@@ -128,6 +135,12 @@ const PANEL_ALIASES = new Map([
   ['provider settings', 'provider-settings'],
   ['cctv', 'cctv-panel'],
   ['cameras', 'cctv-panel'],
+  // A street-level photo's card is in Context; its panel is retired.
+  ['street-level-panel', 'global-context-panel'],
+  ['street level', 'global-context-panel'],
+  ['street view', 'global-context-panel'],
+  ['street level panel', 'global-context-panel'],
+  ['street view panel', 'global-context-panel'],
   ['voice settings', 'voice-settings'],
   ['voice-settings', 'voice-settings'],
   ['voice preview', 'voice-preview'],
@@ -937,6 +950,118 @@ export function createGevActionRunner({
           `Unknown panel: ${args.panelId || args.panel || 'missing'}`,
         );
       const open = args.open !== false;
+      const requested = String(args.panelId || args.panel || '').trim();
+      const streetLevelRequest = /^street[- ]?(level|view)([- ]panel)?$/i.test(
+        requested,
+      );
+      // The retired Street Level panel lives in Context, which the Cockpit
+      // hides: as for contacts, say so rather than open it unseen.
+      if (
+        open &&
+        streetLevelRequest &&
+        styleManager?.getCockpitState?.()?.active
+      )
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          applied: false,
+          error: 'Cockpit is active; exit Cockpit first to open Context.',
+        };
+      // The retired Street Level panel has nothing of its own to close: its
+      // photo is part of Context, and closing it must not close Context with
+      // everything else in it.
+      if (!open && streetLevelRequest && panelId === 'global-context-panel') {
+        const say =
+          'That panel is part of Context now; nothing was closed. Turn its layer off to hide it, or close Context.';
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          panelId,
+          open,
+          applied: false,
+          say,
+          error: say,
+        };
+      }
+      // Street Level's panel is retired: a photo the viewer has accepted
+      // has its card in Context; otherwise (none, still opening, rejected)
+      // its controls are on its Data Layers row.
+      if (open && streetLevelRequest) {
+        const layer = dataManager?.layers?.get?.(STREET_LEVEL_LAYER_ID)?.module;
+        const { photo, reason } = acceptedStreetLevelPhoto(layer);
+        if (!photo) {
+          const menu = await runGevAction(
+            'show_data_layers_menu',
+            { layerId: STREET_LEVEL_LAYER_ID },
+            runOptions,
+          );
+          return {
+            ...menu,
+            reason,
+            say:
+              menu.say ?? `${reason} Street Level controls are in Data Layers.`,
+          };
+        }
+        if (isContextRailCovered() && styleManager?.exitContextSelectionView) {
+          const cards = useEntityCardStore(applicationPinia());
+          const selection = cards.selectionGeneration();
+          if (styleManager.exitContextSelectionView()) {
+            await nextTick();
+            if (
+              !current() ||
+              cards.selectionGeneration() !== selection ||
+              acceptedStreetLevelPhoto(layer).photo?.id !== photo.id
+            )
+              return {
+                ok: false,
+                action: name,
+                applied: false,
+                cancelled: true,
+              };
+          }
+        }
+        if (isContextRailCovered()) {
+          const say =
+            'Context is covered. Return to the main view to see the street-level photo.';
+          return {
+            ok: false,
+            action: 'set_panel_open',
+            panelId,
+            open,
+            applied: false,
+            say,
+            error: say,
+          };
+        }
+        if (!setPanelOpen(styleManager, 'global-context-panel', true)) {
+          const say = 'There is no panel to open here.';
+          return {
+            ok: false,
+            action: 'set_panel_open',
+            panelId,
+            open,
+            applied: false,
+            say,
+            error: say,
+          };
+        }
+        styleManager?.revealPanel?.('global-context-panel');
+        announceStreetLevelPhoto(photo, { explicit: true });
+        // A later request that did not open leaves its error beside the
+        // photo still shown: say which one this is.
+        const lastError = layer?.getUIState?.()?.street?.error;
+        return {
+          ok: true,
+          action: 'set_panel_open',
+          panelId: 'global-context-panel',
+          open,
+          ...(lastError
+            ? {
+                say: 'Showing the current street-level photo. The latest request failed.',
+              }
+            : {}),
+        };
+      }
       if (panelId === 'voice-settings' || panelId === 'voice-preview')
         return showVoicePanel(
           panelId === 'voice-settings' ? 'settings' : 'preview',
@@ -1309,6 +1434,7 @@ export function createGevActionRunner({
       // Open the panel that holds the row: Directions lives in Utilities.
       const panelId = row?.closest('[data-panel-id]')?.id || 'data-panel';
       setPanelOpen(styleManager, panelId, true);
+      styleManager?.revealPanel?.(panelId);
       const focusedLayer = row ? focusDataLayerRow(row, layerId) : null;
       return {
         ok: true,
@@ -2239,6 +2365,46 @@ function openCameraCard(cameraId) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The street-level photo open now (`{id, lat, lon}`), or null.
+ * @returns {?{id: string, lat: number, lon: number}}
+ */
+function openStreetLevelPhoto() {
+  return useStreetLevelStore(applicationPinia()).view?.viewer?.photo || null;
+}
+
+/**
+ * The open photo once the Street Level layer has accepted it, else why not:
+ * `{photo}` or `{reason}`. A pose still loading or a photo its provider
+ * rejected is not a photo to announce; an unrelated lookup running over a
+ * settled photo does not refuse it.
+ * @param {object} [layerModule] The Street Level layer.
+ * @returns {{photo?: {id: string, lat: number, lon: number}, reason?: string}}
+ */
+function acceptedStreetLevelPhoto(layerModule) {
+  const photo = openStreetLevelPhoto();
+  const settled = layerModule?.settledPhotoId?.();
+  if (photo && settled === photo.id) return { photo };
+  if (layerModule?.photoOpening?.() === true)
+    return { reason: 'The street-level photo is still opening.' };
+  if (photo || layerModule?.getUIState?.()?.street?.error)
+    return { reason: 'The street-level photo did not open.' };
+  return { reason: 'No street-level photo is open.' };
+}
+
+/**
+ * Let go of a street-level photo's card that came up while a voice request
+ * loaded the photo, when that photo is closed again as late. A card shown
+ * before the request (`before`) is left as it is.
+ * @param {?string} before
+ */
+function releaseLateStreetCard(before) {
+  const cards = useEntityCardStore(applicationPinia());
+  const card = cards.card;
+  if (card?.layerId === STREET_LEVEL_LAYER_ID && card.key !== before)
+    cards.clear();
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */
@@ -4099,8 +4265,8 @@ function normalizeStyle(value) {
   return null;
 }
 
-/** The application panel that holds the street-level photo. */
-const STREET_LEVEL_PANEL_ID = 'street-level-panel';
+/** The application panel that holds the street-level photo: its card in Context. */
+const STREET_LEVEL_PANEL_ID = 'global-context-panel';
 
 /**
  * The layer-state origin of an action's changes. The assistant's are the
@@ -4111,18 +4277,30 @@ function actionIntentOrigin(runOptions) {
   return runOptions?.origin === 'programmatic' ? 'programmatic' : 'voice';
 }
 
-/**
- * Whether cockpit, clean view, recording or scene playback hides the panel a
- * street-level photo opens in. Embed mode uses clean view for its globe but
- * lifts the photo out of the hidden rail.
- */
-function streetLevelPanelHidden() {
+function reconstructionPanel(body) {
+  return body?.querySelector?.(
+    '#right-context-rail.bhote-event-active > #bhote-koshi-event-panel',
+  );
+}
+
+/** A new covering surface owns the view while a photo request is in flight. */
+function streetLevelPanelHidden(cover, initialCover) {
   const body = globalThis.document?.body;
   const embedded = body?.classList?.contains('ui-embed') === true;
-  return EXCLUSIVE_SURFACE_CLASSES.some(
-    (mode) =>
-      body?.classList?.contains(mode) &&
-      !(embedded && mode === 'ui-clean-view'),
+  return (
+    (!embedded &&
+      (body?.classList.contains('stories-mode') ||
+        (cover.reconstruction &&
+          cover.reconstruction !== initialCover?.reconstruction))) ||
+    EXCLUSIVE_SURFACE_CLASSES.some(
+      (mode) =>
+        body?.classList?.contains(mode) &&
+        !(
+          mode === 'ui-clean-view' &&
+          (embedded ||
+            (initialCover && cover.cleanView === initialCover.cleanView))
+        ),
+    )
   );
 }
 
@@ -4244,7 +4422,18 @@ async function requestStreetLevel(
       ),
       extra,
     );
-  if (streetLevelPanelHidden()) return hidden();
+  const body = globalThis.document?.body;
+  const readCover = () =>
+    styleManager?.contextSelectionCover?.() ?? {
+      cleanView: body?.classList.contains('ui-clean-view') ? 0 : null,
+      reconstruction: reconstructionPanel(body),
+    };
+  const selectionCover =
+    styleManager?.exitContextSelectionView && args.autoOpen !== false
+      ? readCover()
+      : null;
+  const photoHidden = () => streetLevelPanelHidden(readCover(), selectionCover);
+  if (photoHidden()) return hidden();
   const interrupted = (stage, extra = {}) => {
     if (!current())
       return fail(stage, 'Street-level request was cancelled', {
@@ -4259,7 +4448,7 @@ async function requestStreetLevel(
         location,
         ...extra,
       });
-    if (streetLevelPanelHidden()) return hidden({ location, ...extra });
+    if (photoHidden()) return hidden({ location, ...extra });
     return null;
   };
 
@@ -4429,11 +4618,14 @@ async function requestStreetLevel(
   // this looks and closes if nothing opens; a found photo loads only while
   // the camera and the panel are still the request's.
   reportProgress('imagery', label);
-  const opened = await layerModule.openNearest(point, {
+  const cards = useEntityCardStore(applicationPinia());
+  const cardBefore = cards.card?.key ?? null;
+  const selectionBefore = cards.selectionGeneration();
+  const opening = layerModule.openNearest(point, {
     providerIds: [provider],
     frame: false,
     replace: true,
-    proceed: () => current() && !owner.taken() && !streetLevelPanelHidden(),
+    proceed: () => current() && !owner.taken() && !photoHidden(),
     // Under the screen centre, not the middle of a tilted view's footprint;
     // this request is the user's own, not a link's armed one.
     ...(point ? {} : { aim: 'screen-centre', armed: false }),
@@ -4442,12 +4634,18 @@ async function requestStreetLevel(
       ? { radiusM: STREET_LEVEL_WIDE_RADIUS_M }
       : {}),
   });
+  // The layer claims the request before its first provider await.
+  const photoRequest = layerModule.getUIState?.()?.photoRequests;
+  const opened = await opening;
   const street = layerModule.getUIState?.()?.street || {};
   // A photo that opened after the camera moved on, or into a panel hidden
-  // meanwhile, is closed again.
+  // meanwhile, is closed again, and so is the card it brought up.
   const late = interrupted('imagery');
   if (late) {
-    if (opened === true) layerModule.closeViewer?.();
+    if (opened === true) {
+      layerModule.closeViewer?.();
+      releaseLateStreetCard(cardBefore);
+    }
     return late;
   }
   if (opened !== true) {
@@ -4492,13 +4690,48 @@ async function requestStreetLevel(
       { location, noImagery: true, ...(filter ? { filter } : {}) },
     );
   }
-  // Every explicit request shows its photo, also one replacing a photo whose
-  // panel or phone sheet the user had closed. Embed mode lifts the photo.
-  if (!globalThis.document?.body?.classList?.contains('ui-embed')) {
-    styleManager?.setPanelCollapsed?.(STREET_LEVEL_PANEL_ID, false, {
-      persist: false,
-    });
-    styleManager?.revealPanel?.(STREET_LEVEL_PANEL_ID);
+  // Show the result only while this request still owns the selection.
+  const settled = layerModule.getUIState?.();
+  const photo = settled?.acceptedPhoto;
+  const stillSelected = () =>
+    cards.selectionGeneration() === selectionBefore ||
+    (photo && cards.card?.key === streetLevelCardKey(photo.id));
+  const stillAccepted = () => {
+    if (photoRequest == null) return true;
+    const live = layerModule.getUIState?.();
+    return (
+      live?.photoRequests === photoRequest &&
+      live?.acceptedPhoto?.requestId === photoRequest &&
+      live?.acceptedPhoto?.id === photo?.id
+    );
+  };
+  if (
+    !body?.classList.contains('ui-embed') &&
+    stillSelected() &&
+    stillAccepted()
+  ) {
+    if (isContextRailCovered()) {
+      if (styleManager?.exitContextSelectionView?.(selectionCover) !== true)
+        return hidden({ location });
+      await nextTick();
+    }
+    if (
+      current() &&
+      !owner.taken() &&
+      !photoHidden() &&
+      stillSelected() &&
+      stillAccepted()
+    ) {
+      styleManager?.setPanelCollapsed?.(STREET_LEVEL_PANEL_ID, false, {
+        persist: false,
+      });
+      styleManager?.revealPanel?.(STREET_LEVEL_PANEL_ID);
+      if (photo?.requestId === photoRequest && photo) {
+        if (cards.card?.key === streetLevelCardKey(photo.id))
+          globalThis.dispatchEvent?.(new Event('gev:context-show-view'));
+        else announceStreetLevelPhoto(photo, { explicit: true });
+      }
+    }
   }
   return {
     ok: true,

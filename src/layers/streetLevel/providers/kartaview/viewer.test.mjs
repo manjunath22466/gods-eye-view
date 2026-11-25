@@ -236,12 +236,15 @@ test('a flat photo shows its 1280 px version, then the sharp one, with a pose fa
 });
 
 test('a failing image proxy falls back to the photo on KartaView storage', async () => {
-  const { viewer, host, loads } = setup({ failLoads: ['cdn.kartaview.org'] });
+  const { viewer, host, loads, poses } = setup({
+    failLoads: ['cdn.kartaview.org'],
+  });
   await viewer.mount(host);
   await viewer.open('flat1');
   assert.equal(loads[1].url, PHOTOS.flat1.urls.view);
   assert.equal(parts(host).picture.hidden, false);
   assert.equal(parts(host).picture.src, PHOTOS.flat1.urls.view);
+  assert.equal(poses.at(-1).still, PHOTOS.flat1.urls.view);
 });
 
 test('a 360° photo shows on the panorama, preview first; dragging turns the bearing', async () => {
@@ -288,7 +291,12 @@ test('without WebGL, or when the panorama fails, a 360° photo shows its front v
   await noGl.viewer.open('pano1');
   assert.equal(parts(noGl.host).picture.hidden, false);
   assert.equal(noGl.loads[0].url, PHOTOS.pano1.urls.view);
-  assert.equal(noGl.poses.at(-1).isPano, false);
+  assert.equal(
+    noGl.poses.at(-1).isPano,
+    true,
+    'the capture is still a panorama',
+  );
+  assert.equal(noGl.poses.at(-1).still, PHOTOS.pano1.urls.view);
   await settle();
   assert.equal(
     noGl.loads.length,
@@ -474,13 +482,17 @@ test('a lost WebGL context drops the panorama and shows the photo again on a new
   const lost = parts(host).canvas;
   lost.fire('webglcontextlost');
   assert.equal(renderers[0].destroyed, true);
+  assert.equal(poses.at(-1), null, 'the lost frame is no longer confirmed');
   await drawn();
   // A lost canvas only ever gives back its lost context: a new element.
   assert.notEqual(parts(host).canvas, lost);
   assert.deepEqual(stepped, ['pano1'], 'reopened through the core');
   assert.ok(await until(() => renderers.length === 2), 'a new renderer');
   assert.equal(renderers[1].canvas, parts(host).canvas);
-  assert.equal(poses.at(-1).imageId, 'pano1');
+  assert.ok(
+    await until(() => poses.at(-1)?.imageId === 'pano1'),
+    'the replacement canvas has drawn the photo',
+  );
   await drawn();
   assert.equal(parts(host).canvas.hidden, false);
 });

@@ -256,6 +256,66 @@ test('a place card uses the same Oslo civil date across UTC midnight', async (t)
   assert.notEqual(value, durationText(dayLengthMinutes(69.65, Date.now())));
 });
 
+test('a place leads with a street-level photo where Street Level remembers a photo a short walk away', async (t) => {
+  useAirports(t, []);
+  const photo = {
+    id: 'mapillary:1',
+    lat: 30.2612,
+    lon: -97.7452,
+    still: '/still/1.jpg',
+    providerId: 'mapillary',
+    provider: 'Mapillary',
+    creator: 'walker',
+    license: 'CC-BY-SA-4.0',
+  };
+  const { $, cards } = fixture(t, [
+    {
+      id: 'street-level',
+      name: 'Street Level',
+      enabled: true,
+      records: [photo],
+      module: {
+        photo: (id) => (id === photo.id ? photo : null),
+        providerCredit: (id) => (id === 'mapillary' ? '© Mapillary' : ''),
+      },
+    },
+  ]);
+  cards.select(
+    placeIdentity({ name: 'Congress Ave Bridge', lat: 30.261, lon: -97.7454 }),
+  );
+  await settle();
+  assert.equal(
+    $('.entity-hero__place-street img').getAttribute('src'),
+    '/still/1.jpg',
+  );
+  // Its full credit: the provider's own, who took it and its licence.
+  assert.equal(
+    $('.entity-hero__place-street small').textContent,
+    '© Mapillary · Image by walker · CC-BY-SA-4.0',
+  );
+  // The button names its action; the photo inside adds no second name.
+  assert.equal(
+    $('.entity-hero__place-street').getAttribute('aria-label'),
+    'Open street-level photo',
+  );
+  assert.equal($('.entity-hero__place-street img').getAttribute('alt'), '');
+  assert.equal($('.entity-hero .close-up-map'), null);
+  assert.equal(
+    $('.entity-hero__place-street').getAttribute('aria-describedby'),
+    $('.entity-hero__place-street small').id,
+  );
+  $('.entity-hero__place-street img').dispatchEvent(new Event('error'));
+  await settle();
+  assert.ok(
+    $('.entity-hero .close-up-map'),
+    'a failed still falls back to the map',
+  );
+  // Too far for the photo: the map.
+  cards.select(placeIdentity({ name: 'Elsewhere', lat: 30.3, lon: -97.7 }));
+  await settle();
+  assert.ok($('.entity-hero .close-up-map'));
+});
+
 test('an airport from search opens its card with the flights already loaded within 50 km, arrivals first', async (t) => {
   useAirports(t);
   const records = [

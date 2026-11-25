@@ -97,6 +97,7 @@ test('a flat picture shows its SD version with author, licence and a Panoramax l
   assert.equal(pose.bearing, 30);
   assert.equal(pose.isPano, false);
   assert.equal(pose.creator, 'tester');
+  assert.equal(pose.still, PHOTOS.flat.urls.sd);
   assert.equal(pose.license, 'CC BY-SA 4.0');
   assert.equal(pose.sequenceId, 'seq-1');
   assert.equal(
@@ -302,10 +303,12 @@ test('a photo with no author to name is captioned with the instance holding it',
   );
   photo.via = 'panoramax.ign.fr';
   assert.deepEqual(PANORAMAX_SOURCES.describe(photo), {
-    title: 'via panoramax.ign.fr',
+    title: null,
     creator: null,
+    via: 'panoramax.ign.fr',
     license: 'CC BY-SA 4.0',
     externalUrl: 'https://api.panoramax.xyz/#pic=x&focus=pic',
+    still: null,
   });
   const named = { ...photo, creator: 'Robot8A' };
   assert.equal(PANORAMAX_SOURCES.describe(named).title, null);

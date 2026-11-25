@@ -933,7 +933,8 @@ Visual (`#pp-toggles`, the display settings, rail item `palette`) is the last
 panel of the left column, after Data Layers, Utilities and Authoring, and
 opens from the left rail like them (`PanelLayoutController`, falling back to
 the right column in a host without a left stack). Context leads the right
-column, followed by CCTV, Street Level and the other right panels. An open
+column, followed by CCTV and the other right panels (the Street Level panel
+is retired: a street-level photo's card in Context is its only view). An open
 Context or CCTV panel takes the column's full height; the other right panels
 keep the content-sized layout and its hysteresis band. With nothing open, a
 rail's icons and their names show as two glass pieces side by side; once a
@@ -1865,20 +1866,17 @@ key changes: `API_KEY_REJECTED` for a `401` or Gemini's `400` with reason
 OpenAI's `429` `insufficient_quota`. Each refusal answers `502` with its code,
 and the chat shows a matching message.
 
-Chat and the voice panel sit above the dock or dock into the right rail's lane,
-which hides the rail until the panel minimizes or closes, or a rail panel opens.
-A voice or chat action that selects something (`select_nearest_aircraft`,
-`track_entity`) opens its card in the Context panel as a click on it does
-(`createContextCardOpener` in `src/ui/stores/entityCard.js`, handed to voice by the app), except in
-Cockpit (as Cockpit's own state reports it) or when another card was picked
-while the action ran, which then stays, and steps a panel docked in the lane down to its bar so the rail
-shows it; a panel above the dock leaves the rail in view and stays as it is.
-Minimized panels always sit as a bar centred above the dock; restoring returns a
-docked panel to the lane. A centred panel steps down to its bar when the pointer
-reaches the Location or Visual Presets button and rests above an open tray,
-without moving keyboard focus. Expanded over an open tray, it docks into the
-lane until the trays close; a panel that stepped down expands in the centre
-again once the trays close and the pointer leaves the wings. Panel height animates when one panel replaces the
+Chat and the voice panel float above the command dock. Old right-dock
+preferences fall back to this layout. A voice or chat action that selects
+something (`select_nearest_aircraft`, `track_entity`) opens its card in the
+Context panel as a click on it does (`createContextCardOpener` in
+`src/ui/stores/entityCard.js`, handed to voice by the app). In Cockpit or
+when another card was picked while the action ran, the existing card stays.
+Minimized panels sit as a bar above the dock. A panel steps down to its bar
+when the pointer reaches the Location or Visual Presets button, without
+moving keyboard focus. Restoring it over an open tray places it above the
+tray. A panel that stepped down expands again once the trays close and the
+pointer leaves the wings. Panel height animates when one panel replaces the
 other or the voice view changes. Minimized voice shows the last sentence from
 each side, and the empty Voice Preview suggests things to say until voice
 starts. Settings opened from chat keep chat's frame and show the shared AI
@@ -3929,7 +3927,7 @@ On desktop each side stack has a floating icon rail (`src/ui/panelNavigation.js`
 rendered by the Vue `PanelRailView` and the kit's `UiRail`) in the screen-edge
 gutter beside it. The rail lists every panel the side currently offers, in stack
 order: Data Layers and Authoring on the left; Display, CCTV, Weather and Recent
-Imagery (while shown), Street Level and Context on the right. Selecting an item
+Imagery (while shown) and Context on the right. Selecting an item
 opens its panel through `setPanelCollapsed(id, false, {explicit: true})`;
 selecting the open panel's item closes it. The item of the open panel is
 pressed (`aria-pressed`), and its tooltip is suppressed while the panel is open.
@@ -3953,7 +3951,7 @@ each side's panels from the DOM; `PanelChrome` remains the disclosure owner.
 
 At 720px and narrower, `src/ui/mobileShell.js` keeps the globe full screen and
 shows a bottom tab bar: Layers (Data Layers, with Authoring collapsed below),
-Cameras (CCTV and Street Level), Context (Global Context, plus Weather and
+Cameras (CCTV), Context (Global Context, plus Weather and
 Recent Imagery when shown), Search (Location) and More (Visual Presets and Map
 Source above Display). A tab opens one bottom sheet; the same tab, the backdrop
 or Escape closes it, and focus moves into the sheet and back to its tab. A
@@ -6681,11 +6679,11 @@ Polygons keep holes; pick ownership is deliberately unregistered so sibling
 cards still work over a zone. The row legend and selected card state that the
 layer is informational only and not a substitute for B4UFLY / LAANC.
 
-Street Level is a docked, collapsible right-rail panel (`#street-level-panel`,
-layer token `0`, option owner `street-level`, panel `ui` token `t`) that starts
-collapsed. It opens itself only when the user, voice or a tool switches the
-layer on or a photo opens, never on a restore, and those opens are not stored.
-Like the iD editor's photo overlay, it has one chip per registered provider,
+Street Level (layer token `0`, option owner `street-level`) has no panel:
+its photo opens as a card in Context and its filters are its Data Layers row
+(`src/ui/streetLevelRowControls.js`; the retired panel's `ui` token `t` still
+decodes and is ignored). Like the iD editor's photo overlay, it has one chip
+per registered provider,
 shared 360°/flat and captured-since filters (relative days, so a link keeps its
 meaning), one viewer host and one on-globe credit per active provider. Each
 provider draws in one colour (`PROVIDER_COLORS` in
@@ -6698,19 +6696,62 @@ keyless provider (KartaView), including a restored "Mapillary on" unless the lin
 switches the keyless providers off; filter-only updates never change the source.
 With it, coverage draws as z11–14 sequence lines below 60 km; the proxy strips the unused `image` layer from z14
 tiles (12 MB → ~80 KB) and shares one upstream fetch between concurrent
-requests for a tile.
+requests for a tile. A Mapillary line click draws its cones and prefers the
+nearest photo from the clicked sequence among the returned results. If none
+of those results belongs to the sequence, it uses the nearest returned photo.
+A sky click opens nothing, and a cone click opens that cone's photo.
+
+A street-level photo has its own Context card (`street-level:<provider>:<image>`),
+for every provider (Mapillary, Google Street View, KartaView, Panoramax).
+Context owns the one photo viewer (`StreetLevelViewer.vue`), in an
+offscreen, inert home that keeps it sized; a photo's card borrows it as its
+top image (`StreetViewHero.vue`) while the card can be seen, and gives it
+back on the Properties tab, under another phone sheet, or when the card
+goes. The controls and credit sit below the photo, and its date appears in
+the card's source line. The home registers on mount and lets the viewer go on unmount
+(`streetLevelViewerPlacement.js`). A photo picked on the map opens Context
+on its card after the photo settles, including the Context sheet on a phone.
+An item pick leaves Clean View or dismisses the Bhote Koshi reconstruction
+panel. Dismissing that panel stops its playback and keeps the event's
+evidence loaded. OPEN on the Data Layers row does the same unless the person changed panels
+or sheets during the load. A voice request also shows the settled photo's
+card. For billed Google Street View, the pane must be visible before the
+panorama loads. Context puts the viewer in its loading slot, then moves it
+to the accepted card. An explicit embedded request uses the visible overlay.
+A Nearby row shows its card at once and loads the photo into it. The latest
+pick wins: Street Level reports each photo request
+(`photoRequests`), and the bridge (`entityContextBridge.js`) shows a photo's
+card only if nothing else was selected since that request, a street card
+included. While a photo's card shows, each step the viewer takes (arrows,
+PLAY) moves the card along without counting as a new pick, opening Context
+or changing its tab. If the camera moves on or the photo surface is hidden while a voice
+request loads, closing that late photo clears the card it opened. The photo card's × closes the photo, and so does selecting something
+else: the new item's card shows in Context, also on a phone, where the
+Context sheet stays. Another photo's card, a click on open ground or Escape
+on the map cancels only a photo still loading for that card; a photo
+already showing goes back to the viewer's offscreen home and stays open.
+Street Level remembers up to 12 photos opened this session. With no
+selection, In view lists remembered photos from enabled providers on the
+current map and drawn sequences that cross the viewport. The sequence row
+uses its nearest point inside the viewport. On a selected card, Nearby uses
+the selected item's radius. Each sequence has one row
+(`near:<provider>:<lat>,<lon>:<sequence>`). A row opens the provider's
+nearest photo, from that sequence when supported (Mapillary and Panoramax).
+Selecting an item leaves Clean View or closes the Bhote Koshi reconstruction
+panel and reveals its Context card. Closing the reconstruction panel this way
+keeps the layer and its evidence available.
 
 Line coverage accepts a provider’s numeric `zoomFor` result or its legacy
 `{zoom, kind}` shape. Overview levels and invalid zooms show the zoom-in hint
 instead of silently requesting no tiles.
 
 Coverage is z11–14 sequence lines below 60 km; above that nothing is drawn and
-the panel says to zoom in. Tiles come from the visible ground within range of
+the Data Layers row says to zoom in. Tiles come from the visible ground within range of
 the camera, nearest first, at most 9 (the halves of a view across
 the date line count a shared tile once). Lines are draped
 `GroundPolylinePrimitive`s (`ClassificationType.BOTH`), so they follow terrain
 and Google 3D tiles alike; cones and the photo marker are ground-clamped
-billboards with a horizon cull. When Mapillary is lit without `MAPILLARY_CLIENT_TOKEN` the panel
+billboards with a horizon cull. When Mapillary is lit without `MAPILLARY_CLIENT_TOKEN`, the row
 reads KEY REQUIRED, says which key to add and disables the filters; a rejected
 key reads KEY REJECTED and stops tile requests until the layer goes off; a 429
 pauses them for its Retry-After.
@@ -6725,17 +6766,16 @@ rate-limits, the proxy answers 429 itself until the Retry-After (seconds or an
 HTTP date, at most 10 minutes) is over, so the rest of a view does not go on
 asking.
 
-The header pill is the layer switch. Lighting a chip swaps the source;
+The Data Layers toggle controls the layer. Lighting a chip swaps the source;
 clicking the lit chip turns the layer off. A chip without a usable key
 explains the key instead of switching, and the other chips keep switching.
-Lit off its map stack, a provider leaves the panel saying which map it
+Lit off its map stack, a provider leaves the row saying which map it
 needs. When the switched-on providers lack
 their keys but a switched-off one would draw with a key already set (no
 Mapillary token, Street View on Google 3D with a Google key), the layer
-reports it (`keyAlternatives`), and the panel's KEY REQUIRED, its coverage
-line and the layer row's tooltip say to light it. The
-viewer sits under the header with EXPAND, FIT/FILL and close above the
-image. SINCE is a stepped slider whose readout names the cut-off date.
+reports it (`keyAlternatives`), and the row's KEY REQUIRED state, coverage
+line and tooltip explain the available choice. The photo card has its own close
+control. EXPAND and FIT/FILL share the credit row beneath the image. SINCE is a stepped slider whose readout names the cut-off date.
 The viewer caption's bearing wraps after rounding to whole degrees, so a view
 facing 359.5° or more reads `0°` rather than `360°`.
 
@@ -6776,8 +6816,9 @@ for other maps, so it draws none: with it on, a click on the map itself
 (`scenePick.isSurfacePick`: nothing picked or Google 3D tile content, so a
 Mapillary line under the pointer wins; no tool holding the pointer; camera
 below 3 km) opens its nearest Google-collected outdoor panorama within 50 m
-and leaves the camera where it is (`groundClick.js`). Higher up the hint
-says to zoom in. **OPEN STREET VIEW** beside that hint (`#sl-nearest-btn`)
+and leaves the camera where it is (`groundClick.js`). Higher up the Street
+Level row's coverage line in Data Layers says to zoom in. The row's **OPEN
+STREET VIEW** chip (`sl-open-nearest`, `src/ui/streetLevelRowControls.js`)
 does the same at the view centre, so Street View needs no pointer; it is
 disabled until the camera is at street zoom (and aimed at the sky, it opens
 nothing and says to aim at a street). One provider is lit at a time:
@@ -6790,7 +6831,7 @@ marker is a Google-blue view cone (`marker: {kind: 'view-cone'}`) in place
 of GEV's amber pin. Its
 panoramas are all 360° and it draws no coverage, so it declares `filters: []`
 (a provider's `filters` default to both `pano` and `since`): lookups ignore
-the IMAGERY and SINCE filters, and the panel hides each filter row no lit provider
+the IMAGERY and SINCE filters, and the row hides filters no lit provider
 honours (`filterControls`). The viewer is Google's `StreetViewPanorama` in its own
 element in the viewer host, without Google's fullscreen, close and address
 controls (the address goes in the caption); a pose goes out at once and
@@ -6830,15 +6871,15 @@ filter, 332 of 1,041 segments lie on it, 676 miss it, 33 fall between).
 A filter change reloads the lines (`lineCoverage.reload`), keeps the JSON segments, and caches masks per
 filter and tile. A dense filtered PNG can take KartaView over a minute the
 first time (it answers 504 at 60 s and keeps drawing), so a timeout or 5xx is
-asked again 4 s later, four tries in all; then the panel says it did not
+asked again 4 s later, four tries in all; then the row says it did not
 filter the area in time. KartaView's `startDate` is the upload date (its
 server filters by nothing else), so SINCE goes by upload date throughout,
 the cut-off taken as its UTC day (`passesKartaViewFilter`): the nearest
 lookup asks the photo API for the projection (`SPHERE`/`PLANE`; it ignores
 `fieldOfView`) and upload date and checks each answer the same way (when
-photos are near but none passes, the panel says so), and the cones pass on
+photos are near but none passes, the row says so), and the cones pass on
 each photo's projection and upload date. The provider declares
-`sinceBasis: 'upload'`, so while it is lit the panel shows "(by
+`sinceBasis: 'upload'`, so while it is lit the row shows "(by
 upload date)" beside the SINCE value, as ANY DATE (by upload date) (`sinceNote` in the UI state). Tiles come uncompressed and
 uncacheable, so the last 24 decoded tiles are kept for 10 minutes while
 KartaView is lit (`createTileCache`, dropped when it is switched off); one
@@ -6847,11 +6888,11 @@ list is not cached. A click on a line reaches
 `handlePick(id, {groundPoint})`, and the provider asks the core
 (`actions.openNearest`) for its nearest showable photo within 50 m, without
 framing: many photos are archived (their file answers 409, while a HEAD says 200) or have no file, so the six nearest are probed at once with a GET cut
-off at the headers, and where all are gone the panel says KartaView's photos
+off at the headers, and where all are gone the row says KartaView's photos
 there are archived. Only a definite answer (403/404/409/410, or 200) is
 remembered; a storage timeout or 5xx is asked again. The open photo's
 sequence draws as cones from the 250-photo page holding it
-(`/2.0/sequence/{id}/photos`); the panel counts the drive's own photos
+(`/2.0/sequence/{id}/photos`); Street Level counts the drive's own photos
 (`countActivePhotos`, asked once per sequence). The camera direction (the
 marker, cones and a panorama's centre) is the direction of travel
 to the next photo a few metres on (`assignCourses`): KartaView is dashcam
@@ -6881,7 +6922,7 @@ https storage host. The viewer (`viewer.js`) shows a flat photo at 1,280 px,
 then 2,560 px, from the image proxy (`pr:sharp/rs:fit:W:H/<base64url>`),
 with KartaView's own 1,280 px file as the fallback, and a 360° photo's
 equirectangular `wrapped_proc` image (13,000 px wide upstream) resized to
-1,024 px, then 2,048 (docked) or 4,096 px (expanded, or once the viewer
+1,024 px, then 2,048 for the card or 4,096 px (expanded, or once the viewer
 grows), decoded off the main thread into an ImageBitmap and uploaded as RGBA
 (about 90 ms → 15 ms for 4,096 px on a phone-class CPU), on `panorama.js`, a
 single-triangle WebGL renderer (image centre = the camera heading; drag,
@@ -6924,7 +6965,7 @@ view draw their longest lines within 90,000 points (`maxPoints`,
 each). Every point becomes ~8 ground-line vertices:
 unsimplified, the lines hung the tab. Decoded tiles are kept while the
 provider is on (16, ten minutes, `tileCache.js`, shared with KartaView).
-Above 60 km nothing is drawn and the panel says to zoom in.
+Above 60 km nothing is drawn and the row says to zoom in.
 A tile decodes in slices of about 8 ms, the page getting a turn between
 them (a 2 MB z10 tile is ~200 ms of work). A busy API (429/503) holds the
 tiles back for its Retry-After, which the browser cannot read here (the API
@@ -6968,8 +7009,8 @@ producer (an uploading app and its photographer; never an account named by
 an email address), or else the instance holding the picture ("via
 panoramax.ign.fr"), and the picture's licence (CC BY-SA 4.0, Licence
 Ouverte 2.0…; StreetPose `license`), and links to the picture in the
-Panoramax viewer. Esc anywhere in the docked viewer clears the selected
-sequence before the panel can take it (KartaView too). After a GPU reset
+Panoramax viewer. Escape in the photo viewer clears the selected sequence
+before Context handles the key (KartaView too). After a GPU reset
 the viewer draws the same picture again itself (`onReopen`), leaving the
 core's lookups alone. The MCP globe panel allows the meta-catalogue and the
 three biggest instances; a picture on another instance shows only in the
@@ -7016,16 +7057,16 @@ app.
 - **Outcome.** `noImagery` marks an empty result, `imageryError` a source or
   viewer failure and `aim: 'sky'` a sky centre (from `street.nearestOutcome`);
   an empty result names a narrowing 360°/flat or SINCE filter the source
-  honours, as `filter`. Every photo the action opens reveals the panel, also
-  one the user had collapsed.
+  honours, as `filter`. A successful photo opens Context on its card. The
+  phone display follows the sheet rule below.
 - **Search.** A source without a coverage layer searches up to 250 m
   (`NEAREST_RADIUS_MAX_M`; Google honours it); clicks keep 50 m. Mapillary
   asks for 100 photos within 50 m, its API's most (the API returns them
   unordered and cuts at the limit), and gives up after 12 s, body included
   (`NEAREST_TIMEOUT_MS`).
-- **Phone.** The panel sits in the Cameras tab sheet: a photo that opens, or a
-  link that arms, opens the sheet and scrolls the panel into view
-  (`revealPanel`, which does nothing above 720px).
+- **Phone.** A successful explicit voice lookup shows the photo in the
+  Context sheet. A link that arms the viewer opens Data Layers and scrolls
+  Street Level's row, which holds OPEN, into view.
 
 The layer also exposes `requiredMapStack(id)` and `providerStatus(id)` for
 callers that decide before the panel lists a source, and `holdViewer()`. A

@@ -152,6 +152,19 @@ test('the top image per kind: anything with a model leads with the model views',
     heroKindOf({ kind: 'camera', layerId: 'cctv', ...at }),
     'camera',
   );
+  assert.equal(
+    heroKindOf({ kind: 'street photo', layerId: 'street-level', ...at }),
+    'street',
+  );
+  assert.equal(
+    heroKindOf({
+      kind: 'place',
+      layerId: 'picked-place',
+      placeStreet: true,
+      ...at,
+    }),
+    'place-street',
+  );
   assert.equal(heroKindOf({ kind: 'feature', layerId: 'news' }), 'none');
 });
 

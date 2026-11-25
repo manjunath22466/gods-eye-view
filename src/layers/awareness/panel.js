@@ -226,6 +226,7 @@ export function createPanel({ state: layerState, parts }) {
       subject: `${subject.label} · ${windowLabel}`,
       subjectIdentity: { layerId: subject.layerId, id: subject.id },
       subjectLabel: subject.label,
+      subjectOrigin: subject.origin,
       subjectNames: presentNames(subject.memberNames),
       photo: presentPhoto(subject),
       navigation: presentNavigation(),
