@@ -254,7 +254,13 @@ export function layoutRightPanelRail({
     align: 'start',
   });
   if (!layout) return;
-  const { safeTop, safeBottom, maxHeight: availableHeight } = layout;
+  // The docked view and the mini player sit under Context in this column
+  // (ContextView.vue): the room they need comes off its bottom.
+  const reserve =
+    parseFloat(stack.style.getPropertyValue('--right-stack-reserve')) || 0;
+  const safeTop = layout.safeTop;
+  const safeBottom = layout.safeBottom - reserve;
+  const availableHeight = Math.max(0, layout.maxHeight - reserve);
   const stabilityBand = Math.max(48, viewportHeight * 0.06);
   const wasFocused = stack.classList.contains('layout-focus');
   const shouldFocus =
@@ -350,6 +356,10 @@ export function layoutRightPanelRail({
   stack.dataset.layoutMode = shouldFocus ? 'focus' : 'normal';
   stack.dataset.safeTop = layoutTop.toFixed(1);
   stack.dataset.safeBottom = safeBottom.toFixed(1);
+  // Where the column could end with no room kept under it: the dock and the
+  // mini player stand on this line (ContextView.vue), so where they sit
+  // never depends on how tall the panel above them is.
+  stack.dataset.columnBottom = layout.safeBottom.toFixed(1);
   stack.dataset.availableHeight = availableHeight.toFixed(1);
   stack.dataset.requiredHeight = naturalHeight.toFixed(1);
   stack.dataset.expandedCount = String(expandedPanels.length);

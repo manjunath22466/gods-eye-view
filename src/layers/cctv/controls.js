@@ -5,10 +5,16 @@ import {
   DEFAULT_CAMERA_CALIBRATION,
   CALIBRATION_RANGE_FLOOR_M,
 } from './policy.js';
+import { t } from '../../i18n/index.js';
+import { attachCctvVideo } from './videoPlayback.js';
 
 export function createControls({ state: layerState, services, parts, source }) {
   const { holdContinuousRender, releaseContinuousRender } = services.render;
   const { CCTV_ACTIVATION_RESULT } = services.activation;
+  let rowControlsListener = null;
+  // Prev/Next are offered while Cameras is on with more than one camera.
+  const stepsOffered = () =>
+    Boolean(layerState._enabled) && layerState._records.length > 1;
 
   const methods = {
     id: 'cctv',
@@ -77,7 +83,15 @@ export function createControls({ state: layerState, services, parts, source }) {
         typeof params.selectedCameraId === 'string' &&
         layerState._recordById.has(params.selectedCameraId)
       ) {
-        parts.selection.setActiveCamera(params.selectedCameraId);
+        // A camera restored (from last time, a share link or a scene) over
+        // the layer's own opening pick is nobody's pick: its notification
+        // says so, and Context does not open its card for it.
+        layerState._quietActivation = layerState._openingCameraProvisional;
+        try {
+          parts.selection.setActiveCamera(params.selectedCameraId);
+        } finally {
+          layerState._quietActivation = false;
+        }
       }
       if (params.calibration && typeof params.calibration === 'object') {
         const calibrationCfg = params.calibration;
@@ -232,6 +246,111 @@ export function createControls({ state: layerState, services, parts, source }) {
     },
 
     /**
+     * The cameras the layer has loaded, as plain records (id, name, position)
+     * for Context's counts and nearby lists. Empty while the layer is off.
+     * @param {number} [maxCount]
+     * @returns {{ id: string, name: string, lat: number, lon: number }[]}
+     */
+    getAnalystRecords(maxCount) {
+      if (!layerState._enabled) return [];
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(0, Math.floor(maxCount))
+        : layerState._records.length;
+      const records = [];
+      for (const record of layerState._records) {
+        if (records.length >= limit) break;
+        const camera = record.camera;
+        if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon))
+          continue;
+        records.push({
+          id: String(camera.id),
+          name: camera.name || '',
+          lat: camera.lat,
+          lon: camera.lon,
+        });
+      }
+      return records;
+    },
+
+    /**
+     * A video camera's own stream, for a view that keeps playing it after the
+     * layer's projection lets it go (a docked camera with Cameras off). Null
+     * for a still camera, a browser-overlay camera or one the layer does not
+     * hold. The records stay while the layer is off.
+     * @param {string} cameraId
+     * @returns {?{url: string, feedType: string}}
+     */
+    streamSourceForCamera(cameraId) {
+      const camera = layerState._recordById.get(String(cameraId))?.camera;
+      if (!camera || parts.model.isBrowserOverlayCamera(camera)) return null;
+      const feedType = parts.model.normalizeFeedType(camera.feedType);
+      if (!parts.model.isVideoFeedType(feedType)) return null;
+      return { url: source.getMediaUrl(camera), feedType };
+    },
+
+    /**
+     * Play a stream from `streamSourceForCamera` into a muted, inline video
+     * element: one connection, released (and its lease returned) by the
+     * handle's `dispose()`; `onFailure` hears a stream that cannot play.
+     * @param {HTMLVideoElement} video
+     * @param {{url: string, feedType: string}} stream
+     * @param {{onFailure?: () => void}} [options]
+     * @returns {{dispose: () => void}}
+     */
+    attachCameraStream(video, stream, { onFailure = () => {} } = {}) {
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      video.preload = 'auto';
+      return attachCctvVideo(video, stream.url, stream.feedType, { onFailure });
+    },
+
+    /**
+     * The URL of a camera's latest still, for a pinned camera's tile in
+     * Context. It changes once per refresh interval (at least the provider's
+     * own minimum), so reading it again on that interval loads a new frame.
+     * Null for a camera the layer does not hold.
+     * @param {string} cameraId
+     * @returns {?{url: string, refreshMs: number}}
+     */
+    frameUrlForCamera(cameraId) {
+      const record = layerState._recordById.get(String(cameraId));
+      if (!record?.camera) return null;
+      const refreshMs = Math.max(
+        10_000,
+        Number.isFinite(record.camera.frameRefreshMs)
+          ? record.camera.frameRefreshMs
+          : 0,
+      );
+      return { url: source.getFrameUrl(record.camera, refreshMs), refreshMs };
+    },
+
+    /**
+     * What a camera's card shows about it: where it looks, how often its
+     * frame refreshes, and who runs its feed. Null for an unknown camera.
+     * @param {string} cameraId
+     */
+    cameraDetails(cameraId) {
+      const camera = layerState._recordById.get(String(cameraId))?.camera;
+      if (!camera) return null;
+      const finite = (value) => (Number.isFinite(value) ? value : null);
+      const words = (value) =>
+        (typeof value === 'string' && value.trim()) || null;
+      return {
+        name: words(camera.name),
+        city: words(camera.city),
+        provider: words(camera.provider),
+        // The owner a partner-supplied feed inside a pack names.
+        credit: words(camera.credit),
+        feedType: words(camera.feedType),
+        headingDeg: finite(camera.headingDeg),
+        fovDeg: finite(camera.fovDeg),
+        rangeM: finite(camera.rangeM),
+        refreshMs: Math.max(10_000, finite(camera.frameRefreshMs) ?? 0),
+      };
+    },
+
+    /**
      * Returns basic layer statistics, including initial-load progress while
      * the staggered geometry queue is draining.
      * @returns {{ count: number, lastUpdate: number|null, error: string|null, loading: boolean, loadingLoaded: number, loadingTotal: number }}
@@ -334,6 +453,79 @@ export function createControls({ state: layerState, services, parts, source }) {
         parts.navigation.focusCamera(nextId, options.durationSec || 1.8);
       }
       return nextId;
+    },
+
+    /**
+     * Steps to the previous or next of the cameras nearest the view and
+     * selects it, flying there unless `focus` is false (see
+     * navigation.stepNearbyCamera).
+     * @param {number} direction Negative for previous, otherwise next.
+     * @param {{focus?: boolean, durationSec?: number}} [options]
+     * @returns {?{cameraId: string, focusResult: ?string}}
+     */
+    stepNearbyCamera(direction, options = {}) {
+      return parts.navigation.stepNearbyCamera(direction, options);
+    },
+
+    /**
+     * The cameras within a radius of a point, nearest first, with their
+     * distances: Context's Cameras list (see navigation.camerasNear).
+     * @param {{lat: number, lon: number}} at
+     * @param {{radiusKm?: number, limit?: number}} [options]
+     */
+    camerasNear(at, options) {
+      return parts.navigation.camerasNear(at, options);
+    },
+
+    /**
+     * Context's Cameras list area, for Prev/Next to walk the same list.
+     * @param {?{lat: number, lon: number, radiusKm: number}} area
+     */
+    setNearbyArea(area) {
+      parts.navigation.setNearbyArea(area);
+    },
+
+    /**
+     * ‹ Prev · Next › on the Data Layers row, while Cameras is on: they step
+     * through the cameras nearest the view and open each one's card.
+     */
+    getRowControls() {
+      if (!stepsOffered()) return null;
+      return {
+        chips: [
+          {
+            id: 'previous-camera',
+            label: t('Previous camera'),
+            icon: 'chevron_left',
+            action: true,
+            onClick: () => parts.navigation.stepNearbyCamera(-1),
+          },
+          {
+            id: 'next-camera',
+            label: t('Next camera'),
+            icon: 'chevron_right',
+            action: true,
+            onClick: () => parts.navigation.stepNearbyCamera(1),
+          },
+        ],
+      };
+    },
+
+    setRowControlsListener(listener) {
+      if (rowControlsListener)
+        layerState._listeners.delete(rowControlsListener);
+      rowControlsListener = null;
+      if (typeof listener !== 'function') return;
+      // Redrawn only when whether the steps are offered changes, not on
+      // every camera or progress update.
+      let previous = stepsOffered();
+      rowControlsListener = () => {
+        const offered = stepsOffered();
+        if (offered === previous) return;
+        previous = offered;
+        listener();
+      };
+      layerState._listeners.add(rowControlsListener);
     },
 
     /**

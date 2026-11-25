@@ -5,6 +5,7 @@ import test from 'node:test';
 import { createPinia } from 'pinia';
 import { createApp, nextTick } from 'vue';
 import { CctvControls } from './cctvControls.js';
+import { CCTV_SELECTED_EVENT } from './cctvEvents.js';
 import { presentCctvPanel } from './cctvPresentation.js';
 import { useCctvStore } from './stores/cctv.js';
 import CctvPanel from './views/panels/CctvPanel.vue';
@@ -33,6 +34,7 @@ function panel(t, { video = false } = {}) {
     ]),
   );
   if (video) elements._cctvVideo = document.getElementById('cctv-video');
+  const store = useCctvStore(pinia);
   const controls = new CctvControls({
     elements: {
       ...elements,
@@ -52,14 +54,14 @@ function panel(t, { video = false } = {}) {
       setPanelCollapsed() {},
       syncViewport() {},
     },
-    store: useCctvStore(pinia),
+    store,
   });
   t.after(() => {
     controls.destroy();
     app.unmount();
   });
   const byId = (id) => document.getElementById(id);
-  return { controls, byId };
+  return { controls, byId, store };
 }
 
 const camera = {
@@ -73,13 +75,25 @@ const camera = {
   calBadge: 'curated',
 };
 
-test('the panel keeps its initial markup until the controls render', (t) => {
+test('the panel and its camera tools keep their initial markup until the controls render', (t) => {
   const { byId } = panel(t);
   assert.equal(byId('cctv-enable-btn').textContent, 'CCTV OFF');
   assert.equal(byId('cctv-enable-btn').classList.contains('active'), false);
-  assert.equal(byId('cctv-coverage-btn').textContent, 'COVERAGE OFF');
-  assert.equal(byId('cctv-auto-hop-btn').textContent, 'AUTO HOP OFF');
-  assert.equal(byId('cctv-projection-btn').textContent, 'PROJECTION ON');
+  // The camera tools are a block of their own inside the panel (Context's
+  // Camera settings tab borrows them), not a fold.
+  assert.equal(byId('cctv-tools').tagName, 'DIV');
+  assert.equal(byId('cctv-panel').contains(byId('cctv-tools')), true);
+  // Toggles: a name, a switch and their state in aria-pressed.
+  const toggle = (id) => [
+    byId(id).textContent,
+    byId(id).getAttribute('aria-pressed'),
+  ];
+  assert.deepEqual(toggle('cctv-coverage-btn'), ['CoverageOff', 'false']);
+  assert.deepEqual(toggle('cctv-auto-hop-btn'), [
+    'Hop between cameras',
+    'false',
+  ]);
+  assert.deepEqual(toggle('cctv-projection-btn'), ['Projection', 'true']);
   assert.equal(byId('cctv-quality-chip').textContent, 'CAL · --');
   assert.equal(byId('cctv-quality-chip').hasAttribute('data-cal-badge'), false);
   assert.equal(
@@ -105,8 +119,8 @@ test('a disabled layer disables every button but the switch', async (t) => {
   );
 });
 
-test('an active camera renders the switch, toggles, CAL chip and meta line', async (t) => {
-  const { controls, byId } = panel(t);
+test('an active camera renders the toggles, CAL chip and meta line', async (t) => {
+  const { controls, byId, store } = panel(t);
   controls._renderCctvState({
     enabled: true,
     count: 1,
@@ -118,26 +132,32 @@ test('an active camera renders the switch, toggles, CAL chip and meta line', asy
     showProjection: false,
   });
   await nextTick();
-  assert.equal(byId('cctv-enable-btn').textContent, 'CCTV ON');
-  assert.equal(byId('cctv-enable-btn').classList.contains('active'), true);
   for (const id of Object.values(BUTTONS))
     assert.equal(byId(id).disabled, false, id);
-  assert.equal(byId('cctv-coverage-btn').textContent, 'VIEWSHED ON');
-  assert.equal(byId('cctv-coverage-btn').classList.contains('active'), true);
-  assert.equal(byId('cctv-auto-hop-btn').textContent, 'AUTO HOP ON');
-  assert.equal(byId('cctv-projection-btn').textContent, 'PROJECTION OFF');
-  assert.equal(byId('cctv-projection-btn').classList.contains('active'), false);
+  assert.equal(
+    byId('cctv-coverage-btn').querySelector('.gev-tool-toggle__state')
+      .textContent,
+    'Viewshed',
+  );
+  assert.equal(byId('cctv-coverage-btn').classList.contains('is-on'), true);
+  assert.equal(byId('cctv-auto-hop-btn').textContent, 'Hop between cameras');
+  assert.equal(byId('cctv-projection-btn').textContent, 'Projection');
+  assert.equal(byId('cctv-projection-btn').classList.contains('is-on'), false);
   // The toggles say their state to assistive technology, not only by colour.
   const pressed = (id) => byId(id).getAttribute('aria-pressed');
-  assert.equal(pressed('cctv-enable-btn'), 'true');
   assert.equal(pressed('cctv-coverage-btn'), 'true');
   assert.equal(pressed('cctv-auto-hop-btn'), 'true');
   assert.equal(pressed('cctv-projection-btn'), 'false');
   assert.equal(pressed('cctv-adjust-btn'), 'false');
-  assert.equal(byId('cctv-quality-chip').textContent, 'CAL · CURATED');
-  assert.equal(byId('cctv-quality-chip').dataset.calBadge, 'curated');
+  // The calibration status reads as a sentence.
   assert.equal(
-    byId('cctv-meta').textContent,
+    byId('cctv-quality-chip').textContent,
+    'Hand-checked calibration',
+  );
+  assert.equal(byId('cctv-quality-chip').dataset.calBadge, 'curated');
+  assert.equal(store.view.activeCameraId, 'a');
+  assert.equal(
+    store.view.meta,
     'Austin · HDG 92° · FOV 60° · RANGE 120m · OFF · CURATED · Configured Source',
   );
 });
@@ -175,13 +195,19 @@ test('coverage reads its mode, or the older on/off flag', () => {
   const text = (state) => presentCctvPanel(state, true).coverage;
   assert.deepEqual(text({ coverageMode: 'on' }), {
     active: true,
+    mode: 'on',
     text: 'COVERAGE ON',
   });
   assert.deepEqual(text({ showCoverage: true }), {
     active: true,
+    mode: 'on',
     text: 'COVERAGE ON',
   });
-  assert.deepEqual(text({}), { active: false, text: 'COVERAGE OFF' });
+  assert.deepEqual(text({}), {
+    active: false,
+    mode: 'off',
+    text: 'COVERAGE OFF',
+  });
 });
 
 test('losing the active camera resets the CAL chip', async (t) => {
@@ -231,14 +257,14 @@ async function calibrating(t) {
 
 test('a pose chip types against the camera base captured when it opened', async (t) => {
   const { controls, patches, chip, begin, key } = await calibrating(t);
-  assert.equal(chip.textContent, 'HDG 30.0°');
+  assert.equal(chip.textContent, '30.0°');
   const input = await begin();
   assert.ok(input, 'the chip holds an input');
   assert.ok(document.activeElement === input, 'the input has focus');
   assert.equal(chip.textContent, 'HDG ');
   assert.equal(input.value, '30.0');
   assert.equal(input.step, '0.1');
-  assert.equal(input.getAttribute('aria-label'), 'HDG');
+  assert.equal(input.getAttribute('aria-label'), 'Heading in degrees');
   input.value = '100';
   // A refresh while typing keeps the draft and the base the edit opened with.
   controls._renderCctvState({
@@ -262,7 +288,25 @@ test('a pose chip types against the camera base captured when it opened', async 
   assert.equal(controls._calibrationEdit, null);
   await nextTick();
   assert.ok(!chip.querySelector('input'), 'the input is gone');
-  assert.equal(chip.textContent, 'HDG 30.0°');
+  assert.equal(chip.textContent, '30.0°');
+});
+
+test('each pose value is named by its field label, and its input by the label and unit', async (t) => {
+  const { begin } = await calibrating(t);
+  // The name aria-labelledby gives: the referenced elements' text, in order.
+  const named = (node) =>
+    (node.getAttribute('aria-labelledby') || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent.trim())
+      .join(' ')
+      .replace(/[\u2066-\u2069]/g, '');
+  const chip = (field) => document.querySelector(`[data-cal-field="${field}"]`);
+  assert.equal(named(chip('heading')), 'Heading 30.0°');
+  assert.equal(named(chip('range')), 'Range 120 m');
+  assert.equal(named(chip('north')), 'North offset 0.0 m');
+  const input = await begin();
+  assert.equal(input.getAttribute('aria-label'), 'Heading in degrees');
 });
 
 test('a camera switch cancels calibration before old blur can change the new camera', async (t) => {
@@ -285,7 +329,7 @@ test('a camera switch cancels calibration before old blur can change the new cam
   await nextTick();
   assert.deepEqual(patches, []);
   assert.ok(!chip.querySelector('input'), 'the input is gone');
-  assert.equal(chip.textContent, 'HDG 200.0°');
+  assert.equal(chip.textContent, '200.0°');
 });
 
 test('Escape claims calibration cancellation and disposal prevents late commits', async (t) => {
@@ -297,7 +341,7 @@ test('Escape claims calibration cancellation and disposal prevents late commits'
   input.dispatchEvent(new Event('blur'));
   assert.equal(escape.defaultPrevented, true);
   await nextTick();
-  assert.equal(chip.textContent, 'HDG 30.0°');
+  assert.equal(chip.textContent, '30.0°');
   input = await begin();
   input.value = '120';
   controls.destroy();
@@ -318,7 +362,7 @@ test('ADJUST, SAVE and RESET follow whether a camera can be calibrated', async (
   ])
     assert.equal(byId(id).disabled, true, id);
   const chip = document.querySelector('[data-cal-field="north"]');
-  assert.equal(chip.textContent, 'ΔN --');
+  assert.equal(chip.textContent, '--');
   assert.equal(chip.disabled, true);
   controls._renderCctvState({
     enabled: true,
@@ -329,10 +373,11 @@ test('ADJUST, SAVE and RESET follow whether a camera can be calibrated', async (
     calibrationMode: true,
   });
   await nextTick();
-  assert.equal(byId('cctv-adjust-btn').textContent, 'ADJUST ON');
-  assert.equal(byId('cctv-adjust-btn').classList.contains('active'), true);
+  assert.equal(byId('cctv-adjust-btn').textContent, 'Adjust');
+  assert.equal(byId('cctv-adjust-btn').getAttribute('aria-pressed'), 'true');
+  assert.equal(byId('cctv-adjust-btn').classList.contains('is-on'), true);
   assert.equal(byId('cctv-calib-save-btn').disabled, false);
-  assert.equal(chip.textContent, 'ΔN 0.0m');
+  assert.equal(chip.textContent, '0.0 m');
   assert.equal(chip.disabled, false);
 });
 
@@ -343,7 +388,7 @@ test('blur alone commits the draft; an empty draft changes nothing', async (t) =
   input.dispatchEvent(new Event('blur'));
   assert.deepEqual(patches, []);
   await nextTick();
-  assert.equal(chip.textContent, 'HDG 30.0°');
+  assert.equal(chip.textContent, '30.0°');
   input = await begin();
   input.value = '25';
   input.dispatchEvent(new Event('blur'));
@@ -592,6 +637,76 @@ test('a panel the accordion folded still has its saved state closed', (t) => {
   assert.deepEqual(calls, [['cctv-panel', true]]);
 });
 
+test('a picked camera opens its card in Context', (t) => {
+  const { controls } = panel(t);
+  const picked = [];
+  const onPicked = (event) => picked.push(event.detail.cameraId);
+  document.addEventListener(CCTV_SELECTED_EVENT, onPicked);
+  t.after(() => document.removeEventListener(CCTV_SELECTED_EVENT, onPicked));
+  // The camera already active on the render that turns the layer on (the
+  // one it chose for itself, or one restored) opens nothing. The fixtures
+  // carry only the fields the layer's uiState() publishes.
+  controls._renderCctvState(activeState);
+  assert.deepEqual(picked, []);
+  controls._renderCctvState({ ...activeState, enabled: false });
+  controls._renderCctvState({ ...activeState, activeCameraId: 'restored' });
+  assert.deepEqual(
+    picked,
+    [],
+    'a camera restored from last time is not a pick',
+  );
+  // A camera someone picks is announced once.
+  controls._renderCctvState({ ...activeState, activeCameraId: 'other' });
+  controls._renderCctvState({ ...activeState, activeCameraId: 'other' });
+  assert.deepEqual(picked, ['other']);
+  // The layer's own opening camera, moved to the one nearest the view after
+  // a settled pan, is not a pick either (uiState's `openingCamera`).
+  controls._renderCctvState({
+    ...activeState,
+    activeCameraId: 'nearest-after-pan',
+    openingCamera: true,
+  });
+  assert.deepEqual(picked, ['other']);
+  // With Auto-hop on, timed hops open nothing: the layer marks its own
+  // timed step as openingCamera while it activates, so the open card stays
+  // and Context is not reopened on each step.
+  for (const id of ['third', 'fourth', 'fifth'])
+    controls._renderCctvState({
+      ...activeState,
+      activeCameraId: id,
+      autoHop: true,
+      openingCamera: true,
+    });
+  assert.deepEqual(picked, ['other']);
+  // A person's step (Next or Previous, voice) with Auto-hop on is a pick.
+  controls._renderCctvState({
+    ...activeState,
+    activeCameraId: 'manual-next',
+    autoHop: true,
+  });
+  assert.deepEqual(picked, ['other', 'manual-next']);
+});
+
+test('a camera picked after a deselect left none active opens its card', (t) => {
+  const { controls } = panel(t);
+  const picked = [];
+  const onPicked = (event) => picked.push(event.detail.cameraId);
+  document.addEventListener(CCTV_SELECTED_EVENT, onPicked);
+  t.after(() => document.removeEventListener(CCTV_SELECTED_EVENT, onPicked));
+  const at = (id) => ({
+    ...activeState,
+    activeCameraId: id,
+    activeCamera: id ? { ...camera, id } : null,
+  });
+  controls._renderCctvState(at('a'));
+  controls._renderCctvState(at('b'));
+  // An empty-ground click leaves no camera active.
+  controls._renderCctvState(at(null));
+  // Voice, next/previous or the Data Layers row then picks another.
+  controls._renderCctvState(at('c'));
+  assert.deepEqual(picked, ['b', 'c']);
+});
+
 test('the meta line of a disabled layer does not describe its last camera', () => {
   const off = { ...activeState, enabled: false, count: 3 };
   assert.equal(
@@ -746,4 +861,54 @@ test('leaving the Cameras sheet stops the live video and coming back starts it a
   await settle();
   assert.ok(controls._cctvVideoSurface);
   assert.notEqual(controls._cctvVideoSurface, first);
+});
+
+test('the tools group into View, Auto-hop, Calibration and Scene summary, in plain words', async (t) => {
+  const { controls, byId, store } = panel(t);
+  const sent = [];
+  controls.actions.setParams = (params) => sent.push(params);
+  // The interval select is read from the page like the other tools.
+  controls._cctvAutoHopSec = byId('cctv-auto-hop-sec');
+  controls._initCctvPanel();
+  controls._renderCctvState({
+    enabled: true,
+    count: 1,
+    cameraIndex: [camera],
+    activeCameraId: 'a',
+    activeCamera: { ...camera, pitchDeg: -18, heightM: 8 },
+    autoHop: true,
+    autoHopSec: 30,
+    summaryLines: [
+      { label: 'Coverage', value: '0.01 km²' },
+      { label: 'Overlap', value: '15 cameras' },
+      { label: 'Projection', value: 'On' },
+    ],
+  });
+  await nextTick();
+  const heads = [
+    ...document.querySelectorAll('#cctv-tools .cctv-tools__head'),
+  ].map((node) => node.textContent);
+  assert.deepEqual(heads, ['View', 'Auto-hop', 'Calibration', 'Scene summary']);
+  // Calibration is a fold, open in the tab; its values sit beside
+  // readable labels.
+  assert.equal(document.querySelector('.cctv-tools__calibration').open, true);
+  const rows = [...document.querySelectorAll('.cctv-cal-grid__row')].map(
+    (row) => row.textContent.replace(/\s+/g, ' ').trim(),
+  );
+  assert.equal(rows[0], 'Heading 91.6°');
+  assert.match(rows[1], /^Pitch [−-]18\.0°$/);
+  // The scene summary as short labelled lines, not one caps run-on.
+  const lines = [
+    ...byId('cctv-summary').querySelectorAll('.cctv-tools__line'),
+  ].map((line) => line.textContent.replace(/\s+/g, ' ').trim());
+  assert.deepEqual(lines, [
+    'Coverage 0.01 km²',
+    'Overlap 15 cameras',
+    'Projection On',
+  ]);
+  assert.equal(store.view.autoHop.sec, 30);
+  assert.equal(byId('cctv-auto-hop-sec').value, '30');
+  byId('cctv-auto-hop-sec').value = '45';
+  byId('cctv-auto-hop-sec').dispatchEvent(new Event('change'));
+  assert.deepEqual(sent.at(-1), { autoHopSec: 45 });
 });

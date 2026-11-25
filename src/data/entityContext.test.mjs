@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { twoline2satrec } from 'satellite.js';
+import { fromDegrees } from '../geo/ellipsoid.js';
 import { createOrbits } from '../layers/satellites/orbits.js';
 import { createRecords } from '../layers/satellites/records.js';
 import {
@@ -9,7 +10,6 @@ import {
   findRecord,
   formatFact,
   layerBreakdown,
-  nearbyByKind,
   nearbyByLayer,
   nearbyEntities,
   recordTitle,
@@ -197,8 +197,8 @@ test('selected-card nearby rows open a cable at the point used for its distance'
   const layers = manager({ [layerId]: { name: 'Cables', records: [cable] } });
   const rows = [
     nearbyEntities(layers, { layerId, ...here }).same[0],
-    nearbyByKind(layers, here).other[0],
-    nearbyByKind(layers, here, { query: 'example' }).other[0],
+    nearbyByLayer(layers, here)[0].items[0],
+    nearbyByLayer(layers, here, { query: 'example' })[0].items[0],
   ];
   assert.deepEqual(
     rows.map((row) => [
@@ -440,7 +440,7 @@ test('the view summary with no rows wanted still counts, and never throws', () =
   assert.deepEqual(groups[0].items, []);
 });
 
-test('in-view satellites stand at their SGP4 catalogue positions (the layer records), not the renderer', () => {
+test('in-view satellites use their drawn positions when available and otherwise use layer records', () => {
   const satrec = twoline2satrec(
     '1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927',
     '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537',
@@ -453,6 +453,7 @@ test('in-view satellites stand at their SGP4 catalogue positions (the layer reco
     source: {},
   });
   let rendererAsked = 0;
+  let rendered = null;
   const records = createRecords({
     state: {
       _enabled: true,
@@ -466,7 +467,7 @@ test('in-view satellites stand at their SGP4 catalogue positions (the layer reco
       rendering: {
         _pointPosition: () => {
           rendererAsked++;
-          return null;
+          return rendered;
         },
       },
     },
@@ -495,6 +496,18 @@ test('in-view satellites stand at their SGP4 catalogue positions (the layer reco
   assert.equal(item.identity.lon, sgp4.longitude);
   assert.ok(item.distanceKm < 0.01, 'centred on its propagated point');
   assert.equal(rendererAsked, 0, 'no renderer position is read');
+
+  rendered = fromDegrees(80, 0, 550_000);
+  layer.module.getViewRecords = records.getViewRecords;
+  const [drawn] = viewSummary(
+    layers,
+    null,
+    { lat: 0, lon: 0 },
+    { hemisphere: true, heightM: 20_000_000 },
+  );
+  assert.equal(drawn.items[0].title, 'ISS (ZARYA)');
+  assert.ok(Math.abs(drawn.items[0].identity.lon - 80) < 1e-6);
+  assert.equal(rendererAsked, 1, 'the drawn point clears the limb');
 });
 
 test('flight insights work out phase, flight level, Mach, squawk meaning and signal age', () => {
@@ -715,12 +728,26 @@ test('a card shows the photo its layer looked up: the tracked airliner, the sele
     photographer: 'A. Spotter',
     licence: '',
   });
-  // What picks the globe's fleet model for it.
-  assert.deepEqual(tracked.aircraftModel, {
+  // What picks the globe's fleet model for it, and for a vessel.
+  assert.deepEqual(tracked.modelSubject, {
+    fleet: 'aircraft',
     typeCode: 'B739',
     category: 'A3',
     callsign: 'DAL1',
   });
+  assert.deepEqual(
+    describeEntity(planes, { layerId: 'ais-live-vessels', id: 'EVER GIVEN' })
+      .modelSubject,
+    {
+      fleet: 'vessel',
+      type: null,
+      mmsi: '353136000',
+      virtual: false,
+      length: null,
+      beam: null,
+      name: null,
+    },
+  );
   // Photos are looked up for the tracked plane only.
   assert.equal(
     describeEntity(planes, { layerId: 'flights', id: 'aa0002' }).photo,
@@ -817,4 +844,58 @@ test('Nearby keeps counts and stable nearest rows when only a few of many matche
       expected.slice(0, limit),
     );
   }
+});
+
+test('a layer that hands out what it has near a point is counted from that: Street Level counts its drawn lines', () => {
+  const here = { lat: 30, lon: -97 };
+  const asked = [];
+  const lines = [
+    {
+      id: 'near:mapillary:30.001000,-97.000000',
+      name: 'Mapillary',
+      lat: 30.001,
+      lon: -97,
+    },
+    {
+      id: 'near:mapillary:30.010000,-97.000000',
+      name: 'Mapillary',
+      lat: 30.01,
+      lon: -97,
+    },
+  ];
+  const layers = manager({
+    'street-level': { name: 'Street Level', records: [] },
+  });
+  layers.layers.get('street-level').module.getRecordsNear = (
+    point,
+    radiusKm,
+  ) => {
+    asked.push([point, radiusKm]);
+    return lines;
+  };
+  const [list] = nearbyByLayer(layers, here, { radiusKm: 5, limit: 3 });
+  assert.deepEqual(asked, [[here, 5]], 'asked for the radius Context shows');
+  assert.equal(list.count, 2, 'not 0 while it has lines in view');
+  assert.equal(list.items[0].title, 'Mapillary');
+  assert.equal(
+    list.items[0].identity.id,
+    'near:mapillary:30.001000,-97.000000',
+    'a row opens the photo nearest its line',
+  );
+  const card = describeEntity(layers, {
+    layerId: 'street-level',
+    id: 'near:mapillary:30.010000,-97.000000',
+    record: lines[1],
+  });
+  assert.equal(
+    nearbyEntities(layers, card).same[0].title,
+    'Mapillary',
+    'a card lists the lines near it too',
+  );
+  layers.layers.get('street-level').enabled = false;
+  assert.deepEqual(
+    nearbyByLayer(layers, here, { radiusKm: 5 }),
+    [],
+    'never read while off',
+  );
 });

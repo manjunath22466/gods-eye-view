@@ -30,6 +30,9 @@ import {
   knownRadioLocation,
   normalizeStackId,
 } from './gevActions.js';
+import { useEntityCardStore } from '../ui/stores/entityCard.js';
+import { applicationPinia } from '../ui/vueRuntime.js';
+import { PLACE_PICK_EVENT } from '../ui/contextEvents.js';
 import { MAP_STACKS } from '../mapStackController.js';
 import { KEY_REJECTED_MESSAGE } from '../layers/streetLevel/providers/google/policy.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
@@ -38,7 +41,13 @@ import { withEntityRecord } from '../data/entityRecords.js';
 import { bindFakeCesiumCamera } from '../testSupport/fakeCameraPort.mjs';
 import { fakeSceneQuery } from '../testSupport/fakeCesiumScene.mjs';
 import { bindRenderer, cameraOf } from '../render/rendererOf.js';
-import { entityFollowTarget } from '../data/followed.js';
+import { entityFollowTarget, isFollowing } from '../data/followed.js';
+import { installPlacePick } from '../ui/placePick.js';
+import { _setAirportsFetchForTest } from '../data/airports.js';
+
+// Node has no document: an event target stands in, so the tests that check
+// what is sent on the document really listen.
+globalThis.document ??= Object.assign(new EventTarget(), { stub: true });
 
 test('every live basemap is reachable by its own id — no enum value without a voice alias', () => {
   // B1 regression: a stack added to MAP_STACKS (and the set_map_stack enum)
@@ -3455,10 +3464,14 @@ test('voice CCTV select, next, prev, and nearest report tracking-refused flights
       activeCameraId = id;
       return true;
     },
-    cycleCamera(step, options) {
-      calls.push(['cycle', step, options]);
-      activeCameraId = step > 0 ? 'cam-b' : 'cam-a';
-      return activeCameraId;
+    // Next and previous take the layer's own nearby-camera walk.
+    stepNearbyCamera(direction) {
+      calls.push(['step', direction]);
+      activeCameraId = activeCameraId === 'cam-a' ? 'cam-b' : 'cam-a';
+      return {
+        cameraId: activeCameraId,
+        focusResult: CCTV_FOCUS_RESULT.TRACKING_HOLDS_VIEW,
+      };
     },
     focusNearest(options) {
       calls.push(['nearest', options]);
@@ -3492,10 +3505,8 @@ test('voice CCTV select, next, prev, and nearest report tracking-refused flights
   assert.deepEqual(calls, [
     ['select', 'cam-b', undefined],
     ['focus', 'cam-b', 1.8],
-    ['cycle', 1, undefined],
-    ['focus', 'cam-b', 1.8],
-    ['cycle', -1, undefined],
-    ['focus', 'cam-a', 1.8],
+    ['step', 1],
+    ['step', -1],
     ['nearest', { focus: false }],
     ['focus', 'cam-a', 1.8],
   ]);
@@ -6962,6 +6973,8 @@ function createStreetLevelHarness({
   imageryError = null,
   sky = false,
   photoOpen = false,
+  docked = false,
+  placeSearch,
   duringMapSwitch = null,
   duringEnable = null,
 } = {}) {
@@ -7003,6 +7016,7 @@ function createStreetLevelHarness({
   const names = { google: 'Google Street View', mapillary: 'Mapillary' };
   const layer = {
     providerIds: ['mapillary', 'google'],
+    dockedPhotoAdmission: () => (docked ? () => docked : null),
     requiredMapStack: (id) => (id === 'google' ? 'photoreal' : null),
     providerStatus: (id) =>
       names[id]
@@ -7127,13 +7141,20 @@ function createStreetLevelHarness({
     getAll: () => [{ id: 'street-level', name: 'Street Level', enabled }],
   };
   styleManager.setPanelCollapsed = (id, collapsed) =>
-    revealed.push(`collapse:${id}:${collapsed}`);
-  styleManager.revealPanel = (id) => revealed.push(`reveal:${id}`);
-  const runner = createGevActionRunner({ viewer, styleManager, dataManager });
+    revealed.push(['collapse', id, collapsed]);
+  styleManager.revealPanel = (id, options) =>
+    revealed.push(['reveal', id, options]);
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager,
+    dataManager,
+    placeSearch,
+  });
   return {
     runner,
     order,
     finishFlight: () => completeFlight?.(),
+    closeDock: () => (docked = false),
     layer,
     dataManager,
     lookups,
@@ -7228,6 +7249,106 @@ test('show_street_level on Mapillary keeps the map, searches at the default radi
     'open:mapillary:default:false',
   ]);
   assert.equal(result.flew, false);
+});
+
+test('a docked voice replacement switches source and moves only after its photo opens', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const args = { latitude: 38.58, longitude: -121.49, provider: 'google' };
+  const options = {
+    enabled: true,
+    activeStack: 'photoreal',
+    photoOpen: true,
+    docked: true,
+  };
+  const failure = createStreetLevelHarness({
+    ...options,
+    imageryError: 'Fixture unavailable',
+  });
+  assert.equal((await failure.runner('show_street_level', args)).ok, false);
+  assert.equal(failure.street.imageId, 'eiffel-photo');
+  assert.deepEqual(failure.order, ['open:google:250:false']);
+
+  const success = createStreetLevelHarness(options);
+  const result = await success.runner('show_street_level', args);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.flew, true);
+  assert.deepEqual(success.order, [
+    'open:google:250:false',
+    'params:google:voice',
+    'fly',
+  ]);
+});
+
+test('a docked voice replacement while the docked photo restores says it is still restoring', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const fixture = createStreetLevelHarness({
+    enabled: true,
+    activeStack: 'photoreal',
+    photoOpen: true,
+    docked: true,
+  });
+  // As the layer: a replacement asked for during the restore is refused
+  // without a failure report, and the old photo stays.
+  let restoring = true;
+  fixture.layer.dockedPhotoRestoring = () => restoring;
+  fixture.layer.openNearest = async () => false;
+  const args = { latitude: 38.58, longitude: -121.49, provider: 'google' };
+  const refused = await fixture.runner('show_street_level', args);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.restoring, true);
+  assert.equal(
+    refused.error,
+    'The docked photo is still being restored. Try again in a moment.',
+  );
+  assert.equal(fixture.street.imageId, 'eiffel-photo');
+
+  // A replacement that fails on its own is not reported as a restore.
+  restoring = false;
+  const failed = await fixture.runner('show_street_level', args);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.restoring, undefined);
+});
+
+test('closing the dock during voice geocoding keeps the old request from opening a photo', async () => {
+  let resolvePlace;
+  let startSearch;
+  const geocoding = new Promise((resolve) => {
+    startSearch = resolve;
+  });
+  const result = new Promise((resolve) => {
+    resolvePlace = resolve;
+  });
+  const fixture = createStreetLevelHarness({
+    enabled: true,
+    photoOpen: true,
+    docked: true,
+    placeSearch: {
+      async geocode() {
+        startSearch();
+        return result;
+      },
+    },
+  });
+  const opening = fixture.runner('show_street_level', {
+    query: 'Dock admission fixture',
+    provider: 'mapillary',
+  });
+  await geocoding;
+  fixture.closeDock();
+  resolvePlace({ place: { lat: 38.58, lng: -121.49, exact: true } });
+  const cancelled = await opening;
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.cancelled, true);
+  assert.deepEqual(fixture.order, []);
+  assert.equal(fixture.street.imageId, 'eiffel-photo');
 });
 
 test('show_street_level without a source uses the one lit in the panel', async () => {
@@ -8795,10 +8916,10 @@ test('show_street_level shows every photo it opens, also over a panel the user h
     fly: false,
   });
   assert.deepEqual(harness.revealed, [
-    'collapse:street-level-panel:false',
-    'reveal:street-level-panel',
-    'collapse:street-level-panel:false',
-    'reveal:street-level-panel',
+    ['collapse', 'street-level-panel', false],
+    ['reveal', 'street-level-panel', { keepContextSheet: true }],
+    ['collapse', 'street-level-panel', false],
+    ['reveal', 'street-level-panel', { keepContextSheet: true }],
   ]);
   const missing = createStreetLevelHarness({ enabled: true, nearest: null });
   await missing.runner('show_street_level', {
@@ -8808,6 +8929,306 @@ test('show_street_level shows every photo it opens, also over a panel the user h
     fly: false,
   });
   assert.deepEqual(missing.revealed, [], 'nothing opened, nothing revealed');
+});
+
+test('voice next and prev take the same walk as the Data Layers row', async () => {
+  const steps = [];
+  let activeCameraId = 'cam-a';
+  let superseded = 0;
+  const cctv = {
+    getUIState: () => ({ activeCameraId }),
+    stepNearbyCamera(direction) {
+      steps.push(direction);
+      if (direction > 0 && activeCameraId === 'cam-c') return null;
+      activeCameraId = direction > 0 ? 'cam-c' : 'cam-a';
+      return {
+        cameraId: activeCameraId,
+        focusResult: CCTV_FOCUS_RESULT.FOCUSED,
+      };
+    },
+    selectCamera: () => assert.fail('the walk selects the camera'),
+    focusCamera: () => assert.fail('the walk flies to the camera'),
+    cycleCamera: () => assert.fail('steps never fall back to list order'),
+  };
+  const dataManager = {
+    layers: new Map([['cctv', { module: cctv }]]),
+    isEnabled: () => true,
+  };
+  const styleManager = {
+    supersedeDeferredNavigation() {
+      superseded += 1;
+    },
+  };
+  const step = (action) => controlCctv(dataManager, { action }, styleManager);
+  const next = await step('next');
+  assert.equal(next.ok, true);
+  assert.equal(next.activeCameraId, 'cam-c');
+  // With no other camera to go to, it says so.
+  const none = await step('next');
+  assert.equal(none.ok, false);
+  assert.equal(none.error, 'No other camera nearby');
+  const prev = await step('prev');
+  assert.equal(prev.ok, true);
+  assert.equal(prev.activeCameraId, 'cam-a');
+  assert.deepEqual(steps, [1, 1, -1]);
+  assert.equal(superseded, 3, 'each step takes over a pending flight');
+});
+
+test("voice focus is the open camera card's Fly to only while the view is free", async (t) => {
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: { moveEnd: { addEventListener() {} } },
+  };
+  const styleManager = { getCockpitState: () => ({ active: false }) };
+  let followed = entityFollowTarget(
+    withEntityRecord({}, { trackedId: 'flights:active' }),
+    {},
+  );
+  const camera = {
+    get followed() {
+      return followed;
+    },
+    on: () => () => {},
+  };
+  bindRenderer(viewer, { camera, canvas: viewer.scene.canvas });
+  const cards = useEntityCardStore(applicationPinia());
+  const flown = [];
+  let canFly = true;
+  const record = { id: 'cam-a', name: 'Camera A', lat: 30.26, lon: -97.74 };
+  const dataManager = {
+    layers: new Map([
+      [
+        'cctv',
+        {
+          module: {
+            getUIState: () => ({ activeCameraId: 'cam-a' }),
+            getAnalystRecords: () => [record],
+            focusCamera: () => CCTV_FOCUS_RESULT.TRACKING_HOLDS_VIEW,
+          },
+        },
+      ],
+    ]),
+    isEnabled: () => true,
+    getAll: () => [{ id: 'cctv', name: 'CCTV', enabled: true }],
+  };
+  cards.connect({
+    dataManager: () => dataManager,
+    flyTo: (card) => {
+      if (!canFly) return false;
+      flown.push(card.key);
+      return true;
+    },
+    follow() {},
+    openPanel() {},
+  });
+  cards.select({ layerId: 'cctv', id: 'cam-a', record, label: 'Camera A' });
+  assert.equal(cards.card?.key, 'cctv:cam-a');
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager });
+  t.after(() => {
+    runner.dispose();
+    cards.clear();
+    cards.connect(null);
+  });
+  assert.equal(
+    isFollowing(viewer),
+    true,
+    'the camera port owns an aircraft follow',
+  );
+  const held = await runner('control_cctv', { action: 'focus' });
+  assert.equal(held.ok, false);
+  assert.match(held.error, /tracking holds the view/);
+  assert.deepEqual(
+    flown,
+    [],
+    'the open camera card cannot take a tracked view',
+  );
+  const direct = await controlCctv(dataManager, { action: 'focus' });
+  assert.equal(
+    direct.ok,
+    false,
+    'without a viewer the direct helper uses the guarded layer route',
+  );
+  assert.deepEqual(flown, []);
+  followed = null;
+  const result = await runner('control_cctv', { action: 'focus' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(flown, ['cctv:cam-a']);
+  canFly = false;
+  const unavailable = await runner('control_cctv', { action: 'focus' });
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.flewTo, false);
+  styleManager.getCockpitState = () => ({ active: true });
+  const cockpit = await runner('control_cctv', { action: 'focus' });
+  assert.equal(cockpit.ok, false);
+  assert.match(cockpit.error, /exit cockpit/);
+  assert.deepEqual(flown, ['cctv:cam-a'], 'Cockpit also retains the view');
+});
+
+test('voice volume reaches a station kept playing with Radio off', async () => {
+  const volumes = [];
+  let enableCalls = 0;
+  const radio = {
+    getUIState: () => ({
+      enabled: false,
+      playingStationId: 'st1',
+      audioState: 'playing',
+      volume: volumes.at(-1) ?? 0.8,
+    }),
+    setVolume(value) {
+      volumes.push(value);
+    },
+  };
+  const dataManager = {
+    layers: new Map([['radio', { module: radio }]]),
+    isEnabled: () => false,
+    getLayerLifecycleState: () => ({
+      lifecycleState: 'disabled',
+      enabled: false,
+      uncertain: false,
+    }),
+    async setEnabled() {
+      enableCalls += 1;
+      return true;
+    },
+  };
+  const result = await controlRadio({}, dataManager, {
+    action: 'volume',
+    volumePct: 40,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(volumes, [0.4]);
+  assert.equal(result.volumePct, 40);
+  assert.equal(enableCalls, 0, 'Radio stays off');
+  // With nothing heard, Radio off still refuses.
+  radio.getUIState = () => ({ enabled: false, audioState: 'stopped' });
+  const refused = await controlRadio({}, dataManager, {
+    action: 'volume',
+    volumePct: 50,
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /fully enabled/);
+});
+
+test('voice pause reaches a station kept playing with Radio off; volume reaches it paused', async () => {
+  const volumes = [];
+  let audioState = 'playing';
+  let enableCalls = 0;
+  const radio = {
+    getUIState: () => ({
+      enabled: false,
+      playingStationId: 'st1',
+      audioState,
+      volume: volumes.at(-1) ?? 0.8,
+    }),
+    pause() {
+      audioState = 'paused';
+      return true;
+    },
+    setVolume(value) {
+      volumes.push(value);
+    },
+  };
+  const dataManager = {
+    layers: new Map([['radio', { module: radio }]]),
+    isEnabled: () => false,
+    getLayerLifecycleState: () => ({
+      lifecycleState: 'disabled',
+      enabled: false,
+      uncertain: false,
+    }),
+    async setEnabled() {
+      enableCalls += 1;
+      return true;
+    },
+  };
+  const paused = await controlRadio({}, dataManager, { action: 'pause' });
+  assert.equal(paused.ok, true);
+  assert.equal(paused.changed, true);
+  assert.equal(audioState, 'paused', 'the kept station is paused');
+  const volume = await controlRadio({}, dataManager, {
+    action: 'volume',
+    volumePct: 30,
+  });
+  assert.equal(volume.ok, true);
+  assert.deepEqual(volumes, [0.3]);
+  assert.equal(enableCalls, 0, 'Radio stays off');
+});
+
+test('"go to Austin" is a place pick; a fly-to a later tool waits on is not', async () => {
+  const { viewer, styleManager, flights } = tiltAfterFlightHarness();
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager,
+    dataManager: { layers: new Map(), getAll: () => [] },
+    searchNavigation: async (_viewer, query, options) => {
+      land = options?.onComplete;
+      return {
+        label: query,
+        latitude: 30.2672,
+        longitude: -97.7431,
+        navigationMode: 'city-overview',
+      };
+    },
+  });
+  let land = null;
+  const picks = [];
+  const onPick = (event) => picks.push(event.detail);
+  globalThis.document.addEventListener(PLACE_PICK_EVENT, onPick);
+  try {
+    const fly = await runner('fly_to_location', { query: 'Austin' });
+    assert.equal(fly.ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(picks.length, 1, 'a named place opens its card');
+    assert.equal(picks[0].name, 'Austin');
+    assert.ok(Number.isFinite(picks[0].latitude));
+    // "Flights near Austin": the fly-to is a step for a later tool.
+    const chained = runner('fly_to_location', {
+      query: 'Austin',
+      waitForArrival: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // "Austin" is a preset place: its flight lands through the camera.
+    flights.at(-1)?.complete();
+    land?.();
+    await chained;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(picks.length, 1, 'a chained fly-to opens no card');
+  } finally {
+    globalThis.document.removeEventListener(PLACE_PICK_EVENT, onPick);
+  }
+});
+
+test('a fly-to coordinates with a name beside them is no place pick', async () => {
+  const { viewer, styleManager } = tiltAfterFlightHarness();
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager,
+    dataManager: { layers: new Map(), getAll: () => [] },
+    searchNavigation: async (_viewer, query) => ({
+      label: query,
+      latitude: 40.6413,
+      longitude: -73.7781,
+      navigationMode: 'city-overview',
+    }),
+  });
+  const picks = [];
+  const onPick = (event) => picks.push(event.detail);
+  globalThis.document.addEventListener(PLACE_PICK_EVENT, onPick);
+  try {
+    for (const query of ['JFK', 'Austin']) {
+      const fly = await runner('fly_to_location', {
+        latitude: 41.39,
+        longitude: 2.17,
+        query,
+      });
+      assert.equal(fly.ok, true, query);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(picks, [], 'no place card opens');
+  } finally {
+    globalThis.document.removeEventListener(PLACE_PICK_EVENT, onPick);
+  }
 });
 
 test('a military voice Cockpit entry switches Military Flights on as a plain layer, never Contacts', async () => {
@@ -8995,5 +9416,183 @@ test('a failed military voice entry switches off only the layer it switched on',
           ],
     );
     assert.equal(fixture.enabled.has('military'), militaryOn);
+  }
+});
+test('a named voice lookup does not open a place after a newer card pick', async (t) => {
+  const { viewer, styleManager } = tiltAfterFlightHarness();
+  const lookup = Promise.withResolvers();
+  let selection = 0;
+  const picks = [];
+  const onPick = (event) => picks.push(event.detail);
+  globalThis.document.addEventListener(PLACE_PICK_EVENT, onPick);
+  const searchNavigation = t.mock.fn(async (_viewer, _query, options) => {
+    await lookup.promise;
+    assert.notEqual(options.beforeFly?.(), false);
+    return { label: 'Austin', latitude: 30.27, longitude: -97.74 };
+  });
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager,
+    dataManager: { layers: new Map(), getAll: () => [] },
+    searchNavigation,
+    contextCard: { generation: () => selection },
+  });
+  t.after(() => {
+    lookup.resolve();
+    runner.dispose();
+    globalThis.document.removeEventListener(PLACE_PICK_EVENT, onPick);
+  });
+  const flight = runner('fly_to_location', { query: 'central Austin' });
+  assert.equal(searchNavigation.mock.callCount(), 1);
+  selection++;
+  lookup.resolve();
+  assert.equal((await flight).ok, true);
+  assert.deepEqual(picks, []);
+});
+
+test('a voice airport pick cannot fly back after newer navigation during its lookup', async (t) => {
+  for (const takeover of [
+    'coordinate flight',
+    'location-panel search',
+    'same-turn coordinate flight',
+  ]) {
+    await t.test(takeover, async (t) => {
+      let release;
+      const gate = new Promise((resolve) => (release = resolve));
+      _setAirportsFetchForTest(async () => {
+        await gate;
+        return new Response(
+          JSON.stringify({
+            rows: [
+              [
+                'KAUS',
+                'AUS',
+                'Austin–Bergstrom International Airport',
+                30.1945,
+                -97.6699,
+                'large',
+                'Austin',
+                'US',
+                542,
+                2,
+              ],
+            ],
+          }),
+          { status: 200 },
+        );
+      });
+      const { viewer, styleManager, panelSearch } = tiltAfterFlightHarness();
+      const dataManager = { layers: new Map(), getAll: () => [] };
+      const cards = useEntityCardStore(applicationPinia());
+      cards.clear();
+      const cardFlights = [];
+      cards.connect({
+        dataManager: () => dataManager,
+        flyTo: (card) => cardFlights.push(card.key),
+      });
+      const offPick = installPlacePick({
+        pinia: applicationPinia(),
+        subscribeCameraHandoff: (listener) =>
+          styleManager.subscribeCameraHandoff(listener),
+        getDataManager: () => dataManager,
+      });
+      const runner = createGevActionRunner({
+        viewer,
+        styleManager,
+        dataManager,
+        searchNavigation: async (_viewer, _query, options) => {
+          assert.notEqual(options.beforeFly?.(), false);
+          return {
+            label: 'Austin–Bergstrom International Airport',
+            latitude: 30.1945,
+            longitude: -97.6699,
+          };
+        },
+      });
+      t.after(() => {
+        release();
+        offPick();
+        runner.dispose();
+        cards.clear();
+        cards.connect(null);
+        _setAirportsFetchForTest(null);
+      });
+      const namedFlight = runner('fly_to_location', { query: 'KAUS' });
+      const sameTurnFlight =
+        takeover === 'same-turn coordinate flight'
+          ? runner('fly_to_location', { latitude: 40.7, longitude: -74 })
+          : null;
+      assert.equal((await namedFlight).ok, true);
+      assert.equal(cards.card, null, 'the airport lookup is still pending');
+      if (sameTurnFlight) assert.equal((await sameTurnFlight).ok, true);
+      else if (takeover === 'coordinate flight') {
+        assert.equal(
+          (await runner('fly_to_location', { latitude: 40.7, longitude: -74 }))
+            .ok,
+          true,
+        );
+      } else panelSearch();
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(
+        cards.card,
+        null,
+        'the stale airport pick cannot replace the newer destination',
+      );
+      assert.deepEqual(
+        cardFlights,
+        [],
+        'the stale lookup cannot start an airport flight',
+      );
+    });
+  }
+});
+
+test('show_street_level lets go of the card a photo brought up when the camera is taken while it loads', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const saved = globalThis.document;
+  globalThis.document = {
+    body: { classList: { contains: () => false } },
+  };
+  const cards = useEntityCardStore(applicationPinia());
+  const photoCard = {
+    key: 'street-level:mapillary:pano-a',
+    layerId: 'street-level',
+    identity: { layerId: 'street-level', id: 'mapillary:pano-a' },
+  };
+  try {
+    for (const before of [null, { key: 'flights:abc', layerId: 'flights' }]) {
+      cards.card = before;
+      const h = createStreetLevelHarness({ enabled: true });
+      const open = h.layer.openNearest;
+      h.layer.openNearest = async (...call) => {
+        const opened = await open(...call);
+        // The photo settled and Context showed its card; then the globe is
+        // dragged before the request reports back.
+        if (!before) cards.card = photoCard;
+        h.gesture();
+        return opened;
+      };
+      const result = await h.runner('show_street_level', {
+        latitude: 38.58,
+        longitude: -121.49,
+        provider: 'mapillary',
+        fly: false,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(h.order.at(-1), 'close', 'the late photo is closed');
+      assert.equal(
+        cards.card?.key ?? null,
+        before?.key ?? null,
+        before ? 'a card shown before stays' : "the photo's card is let go",
+      );
+    }
+  } finally {
+    cards.card = null;
+    globalThis.document = saved;
   }
 });

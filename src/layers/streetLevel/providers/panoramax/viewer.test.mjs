@@ -306,6 +306,8 @@ test('a photo with no author to name is captioned with the instance holding it',
     creator: null,
     license: 'CC BY-SA 4.0',
     externalUrl: 'https://api.panoramax.xyz/#pic=x&focus=pic',
+    // The small picture its card keeps (Context).
+    still: photo.urls.thumb,
   });
   const named = { ...photo, creator: 'Robot8A' };
   assert.equal(PANORAMAX_SOURCES.describe(named).title, null);

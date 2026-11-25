@@ -385,7 +385,7 @@ export function createKartaViewProvider({
 
       /** ‹ › open through the core (loading, errors, cones), camera still. */
       function openStepped(photoId) {
-        context.actions.openImage(photoId, { frame: false });
+        context.actions.openImage(photoId, { frame: false, request: false });
       }
 
       /**
@@ -490,6 +490,8 @@ export function createKartaViewProvider({
           }
           cones.rerender();
         },
+
+        coverageNear: (point, radiusKm) => coverage.linesNear(point, radiusKm),
 
         /** Keyless; an empty view that has loaded says there is nothing here. */
         coverageStats() {

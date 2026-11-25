@@ -1,6 +1,11 @@
 import { satelliteClassText } from '../../data/satelliteClass.js';
 import { toLonLatH } from '../../geo/ellipsoid.js';
 import { ISS_NORAD } from './policy.js';
+import {
+  cosparIdFromTleLine1,
+  satelliteOperator,
+  satelliteOwner,
+} from './classes.js';
 
 /**
  * Map one CelesTrak catalog satellite to a JSON-safe analyst record
@@ -120,5 +125,110 @@ export function createRecords({ state, parts }) {
     }
     return result;
   }
-  return { getAnalystRecords };
+
+  /** The widest standard swath of a sensor-pack entry, in km, or null. */
+  function widestSwathKm(sensor) {
+    const widths = (sensor?.modes || [])
+      .map((mode) => mode.swathKm)
+      .filter((km) => Number.isFinite(km) && km > 0);
+    return widths.length ? Math.max(...widths) : null;
+  }
+
+  /**
+   * What a satellite is and where it came from, for its Context card: its
+   * orbit (class and inclination, from its elements) and its launch and type
+   * (from the SATCAT and UCS records the layer read). Fields not known are
+   * null. Null for a satellite the layer does not hold.
+   * @param {string|number} noradId
+   * @returns {?{orbitClass: ?string, inclinationDeg: ?number,
+   *   launchDate: ?string, owner: ?string, ownerCountryCode: ?string,
+   *   operator: ?string, objectType: ?string, cosparId: ?string,
+   *   opsStatus: ?string}}
+   */
+  function describeSatellite(noradId) {
+    const sat = state._catalog.get(Number(noradId));
+    if (!sat) return null;
+    const satrec = sat.satrec || null;
+    const inclination = Number(satrec?.inclo);
+    const meanMotion = Number(satrec?.no); // radians per minute
+    const eccentricity = Number(satrec?.ecco);
+    const periodMin = meanMotion > 0 ? (2 * Math.PI) / meanMotion : Number.NaN;
+    let orbitClass = null;
+    if (Number.isFinite(periodMin)) {
+      if (Number.isFinite(eccentricity) && eccentricity > 0.25)
+        orbitClass = 'HEO';
+      else if (periodMin < 128) orbitClass = 'LEO';
+      else if (Math.abs(periodMin - 1436) < 30) orbitClass = 'GEO';
+      else orbitClass = 'MEO';
+    }
+    const owner = satelliteOwner({
+      ucs: sat.ucs,
+      satcat: sat.satcat,
+      satelliteClass: sat.satelliteClass,
+    });
+    const text = (value) => {
+      const shown = String(value ?? '').trim();
+      return shown || null;
+    };
+    return {
+      orbitClass,
+      inclinationDeg: Number.isFinite(inclination)
+        ? (inclination * 180) / Math.PI
+        : null,
+      launchDate: text(sat.satcat?.launchDate),
+      owner: text(owner?.label),
+      ownerCountryCode: text(owner?.countryCode),
+      operator: text(
+        satelliteOperator({ ucs: sat.ucs, satelliteClass: sat.satelliteClass }),
+      ),
+      objectType: text(sat.satcat?.objectType),
+      cosparId: text(sat.satcat?.cosparId) || cosparIdFromTleLine1(sat.line1),
+      opsStatus: text(sat.satcat?.opsStatus),
+      // Its imaging sensor, when the bundled pack knows it: the widest
+      // standard swath is the ground it can image as it passes.
+      sensor: sat.sensor
+        ? {
+            label: text(sat.sensor.sensor) || text(sat.sensor.label),
+            swathKm: widestSwathKm(sat.sensor),
+          }
+        : null,
+    };
+  }
+  /**
+   * Where each shown satellite is drawn right now, as records for "in view"
+   * lists (Context's globe view, the omnibar): the renderer's own point
+   * positions, read back, with no SGP4 propagation. Satellites without a
+   * drawn point are left out; a class the user hid stays out.
+   * @returns {Array<object>}
+   */
+  function getViewRecords() {
+    if (!state._enabled || !state._catalog.size) return [];
+    const result = [];
+    for (const [noradId, sat] of state._catalog) {
+      if (
+        noradId !== state._trackedNorad &&
+        parts.controls?._classVisible?.(noradId) === false
+      )
+        continue;
+      const position = parts.rendering._pointPosition?.(noradId);
+      const carto = position ? toLonLatH(position) : null;
+      if (!carto || !Number.isFinite(carto.lat) || !Number.isFinite(carto.lon))
+        continue;
+      result.push(
+        mapAnalystRecord({
+          noradId,
+          name: sat?.name,
+          group: sat?.group,
+          satelliteClass: sat?.satelliteClass,
+          lat: carto.lat,
+          lon: carto.lon,
+          altitudeM: carto.height,
+          speedMps: null,
+        }),
+      );
+    }
+    return result;
+  }
+
+  return { getAnalystRecords, getViewRecords, describeSatellite };
 }

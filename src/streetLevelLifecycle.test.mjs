@@ -34,7 +34,8 @@ async function harness(t, { nearestImage = async () => 'A', failImage = null, ex
     instance.viewer.open = async id => {
       opened.push(id);
       if (id === failImage) throw new Error('Fixture image load failed');
-      pose?.({ imageId: id });
+      pose?.({ imageId: id, position: { lat: 48, lon: 2 } });
+      return id;
     };
     return instance;
   };

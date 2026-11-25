@@ -47,6 +47,7 @@ export function filtersOf(provider) {
  * @property {(viewer: object) => void} destroy
  * @property {(filter: {pano: string, sinceMs: number|null}) => void} setFilter   The filter changed: redraw (reading `getFilter()`).
  * @property {() => {count: number, loading: boolean, hint: string, error: string|null, keyRequired: boolean, keyRejected?: boolean}} coverageStats
+ * @property {(point: {lat: number, lon: number}, radiusKm: number) => Array<{sequenceId: string, lat: number, lon: number, km: number, capturedAt: number, isPano: boolean}>} [coverageNear]   The drawn lines within the radius, each at its point nearest there, nearest first.
  * @property {(pickId: string, click?: {groundPoint: () => {lon: number, lat: number}|null}) => boolean} handlePick   The id carries the provider's own prefix; `groundPoint` is where the click met the ground.
  * @property {(sequenceId: string) => Promise<void>} [selectSequence]
  * @property {() => void} [clearSequence]
@@ -56,13 +57,16 @@ export function filtersOf(provider) {
  *
  * @typedef {object} ViewerAdapter
  * @property {(host: HTMLElement) => Promise<void>} mount     Idempotent; may lazy-load a library.
- * @property {(imageId: string) => Promise<void>} open        Resolves once the image is on screen and a pose was emitted.
+ * @property {(imageId: string) => Promise<string|void>} open Resolves once the image is on screen and a pose was emitted. Its result, when available, identifies the image confirmed by the adapter.
+ * @property {(imageId: string) => boolean} [cancelOpenKeeping]
+ *   Cancel an unshown replacement if this image is still drawn.
  * @property {() => void} close                               Drop the image, keep the instance warm.
  * @property {() => void} unmount                             Destroy the instance (host handed to another provider).
  * @property {() => void} resize
  * @property {(mode: 'letterbox'|'fill') => void} [setRenderMode]
  * @property {() => boolean} [supportsRenderModes]   False while the image has no frame to fit (a panorama): FIT / FILL hide.
- * @property {(listener: (pose: StreetPose) => void) => () => void} onPose
+ * @property {(listener: (pose: StreetPose|null) => void) => () => void} onPose
+ *   A null pose reports that the adapter lost its displayed frame.
  * @property {(listener: (view: ?object) => void) => () => void} [subscribeView]
  *   An adapter that draws nothing itself presents its viewer here, for the
  *   layer's `subscribePhotoViewer()` (see photoViewer.js): its current

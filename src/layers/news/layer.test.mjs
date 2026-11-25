@@ -261,6 +261,32 @@ test('the feed shows the last 24 h at significant and above, beacons when zoomed
   assert.equal(view.inView.active, false);
 });
 
+test('headlines stay out of the analyst records, also while reports are on the map', async (t) => {
+  const { layer } = fixture(t);
+  layer.enable();
+  await layer.update();
+  await settle();
+  assert.ok(layer.getStats().count > 0, 'reports are on the map');
+  assert.deepEqual(layer.getAnalystRecords(), []);
+});
+
+test('the News list counts what the map shows, as the layer stats do', async (t) => {
+  const { layer } = fixture(t);
+  layer.enable();
+  await layer.update();
+  await settle();
+  const counts = () => [
+    layer.getStats().count,
+    layer.getRowControls().feed.mapCount,
+  ];
+  assert.deepEqual(counts(), [2, 2]);
+  // The severity floor changes what the map shows, and both counts alike.
+  layer.setParams({ filters: { minSeverity: 3 } });
+  assert.deepEqual(counts(), [1, 1]);
+  layer.setParams({ filters: { minSeverity: 0 } });
+  assert.deepEqual(counts(), [3, 3]);
+});
+
 test('choosing a card selects it and flies straight down from 150 km; reduced motion jumps', async (t) => {
   const { layer, flights, entries } = fixture(t, { reduced: true });
   layer.enable();
@@ -279,6 +305,55 @@ test('choosing a card selects it and flies straight down from 150 km; reduced mo
   assert.equal(layer.getRowControls().feed.selected.id, 'major');
   layer.setParams({ clear: true });
   assert.equal(layer.getRowControls().feed.selected, null);
+});
+
+test('Prev and Next on the Data Layers row step through the listed reports and open each, only while News is on', async (t) => {
+  const { layer, flights } = fixture(t, { reduced: true });
+  assert.deepEqual(layer.getRowControls().chips, [], 'off: no steps');
+  layer.enable();
+  await layer.update();
+  await settle();
+  const chip = (id) =>
+    layer.getRowControls().chips.find((one) => one.id === id);
+  assert.ok(chip('previous-report') && chip('next-report'));
+  chip('next-report').onClick();
+  assert.equal(
+    layer.getRowControls().feed.selected.id,
+    'major',
+    'the first listed report',
+  );
+  chip('next-report').onClick();
+  assert.equal(layer.getRowControls().feed.selected.id, 'far');
+  chip('next-report').onClick();
+  assert.equal(
+    layer.getRowControls().feed.selected.id,
+    'major',
+    'round to the first',
+  );
+  chip('previous-report').onClick();
+  assert.equal(layer.getRowControls().feed.selected.id, 'far');
+  assert.equal(flights.length, 4, 'each step flies to its report');
+});
+
+test('Prev and Next follow the order the News list card reports', async (t) => {
+  const { layer } = fixture(t, { reduced: true });
+  layer.enable();
+  await layer.update();
+  await settle();
+  // Ids the list no longer shows are skipped.
+  layer.setParams({ listOrder: ['far', 'gone', 'major'] });
+  const chip = (id) =>
+    layer.getRowControls().chips.find((one) => one.id === id);
+  chip('next-report').onClick();
+  assert.equal(
+    layer.getRowControls().feed.selected.id,
+    'far',
+    'the card’s first',
+  );
+  chip('next-report').onClick();
+  assert.equal(layer.getRowControls().feed.selected.id, 'major');
+  chip('previous-report').onClick();
+  assert.equal(layer.getRowControls().feed.selected.id, 'far');
 });
 
 test('a selected report carries the point voice projects to find what is in view', async (t) => {

@@ -27,7 +27,9 @@ import SuggestedLayers from './SuggestedLayers.vue';
 import { CONTEXT_EXEMPT, MISSIONS_LAYER, inspectorHasLayers, inspectorLayerRows, presentLayerRow, shownApart } from '../../layerRowState.js';
 import { COUNT_TILE_LAYERS } from '../../layerCounts.js';
 import { useLayerCountsStore } from '../../stores/layerCounts.js';
+import { usePinnedStore } from '../../stores/pinned.js';
 import { useSpaceMissionsStore } from '../../stores/spaceMissions.js';
+import { viewPin } from '../../placeCard.js';
 
 // What the Context panel shows while nothing is picked: situational
 // awareness of the layers that are on. Where the camera is looking (place,
@@ -95,6 +97,15 @@ watch(
   { immediate: true },
 );
 const placeName = computed(() => place.value?.name || t('This view'));
+// 📌 pins the view itself: the camera as it is and the place's name, from
+// what this header already has. Its tile flies back to the same view.
+const pinned = usePinnedStore();
+const thisViewPin = computed(() => viewPin(store.view, placeName.value));
+const viewPinned = computed(() => Boolean(thisViewPin.value && pinned.isPinned(thisViewPin.value.key)));
+function toggleViewPin() {
+  if (thisViewPin.value) pinned.toggle(thisViewPin.value);
+}
+
 const placeCountry = computed(() => countryName(place.value?.country));
 const weather = computed(() => viewWeather.value?.reading ?? null);
 const weatherFailed = computed(() => Boolean(viewWeather.value?.failed && !viewWeather.value.pending));
@@ -401,26 +412,45 @@ const nearCentre = computed(() => {
 const globeTiles = computed(() => contextNeedle.value
   ? tiles.value.filter((tile) => nearCentre.value[tile.id]?.length)
   : tiles.value);
-// Own row focus in the view so it survives a switch between list layouts.
+// Own row and fallback focus so it survives a switch between list layouts.
 const viewBox = ref(null);
-let heldRow = null;
+let heldFocus = null;
 onBeforeUpdate(() => {
-  const row = globalThis.document?.activeElement?.closest?.('[data-row-key]');
-  heldRow = row && viewBox.value?.contains(row) ? { key: row.dataset.rowKey, layer: row.dataset.rowLayer, index: Number(row.dataset.rowIndex) } : null;
+  const active = globalThis.document?.activeElement;
+  const row = active?.closest?.('[data-row-key]');
+  heldFocus = null;
+  if (!active || !viewBox.value?.contains(active)) return;
+  if (row) {
+    heldFocus = { key: row.dataset.rowKey, layer: row.dataset.rowLayer, index: Number(row.dataset.rowIndex) };
+  } else if (active.matches('.view-context__block, .view-context__blocks, .nearby-lists__title, .view-context__radius input')) {
+    heldFocus = { fallback: active };
+  }
 });
 onUpdated(() => {
-  const was = heldRow;
-  heldRow = null;
+  const was = heldFocus;
+  heldFocus = null;
   const box = viewBox.value;
   const active = globalThis.document?.activeElement;
   if (!was || !box || (active && active !== globalThis.document.body)) return;
+  if (was.fallback) {
+    (box.contains(was.fallback) ? was.fallback : rowFallback(box))?.focus?.();
+    return;
+  }
   const rows = [...box.querySelectorAll('[data-row-key]')];
   const sameRow = rows.find((row) => row.dataset.rowKey === was.key);
   const group = rows.filter((row) => row.dataset.rowLayer === was.layer);
   const block = [...box.querySelectorAll('.view-context__block')].find((node) => node.dataset.layer === was.layer);
-  const fallback = box.querySelector('.view-context__blocks, .nearby-lists__title') || box.querySelector('.view-context__radius input') || box;
-  (sameRow || group[Math.min(was.index, group.length - 1)] || block || fallback)?.focus?.();
+  (sameRow || group[Math.min(was.index, group.length - 1)] || block || rowFallback(box))?.focus?.();
 });
+// Where a row's focus lands when its list is gone.
+function rowFallback(box) {
+  return box.querySelector('.view-context__blocks, .nearby-lists__title') || box.querySelector('.view-context__radius input') || box;
+}
+// Nearby lost its last row, and the focus with it.
+function onNearbyFocusLost() {
+  const box = viewBox.value;
+  if (box) rowFallback(box)?.focus?.();
+}
 
 const nothingNearby = computed(() => lists.value.every((list) => !list.items.length));
 
@@ -530,6 +560,8 @@ const emptyFacts = computed(() => {
     const minutes = dayLengthMinutes(center.lat);
     facts.push({ label: t('Daylight'), value: dayLength(minutes, 'narrow'), title: dayLength(minutes, 'long') });
   }
+  if (Number.isFinite(view.value?.groundM))
+    facts.push({ label: t('Elevation'), value: t('{n} m', { n: formatNumber(Math.round(view.value.groundM)) }) });
   return facts;
 });
 function openDataLayers() {
@@ -550,8 +582,9 @@ const suggestions = computed(() => {
   });
 });
 function openSuggested() {
+  const layerIds = suggestions.value.map((layer) => layer.id);
   openDataLayers();
-  finder.pick(suggestions.value.map((layer) => layer.id));
+  finder.pick(layerIds);
 }
 
 </script>
@@ -567,9 +600,15 @@ function openSuggested() {
       <p class="view-context__eyebrow">{{ t('In view') }} · {{ t('Nothing selected') }}</p>
       <h3 class="view-context__title">
         <span>{{ placeName }}</span>
+        <UiButton v-if="thisViewPin" class="view-context__pin" :pressed="viewPinned" pressed-class="is-on" :label="viewPinned ? t('Unpin this view') : t('Pin this view')" @click="toggleViewPin">
+          <UiIcon name="keep" :size="null" />
+        </UiButton>
       </h3>
       <p class="view-context__region">{{ placeLine }}</p>
     </template>
+    <!-- A layer whose list is Context's nothing-picked content (Radio's
+         stations) comes right under the place. -->
+    <slot name="lead" />
 
     <!-- Nothing on: a few facts, and a pointer to Data Layers. Any layer on,
          Radio included, has its own content instead. -->
@@ -662,7 +701,7 @@ function openSuggested() {
           <div v-if="nearCentre[tile.id]?.length" class="nearby-lists view-context__block-rows">
             <ul :aria-label="t('Nearest the centre of the view: {layer}', { layer: tile.name })">
               <li v-for="(item, index) in nearCentre[tile.id]" :key="item.key">
-                <UiButton :data-row-key="item.key" :data-row-layer="tile.id" :data-row-index="index" @click="store.select(item.identity, { fly: true })">
+                <UiButton :data-row-key="item.key" :data-row-layer="tile.id" :data-row-index="index" @click="store.open(item.identity)">
                   <span class="nearby-lists__name">{{ item.title }}</span>
                   <span class="nearby-lists__meta">{{ distanceText(item.distanceKm) }}</span>
                 </UiButton>
@@ -696,7 +735,7 @@ function openSuggested() {
 
       <p v-if="globeView" class="view-context__hint">{{ t('Click anything on the globe to see its card.') }}</p>
       <template v-else>
-        <NearbyLists :lists="lists" :title="t('Nearby · {radius}', { radius: radiusText })" />
+        <NearbyLists :lists="lists" :title="t('Nearby · {radius}', { radius: radiusText })" @focus-lost="onNearbyFocusLost" />
         <p v-if="contextNeedle && nothingNearby" class="view-context__empty">{{ t('Nothing nearby matches “{text}”.', { text: contextSearchText.trim() }) }}</p>
 
       </template>

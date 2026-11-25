@@ -64,7 +64,7 @@ export const useStreetLevelStore = defineStore('gev-street-level', () => {
 
   /** Forward a view action to the owner. */
   function act(name, ...args) {
-    owner?.handlers[name]?.(...args);
+    return owner?.handlers[name]?.(...args);
   }
 
   /** The readout of a SINCE stop while its thumb is dragged. */

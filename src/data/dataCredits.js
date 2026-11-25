@@ -729,6 +729,15 @@ export const NATURAL_EARTH_CREDIT = {
     '<a href="https://www.naturalearthdata.com" target="_blank" rel="noopener">Natural Earth</a> (public domain)',
 };
 
+/** Registered when an airport from the bundled OurAirports pack is first
+ * shown (public domain — no attribution required; credited as a courtesy). */
+export const OURAIRPORTS_CREDIT = {
+  key: 'ourairports',
+  html:
+    'Airports from ' +
+    '<a href="https://ourairports.com/data/" target="_blank" rel="noopener">OurAirports</a> (public domain)',
+};
+
 /** Registered when a name from the bundled Wikidata places packs is first
  * shown (CC0 — no attribution required; credited as a courtesy). */
 export const WIKIDATA_PLACES_CREDIT = {

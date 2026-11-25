@@ -1,6 +1,7 @@
 <script setup>
 import RailChips from '../rail/RailChips.vue';
 import RailRowList from '../rail/RailRowList.vue';
+import RowPanel from './RowPanel.vue';
 import RowRange from './RowRange.vue';
 import RowSlider from './RowSlider.vue';
 import RowSwitch from './RowSwitch.vue';
@@ -100,7 +101,10 @@ defineProps({
             :hidden="!item.controls.info.text"
             >{{ item.controls.info.text }}</div
           ></div
-        ><RailRowList
+        ><RowPanel
+          v-if="item.controls.panel && !item.controls.hidden"
+          :key="`${item.id}:${item.controls.panel}`"
+          :element-id="item.controls.panel" /><RailRowList
           :list="item.controls.list"
           :on-select="
             (entry) => onListItem(item.id, entry.id)

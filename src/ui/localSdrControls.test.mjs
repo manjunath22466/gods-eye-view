@@ -59,6 +59,16 @@ function stubReceiver() {
       this.emit({ connected: false, status: 'idle' });
       return true;
     },
+    holdFm(options) {
+      calls.push(['holdFm', options?.message?.() ?? null]);
+      this.emit({ status: 'held' });
+      return true;
+    },
+    resumeFm() {
+      calls.push(['resumeFm']);
+      this.emit({ status: 'streaming' });
+      return true;
+    },
     async setMode(mode) {
       calls.push(['setMode', mode]);
       this.emit({ mode });
@@ -234,4 +244,34 @@ test('the card shows one read-only decoder-feed line after a single probe', asyn
   });
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(shown.feedLine, 'Decoder feeds: 1090 live · 978 live');
+});
+
+test('choosing the internet stations on Radio’s row stops local FM, the receiver kept connected; Radio going off leaves it playing', async (t) => {
+  const receiver = stubReceiver();
+  const radio = stubRadio();
+  const controls = new LocalSdrControls({
+    document: stubDocument(),
+    receiver,
+    radio,
+  });
+  t.after(() => controls.destroy());
+  radio.emit({ audioState: 'idle', source: 'local' });
+  receiver.emit({ connected: true, status: 'streaming', mode: 'fm' });
+  const stops = () =>
+    receiver.calls.filter(([name]) => ['stop', 'holdFm'].includes(name));
+  // Radio turned off (its stream stopped, its source kept): FM plays on.
+  radio.emit({ audioState: 'stopped', source: 'local', enabled: false });
+  assert.equal(stops().length, 0, 'Radio off does not stop the receiver');
+  radio.emit({ audioState: 'idle', source: 'internet' });
+  assert.deepEqual(stops(), [
+    ['holdFm', 'Local FM stopped: internet stations chosen'],
+  ]);
+  assert.equal(receiver.getState().connected, true, 'still connected');
+  // Internet radio starting now does not disconnect a held receiver.
+  radio.emit({ audioState: 'playing', source: 'internet' });
+  assert.equal(receiver.calls.filter(([name]) => name === 'stop').length, 0);
+  // Back on the local receiver, the FM it held plays again.
+  radio.emit({ audioState: 'stopped', source: 'local' });
+  assert.deepEqual(receiver.calls.at(-1), ['resumeFm']);
+  assert.equal(receiver.getState().status, 'streaming');
 });

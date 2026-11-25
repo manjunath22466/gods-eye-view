@@ -316,6 +316,7 @@ export function createPhotoViewer({
   let photo = null;
   /** What shows: 'flat', 'pano' or null. */
   let showing = null;
+  let drawnPhoto = null;
   let openSeq = 0;
   let renderMode = 'letterbox';
   let drag = null;
@@ -339,8 +340,8 @@ export function createPhotoViewer({
   let openingId = null;
   /** ‹ › chose this photo: keep the panorama's look direction for it. */
   let keepViewFor = null;
-  /** ‹ › presses run one after another, each from where the last one went. */
-  let steps = Promise.resolve();
+  /** ‹ › presses advance the current sequence in order. */
+  let steps = { tail: Promise.resolve() };
 
   /** Files refused for their size: never loaded again, by any path. */
   const refused = new Set();
@@ -359,7 +360,7 @@ export function createPhotoViewer({
   }
 
   function emit() {
-    if (!photo || !showing) return;
+    if (!photo || drawnPhoto !== photo) return;
     // A lost GPU context, still being recovered: the open that redraws the
     // panorama poses once it is on screen.
     if (showing === 'pano' && !renderer) return;
@@ -388,7 +389,12 @@ export function createPhotoViewer({
       license: described.license ?? null,
       sequenceId: photo.sequenceId,
       externalUrl: described.externalUrl,
+      still: described.still ?? null,
     };
+    publishPose(pose);
+  }
+
+  function publishPose(pose) {
     for (const listener of [...listeners]) {
       try {
         listener(pose);
@@ -471,6 +477,12 @@ export function createPhotoViewer({
     present(delta < 0 ? { prevDisabled: true } : { nextDisabled: true });
   }
 
+  function clearDrawnPhoto() {
+    if (!drawnPhoto) return;
+    drawnPhoto = null;
+    publishPose(null);
+  }
+
   function show(kind) {
     showing = kind;
     present({ kind: kind || '' });
@@ -525,6 +537,7 @@ export function createPhotoViewer({
 
   /** Let the renderer go, keeping the user's look for the photo's reopen. */
   function dropRenderer() {
+    if (showing === 'pano') clearDrawnPhoto();
     const lost = renderer;
     renderer = null;
     // The new renderer starts facing the photo's heading: keep the user's look.
@@ -547,13 +560,20 @@ export function createPhotoViewer({
     }
   }
 
+  function resetSteps() {
+    steps = { tail: Promise.resolve() };
+  }
+
   /**
    * Step along the sequence from the photo showing, or from the one on its
    * way after an earlier press, and open it through the core.
    */
   function stepBy(delta) {
-    steps = steps.then(async () => {
+    const queue = steps;
+    queue.tail = queue.tail.then(async () => {
+      if (queue !== steps) return;
       const fromId = openingId ?? photo?.id;
+      const fromOpen = openSeq;
       if (!fromId || !root) return;
       let from;
       let nextId = null;
@@ -565,7 +585,7 @@ export function createPhotoViewer({
         return;
       }
       // Closed, or another photo was opened meanwhile.
-      if ((openingId ?? photo?.id) !== fromId) return;
+      if (openSeq !== fromOpen || (openingId ?? photo?.id) !== fromId) return;
       if (!nextId) {
         if (presented && photo?.id === fromId) disable(delta);
         return;
@@ -789,6 +809,7 @@ export function createPhotoViewer({
     renderer?.destroy();
     renderer = null;
     // The view takes its elements away.
+    clearDrawnPhoto();
     present(null);
     root = picture = canvas = prevButton = nextButton = null;
     wake(rootWaiters);
@@ -932,6 +953,7 @@ export function createPhotoViewer({
     if (restore) renderer.setView(restore);
     else if (!keepView || showing !== 'pano')
       renderer.setView({ yaw: 0, pitch: 0, fov: PANO_FOV_DEFAULT_DEG });
+    clearDrawnPhoto();
     photo = target;
     // Shown first: a hidden canvas measures 0 and would be sized 1×1. The
     // view draws it shown, at once or on a microtask, and hands the canvas
@@ -961,6 +983,7 @@ export function createPhotoViewer({
       throw new Error(LOAD_FAILED);
     }
     renderer.setImage(image);
+    drawnPhoto = target;
     panoWidth = first.width || 0;
     // A sharper version of the photo before was dropped by `open`; one of
     // this photo, asked by a resize meanwhile, is still worth having.
@@ -988,6 +1011,7 @@ export function createPhotoViewer({
     flatSharp = { shown: null, loading: null };
     photo = target;
     show('flat');
+    drawnPhoto = target;
     return true;
   }
 
@@ -1015,6 +1039,7 @@ export function createPhotoViewer({
     emit();
     onShown(target);
     upgrade(target, seq, showing);
+    return target.id;
   }
 
   const adapter = {
@@ -1053,7 +1078,7 @@ export function createPhotoViewer({
     },
 
     /** Resolves once the photo is on screen and its pose was emitted. */
-    async open(imageId) {
+    async open(imageId, { explicit = false } = {}) {
       if (!root) throw new Error(`${name} viewer is not mounted`);
       const id = String(imageId);
       const seq = ++openSeq;
@@ -1061,11 +1086,12 @@ export function createPhotoViewer({
       // The previous open's downloads stop: only this photo is wanted now.
       openAbort?.abort();
       const opening = (openAbort = new AbortController());
-      const keepView = keepViewFor === id;
+      const keepView = !explicit && keepViewFor === id;
+      if (!keepView) resetSteps();
       keepViewFor = null;
       openingId = id;
       try {
-        await openPhoto(id, seq, keepView, opening.signal);
+        return await openPhoto(id, seq, keepView, opening.signal);
       } catch (error) {
         // A later open, or a close, stopped this one: that is not a failure.
         if (seq !== openSeq) return;
@@ -1075,8 +1101,21 @@ export function createPhotoViewer({
       }
     },
 
+    /** Withdraw the pending image if the named frame is still showing. */
+    cancelOpenKeeping(imageId) {
+      if (!drawnPhoto || drawnPhoto.id !== imageId) return false;
+      openSeq++;
+      resetSteps();
+      openAbort?.abort();
+      openAbort = null;
+      openingId = null;
+      keepViewFor = null;
+      return true;
+    },
+
     close() {
       openSeq++;
+      resetSteps();
       dropSharpPanorama();
       openAbort?.abort();
       openAbort = null;
@@ -1084,6 +1123,7 @@ export function createPhotoViewer({
       keepViewFor = null;
       photo = null;
       flatSharp = { shown: null, loading: null };
+      clearDrawnPhoto();
       show(null);
       present({ src: null });
       renderer?.clear?.();
@@ -1091,6 +1131,7 @@ export function createPhotoViewer({
 
     unmount() {
       openSeq++;
+      resetSteps();
       dropSharpPanorama();
       openAbort?.abort();
       openAbort = null;

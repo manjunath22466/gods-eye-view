@@ -1,4 +1,5 @@
 import { followedOf } from '../data/followed.js';
+import { useDockedStore } from './stores/docked.js';
 import { readEntityRecord } from '../data/entityRecords.js';
 import { nextTick, watch } from 'vue';
 import { getConfiguredLayerCounts } from '../services/application.js';
@@ -24,6 +25,11 @@ import { CockpitCoordinator } from './cockpitCoordinator.js';
 import { ContextControls } from './context.js';
 import { CctvControls } from './cctv.js';
 import { StreetLevelControls } from './streetLevelControls.js';
+import {
+  STREET_LEVEL_LAYER,
+  STREET_LEVEL_PHOTO_EVENT,
+  STREET_LEVEL_PHOTO_REQUEST_EVENT,
+} from './streetLevelEvents.js';
 import { createWildlifeSightingCard } from './wildlifeSightingCard.js';
 import { RadioControls } from './radio.js';
 import { LiveControls } from './liveControls.js';
@@ -83,6 +89,7 @@ import { useEntityCardStore } from './stores/entityCard.js';
 import { useLayerCountsStore } from './stores/layerCounts.js';
 import { installEntityContext } from './entityContextBridge.js';
 import { createLayerCounts } from './layerCounts.js';
+import { installPlacePick } from './placePick.js';
 import { installRailEdgeScroll } from './railEdgeScroll.js';
 import { useCockpitStore } from './stores/cockpit.js';
 import { useGlobeActionsStore } from './stores/globeActions.js';
@@ -93,6 +100,7 @@ import {
   registerDynamicCredit,
   showOsmCredit,
   WIKIDATA_PLACES_CREDIT,
+  OURAIRPORTS_CREDIT,
 } from '../data/dataCredits.js';
 import { withPlacePacks } from './placePacksLoading.js';
 import { preloadOwnerFlags } from './ownerFlag.js';
@@ -243,6 +251,10 @@ export class StyleManager extends ShellFacade {
           readShown: cards.readViewContextShown,
         }),
       },
+      revealContext: () => this.revealPanel('global-context-panel'),
+      supersedeDeferredNavigation: () => this.supersedeDeferredNavigation(),
+      creditAirports: () =>
+        registerDynamicCredit(this.viewer, OURAIRPORTS_CREDIT),
     });
     this.mapStackController = mapStackController;
     this.placeSearch = placeSearch;
@@ -435,6 +447,19 @@ export class StyleManager extends ShellFacade {
         _showToast: (...args) => this._showToast(...args),
       },
     });
+    // A place picked (a search row or chip, voice) opens its card.
+    this._removePlacePick = installPlacePick({
+      pinia: applicationPinia(),
+      subscribeCameraHandoff: (listener) =>
+        this.subscribeCameraHandoff(listener),
+      subscribe: (listener) =>
+        this._locationNavigation.subscribeLocationSearch(listener, {
+          emitCurrent: false,
+        }),
+      getDataManager: () => this._dataManager,
+      creditAirports: () =>
+        registerDynamicCredit(this.viewer, OURAIRPORTS_CREDIT),
+    });
     this._lastTrafficChipUpdateAt = 0;
 
     // Intel HUD
@@ -450,6 +475,7 @@ export class StyleManager extends ShellFacade {
     this._recording.hud = this.hud;
     this._cockpitCoordinator = new CockpitCoordinator({
       viewer,
+      cockpitStore: useCockpitStore(pinia),
       services: {
         flightsLayer: services.flightsLayer,
         militaryFlightsLayer: services.militaryFlightsLayer,
@@ -1252,9 +1278,10 @@ export class StyleManager extends ShellFacade {
     // Photo framing yields to newer navigation and releases tracking like
     // any deferred flight.
     streetLevelLayer.attachNavigation?.({
-      begin: (noun) => this._beginDeferredNavigation(noun),
+      begin: (noun, options) => this._beginDeferredNavigation(noun, options),
       reassert: (generation) => this._reassertNavigationHandoff(generation),
     });
+    const dock = useDockedStore(applicationPinia());
     this._streetLevelControls = new StreetLevelControls({
       root: this._streetLevelPanel,
       layer: streetLevelLayer,
@@ -1266,9 +1293,35 @@ export class StyleManager extends ShellFacade {
           }),
         setParams: (params, options) =>
           this._dataManager?.setLayerParams('street-level', params, options),
+        dockedPhoto: () => (dock.view?.kind === 'street' ? dock.view : null),
+        dockedPhotoCanPresent: () =>
+          !dock.stowed &&
+          !document.hidden &&
+          Boolean(
+            document
+              .querySelector('.docked-view[data-kind="street"]')
+              ?.getClientRects().length,
+          ),
         setPanelCollapsed: (collapsed, options) =>
           this.setPanelCollapsed('street-level-panel', collapsed, options),
-        revealPanel: () => this.revealPanel('street-level-panel'),
+        revealPanel: () =>
+          this.revealPanel('street-level-panel', { keepContextSheet: true }),
+        // Context shows the card of a photo the viewer shows while Context
+        // is on screen, unless something newer was picked since the photo
+        // was asked for (entityContextBridge.js).
+        photoRequested: (requestId) =>
+          document.dispatchEvent(
+            new CustomEvent(STREET_LEVEL_PHOTO_REQUEST_EVENT, {
+              detail: { requestId },
+            }),
+          ),
+        showPhoto: (photo) =>
+          document.dispatchEvent(
+            new CustomEvent(STREET_LEVEL_PHOTO_EVENT, {
+              detail: { layerId: STREET_LEVEL_LAYER, ...photo },
+            }),
+          ),
+
         showToast: (message) => this._showToast(message),
         // Lets the panel open for a user, voice or tool switch-on, not a restore.
         subscribeEnableRequests: (listener) =>
@@ -1289,6 +1342,7 @@ export class StyleManager extends ShellFacade {
       elements: {
         _cctvAdjustBtn: this._cctvAdjustBtn,
         _cctvAutoHopBtn: this._cctvAutoHopBtn,
+        _cctvAutoHopSec: this._cctvAutoHopSec,
         _cctvCalReadout: this._cctvCalReadout,
         _cctvCalibResetBtn: this._cctvCalibResetBtn,
         _cctvCalibSaveBtn: this._cctvCalibSaveBtn,
@@ -1393,11 +1447,21 @@ export class StyleManager extends ShellFacade {
    * Bring a panel into view on a phone, where the rails show only as tab
    * sheets: opens the sheet that holds it. Does nothing above 720px.
    * @param {string} panelId - DOM id of the panel.
+   * @param {{keepContextSheet?: boolean}} [options] Preserve the active
+   * Context sheet when it can show the selected photo.
    * @returns {void}
    */
-  revealPanel(panelId) {
-    const sheet = sheetForPanelId(panelId);
+  revealPanel(panelId, { keepContextSheet = false } = {}) {
     if (!globalThis.matchMedia?.(MOBILE_SHELL_MEDIA_QUERY)?.matches) return;
+    if (keepContextSheet && this._mobileShell?.getSheet?.() === 'context') {
+      const context = document.getElementById('global-context-panel');
+      if (
+        context?.dataset.contextTab === 'view' &&
+        this._panelChrome._shownPanel(context).collapsed === false
+      )
+        return;
+    }
+    const sheet = sheetForPanelId(panelId);
     if (sheet) this._mobileShell?.setSheet(sheet);
     // The sheet opens at its top; a panel lower in the rail is scrolled to.
     document.getElementById(panelId)?.scrollIntoView?.({ block: 'nearest' });
@@ -1979,6 +2043,7 @@ export class StyleManager extends ShellFacade {
     if (this._disposed) return;
     useOmnibarStore(applicationPinia()).connect(null);
     this._removeRailEdgeScroll?.();
+    this._removePlacePick?.();
     this._removeEntityContext?.();
     this._shareRestoration.destroy();
     this._feedback.clearLoadingStatus();

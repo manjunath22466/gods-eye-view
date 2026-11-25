@@ -1102,6 +1102,17 @@ html:not([lang='en']) .data-row-list-text {
   overflow-wrap: anywhere;
 }
 
+/* A part of the page a row borrows while it shows it (RowPanel.vue): Radio's
+   local receiver card, under the row's switch. */
+.data-toggle-panel {
+  padding-inline-start: 26px;
+  margin-top: 6px;
+}
+
+.data-toggle-panel:empty {
+  display: none;
+}
+
 /* Optional per-layer one-of-many switch (Active Fires confidence). The shared
    .gev-segmented surface, sized to the chip row. */
 .data-toggle-controls .data-toggle-segmented {
@@ -1124,6 +1135,22 @@ html:not([lang='en']) .data-row-list-text {
   padding: 3px 6px;
   font-size: 8px;
   letter-spacing: 0.8px;
+}
+
+/* Radio's source switch: the row's full width, each label on one line; a
+   language too long for it ends in an ellipsis, its full label the title. */
+.data-toggle-controls .data-toggle-segmented[data-segmented-id='radio-source'] {
+  max-width: none;
+}
+
+.data-toggle-segmented[data-segmented-id='radio-source'] .data-toggle-segment {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 4px;
+  letter-spacing: 0.4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Optional start and end pickers on one line (e.g. a layer's period). The

@@ -146,9 +146,17 @@ export function createPlayback({ state: layerState, services, parts, source }) {
   async function playSelectedRadio({
     origin = 'programmatic',
     attemptId = null,
+    whileOff = false,
   } = {}) {
     const station = parts.queries.selectedStation();
-    if (!parts.interaction.radioPresentationAllowed() || !station?.streamUrl)
+    // With the layer off only an explicit station play (playStation) or a
+    // resume of the station already selected may start a stream; with the
+    // local receiver chosen, none does.
+    if (
+      layerState._source === 'local' ||
+      !(whileOff || parts.interaction.radioPresentationAllowed()) ||
+      !station?.streamUrl
+    )
       return false;
     if (layerState._tuningActive) parts.tuning.endRadioTuning();
     // A media event carries no reliable attempt identity. Give every explicit
@@ -342,8 +350,12 @@ export function createPlayback({ state: layerState, services, parts, source }) {
     if (['loading', 'playing', 'buffering'].includes(layerState._audioState)) {
       return Promise.resolve(pauseRadioPlayback({ origin }));
     }
-    if (!parts.interaction.radioPresentationAllowed())
-      return Promise.resolve(false);
+    if (!parts.interaction.radioPresentationAllowed()) {
+      // Off, the station already selected plays on from the catalogue read.
+      return layerState._selectedId
+        ? playSelectedRadio({ origin, whileOff: true })
+        : Promise.resolve(false);
+    }
     if (layerState._selectedId) {
       // Drop a fallback left by a voice step whose playback never started.
       layerState._playFallbackId = null;

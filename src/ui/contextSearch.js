@@ -25,7 +25,7 @@ export function matchesContextSearch(...parts) {
   );
 }
 
+/** Close the field. The text is kept for the next time it opens. */
 export function closeContextSearch() {
   contextSearchOpen.value = false;
-  contextSearchText.value = '';
 }

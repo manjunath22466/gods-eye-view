@@ -28,7 +28,9 @@ async function startLayer(
   t,
   {
     source = fakeMapillarySource(),
-    photoViewer = fakePhotoViewer(),
+    photoViewer = fakePhotoViewer({
+      pose: { position: { lon: -121.49, lat: 38.58 } },
+    }),
     providers = [createMapillaryProvider({ source, photoViewer })],
     view = false,
     enable = true,
@@ -1156,6 +1158,76 @@ test('a provider’s openNearest (a line click) asks only that provider and leav
   await lit.context().actions.openNearest(point);
   assert.deepEqual(lit.calls.open, ['lit-near']);
   assert.equal(viewer.flights.started, 0, 'the user picked the spot');
+});
+
+test('Context reads the drawn lines near a point, and a line opens the photo nearest it', async (t) => {
+  const asked = [];
+  const lit = posingProvider({
+    nearestImage: async (point) => {
+      asked.push(point);
+      return 'near-photo';
+    },
+  });
+  const create = lit.create;
+  lit.create = (context) => ({
+    ...create(context),
+    coverageNear: (point, radiusKm) =>
+      radiusKm >= 1
+        ? [
+            {
+              sequenceId: 's1',
+              lat: 38.581,
+              lon: -121.494,
+              km: 0.1,
+              capturedAt: 0,
+              isPano: true,
+            },
+            {
+              sequenceId: 's2',
+              lat: 38.585,
+              lon: -121.494,
+              km: 0.5,
+              capturedAt: 0,
+              isPano: false,
+            },
+          ]
+        : [],
+  });
+  const { layer } = await enabledLayer(t, [lit]);
+  layer.attachViewerHost({});
+  const here = { lat: 38.58, lon: -121.494 };
+  const records = layer.getRecordsNear(here, 2);
+  assert.deepEqual(
+    records.map((record) => [record.id, record.lat, record.provider]),
+    [
+      ['near:mapillary:38.581000,-121.494000:s1', 38.581, 'Mapillary'],
+      ['near:mapillary:38.585000,-121.494000:s2', 38.585, 'Mapillary'],
+    ],
+    'one record per drawn line, as the panel counts them',
+  );
+  assert.deepEqual(
+    layer.getRecordsNear(here, 0.5),
+    [],
+    'nothing past the radius',
+  );
+  assert.equal(await layer.openPhoto(records[0].id), true);
+  assert.deepEqual(
+    asked,
+    [{ lat: 38.581, lon: -121.494 }],
+    'the source is asked at the line',
+  );
+  assert.deepEqual(lit.calls.open, ['near-photo']);
+  assert.equal(
+    layer.getRecordsNear(here, 2)[0].id,
+    'mapillary:near-photo',
+    'the opened photo leads, before the lines',
+  );
+  layer.disable();
+  assert.deepEqual(
+    layer.getRecordsNear(here, 2),
+    [],
+    'nothing while the layer is off',
+  );
 });
 
 test('KartaView through the core: its lines counted as streets', async (t) => {

@@ -474,13 +474,17 @@ test('a lost WebGL context drops the panorama and shows the photo again on a new
   const lost = parts(host).canvas;
   lost.fire('webglcontextlost');
   assert.equal(renderers[0].destroyed, true);
+  assert.equal(poses.at(-1), null, 'the lost frame is no longer confirmed');
   await drawn();
   // A lost canvas only ever gives back its lost context: a new element.
   assert.notEqual(parts(host).canvas, lost);
   assert.deepEqual(stepped, ['pano1'], 'reopened through the core');
   assert.ok(await until(() => renderers.length === 2), 'a new renderer');
   assert.equal(renderers[1].canvas, parts(host).canvas);
-  assert.equal(poses.at(-1).imageId, 'pano1');
+  assert.ok(
+    await until(() => poses.at(-1)?.imageId === 'pano1'),
+    'the replacement canvas has drawn the photo',
+  );
   await drawn();
   assert.equal(parts(host).canvas.hidden, false);
 });

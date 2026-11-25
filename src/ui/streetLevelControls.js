@@ -4,6 +4,7 @@ import {
   SINCE_STOPS,
 } from './streetLevelPresentation.js';
 import { useStreetLevelStore } from './stores/streetLevel.js';
+import { placeStreetLevelViewer } from './streetLevelViewerPlacement.js';
 import { applicationPinia } from './vueRuntime.js';
 import { onLocaleChange, t, translateKnown } from '../i18n/index.js';
 
@@ -46,6 +47,10 @@ export class StreetLevelControls {
           /* storage unavailable */
         }
       },
+      openPhoto: (id) => this.layer.openPhoto?.(id, { frame: false }),
+      closePhoto: (id, options) => this.layer.closePhoto?.(id, options),
+      stopPlayback: () => this.layer.stopPlayback?.(),
+      cancelDockedPhoto: () => this.layer.cancelDockedPhoto?.(),
     });
     this.destroyed = false;
     this.listeners = new AbortController();
@@ -54,6 +59,8 @@ export class StreetLevelControls {
     this._view = null;
     this._wasEnabled = null;
     this._wasOpen = false;
+    this._photoRequests = 0;
+    this._publishedPhotoRevision = 0;
     // Whether the last switch-on was explicit (user, voice, tool), not a restore.
     this._explicitEnable = false;
     this._unsubscribeEnableRequests = null;
@@ -336,6 +343,7 @@ export class StreetLevelControls {
       this._embedHome = null;
       if (parent?.isConnected)
         parent.insertBefore(wrap, next?.parentNode === parent ? next : null);
+      placeStreetLevelViewer();
       this._requestResize();
     }
   }
@@ -349,6 +357,10 @@ export class StreetLevelControls {
       (origin) => {
         this._explicitEnable = isExplicitLayerStateOrigin(origin);
       },
+    );
+    this.layer.attachDockedPhoto?.(
+      this.actions.dockedPhoto,
+      this.actions.dockedPhotoCanPresent,
     );
     this._unsubscribe = this.layer.subscribe?.((state) => this.render(state));
     if (this.layer.getUIState) this.render(this.layer.getUIState());
@@ -366,7 +378,7 @@ export class StreetLevelControls {
     this._view = view;
     this._leaveClosedViewer(view);
     this.store.publish(view);
-    this._reactToTransitions(view);
+    this._reactToTransitions(view, state);
   }
 
   /** A closed image leaves EXPAND, and focus stays in the panel. */
@@ -384,7 +396,7 @@ export class StreetLevelControls {
    * Open the panel on a switch-on or when an image opens. Never persisted:
    * the stored collapse state stays the user's own choice.
    */
-  _reactToTransitions(view) {
+  _reactToTransitions(view, state) {
     const enabled = view.enabled;
     if (enabled && this._wasEnabled === false) {
       // A restore must not reopen a panel the user or a share link kept collapsed.
@@ -402,6 +414,17 @@ export class StreetLevelControls {
       if (!isEmbedPage()) this.actions.revealPanel?.();
     }
     this._wasOpen = open;
+    // A new request first, so a card picked after it can keep its place.
+    const requests = state.photoRequests ?? 0;
+    if (requests !== this._photoRequests) {
+      this._photoRequests = requests;
+      if (requests > 0) this.actions.photoRequested?.(requests);
+    }
+    const photo = state.acceptedPhoto;
+    if (photo && photo.revision !== this._publishedPhotoRevision) {
+      this._publishedPhotoRevision = photo.revision;
+      this.actions.showPhoto?.(photo);
+    }
     this._syncEmbedOverlay(open);
   }
 
@@ -423,6 +446,7 @@ export class StreetLevelControls {
     this._unsubscribe = null;
     this._unsubscribeEnableRequests?.();
     this._unsubscribeEnableRequests = null;
+    this.layer.attachDockedPhoto?.(null);
     this.layer.attachViewerHost?.(null);
     this.store.detach(this._storeToken);
   }

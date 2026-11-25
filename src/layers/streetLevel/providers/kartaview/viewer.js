@@ -18,7 +18,7 @@ import { msg } from '../../../../i18n/index.js';
 
 export { panoSizeFor } from '../../photoViewer.js';
 
-/** English data: the Street Level panel translates it (translateKnown). */
+/** English data: Street Level's UI translates it (translateKnown). */
 const LOAD_FAILED = msg('The KartaView photo could not be loaded');
 
 /** Load a KartaView photo (see photoViewer.js `loadImage`). */
@@ -65,6 +65,12 @@ const KARTAVIEW_SOURCES = Object.freeze({
     title: null,
     creator: null,
     externalUrl: kartaViewPhotoUrl(photo),
+    // The proxy's small flat version, for its card to keep.
+    still: photo.isPano
+      ? photo.urls.view || null
+      : resizedImageUrl(photo.urls.full, FLAT_VIEW_SIZE) ||
+        photo.urls.view ||
+        null,
   }),
 });
 

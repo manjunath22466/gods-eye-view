@@ -218,6 +218,21 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
+/* Context's values change on their own (a camera's frame, an age, a count):
+   its scrollbar's room is always kept, and its thumb shows only while the
+   pointer or focus is in the panel, so a live update never flashes it. */
+#right-context-rail
+  #global-context-panel:not(.collapsed)
+  .global-context-panel-inner:not(:hover):not(:focus-within) {
+  scrollbar-color: transparent transparent;
+}
+#right-context-rail
+  #global-context-panel:not(.collapsed)
+  .global-context-panel-inner:not(:hover):not(
+    :focus-within
+  )::-webkit-scrollbar-thumb {
+  background: transparent;
+}
 #right-context-rail #global-context-panel.collapsed {
   width: var(--right-context-collapsed-width);
   /* Keep the compact Context tab on the rail edge rather than leaving it
@@ -715,158 +730,87 @@ body.recording-mode .gev-panel-rail {
   letter-spacing: 0.08em;
 }
 
-#space-mission-panel .mission-action-row {
-  display: flex;
-  gap: 8px;
-  margin: 1px 0 10px;
-}
-#space-mission-panel .mission-replay-button,
-#space-mission-panel .mission-focus-button {
-  flex: 1;
-  min-width: 0;
-  padding: 9px 12px;
-  border: 1px solid rgba(255, 159, 67, 0.62);
-  border-radius: 5px;
-  color: #ffc078;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 159, 67, 0.08),
-    rgba(34, 230, 230, 0.08)
-  );
-  font:
-    9px 'JetBrains Mono',
-    monospace;
-  letter-spacing: 0.16em;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
-}
-#space-mission-panel .mission-focus-button {
-  border-color: rgba(34, 230, 230, 0.58);
-  color: #22e6e6;
-  background: rgba(34, 230, 230, 0.07);
-}
-#space-mission-panel .mission-replay-button:hover,
-#space-mission-panel .mission-replay-button:focus-visible,
-#space-mission-panel .mission-focus-button:hover,
-#space-mission-panel .mission-focus-button:focus-visible {
-  border-color: #ffb45f;
-  color: #fff;
-  outline: none;
-  box-shadow: 0 0 14px rgba(255, 159, 67, 0.14);
-}
-#space-mission-panel .mission-focus-button:hover,
-#space-mission-panel .mission-focus-button:focus-visible {
-  border-color: #22e6e6;
-  box-shadow: 0 0 14px rgba(34, 230, 230, 0.14);
-}
-#space-mission-panel .mission-replay-button.active {
-  border-color: #22e6e6;
-  color: #d8ffff;
-  background: rgba(34, 230, 230, 0.13);
-  box-shadow: inset 0 0 16px rgba(34, 230, 230, 0.08);
-}
+/* While the replay runs, pause and cancel take Replay's place in the row. */
 #space-mission-panel .mission-replay-transport {
+  display: flex;
   flex: 1;
+  gap: 0.35rem;
   min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
 }
-#space-mission-panel .mission-replay-transport[hidden] {
-  display: none;
-}
-#space-mission-panel .mission-replay-transport button {
-  min-width: 0;
-  min-height: 34px;
-  padding: 0;
-  border: 1px solid rgba(34, 230, 230, 0.5);
-  border-radius: 4px;
-  color: #22e6e6;
-  background: rgba(34, 230, 230, 0.08);
-  font:
-    15px/1 'JetBrains Mono',
-    monospace;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease,
-    opacity 0.15s ease;
-}
-#space-mission-panel .mission-replay-transport button:hover:not(:disabled),
-#space-mission-panel .mission-replay-transport button:focus-visible {
-  border-color: #d8ffff;
-  color: #fff;
-  outline: none;
-  background: rgba(34, 230, 230, 0.16);
-  box-shadow: 0 0 12px rgba(34, 230, 230, 0.14);
-}
-#space-mission-panel .mission-replay-transport button:disabled {
-  opacity: 0.28;
-  cursor: default;
-}
-#space-mission-panel .mission-replay-transport button.cancel {
-  border-color: rgba(255, 159, 67, 0.58);
-  color: #ffb15c;
-  background: rgba(255, 159, 67, 0.08);
+#space-mission-panel .mission-replay-transport .entity-card__action {
+  font-size: 0.8rem;
 }
 #space-mission-panel
   .mission-replay-transport.is-paused
-  [data-mission-replay-play] {
-  border-color: #22e6e6;
-  color: #d8ffff;
-  background: rgba(34, 230, 230, 0.18);
-  box-shadow: inset 0 0 12px rgba(34, 230, 230, 0.1);
+  [data-mission-replay-toggle] {
+  color: var(--gev-tool-on);
+  background: var(--gev-tool-on-fill);
+  border-color: var(--gev-tool-on);
 }
-#space-mission-panel .space-mission-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
+#space-mission-panel .entity-card__actions {
+  margin: 0.6rem 0;
 }
-#space-mission-panel .mission-nav-button {
-  min-width: 94px;
-  padding: 7px 10px;
-  border: 1px solid rgba(34, 230, 230, 0.55);
-  background: rgba(8, 34, 42, 0.72);
-  color: #22e6e6;
-  font:
-    11px 'JetBrains Mono',
-    monospace;
-  letter-spacing: 0.12em;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    opacity 0.15s ease;
+#space-mission-panel .entity-card__action--on {
+  color: var(--gev-tool-on);
+  background: var(--gev-tool-on-fill);
+  border-color: var(--gev-tool-on);
 }
-#space-mission-panel .mission-nav-button:hover:not(:disabled) {
-  background: rgba(34, 230, 230, 0.18);
-  border-color: #22e6e6;
+/* The name block as the item card sets it. */
+#space-mission-panel .entity-card__kind {
+  display: block;
+  color: rgba(199, 214, 222, 0.5);
+  font-size: 0.56rem;
+  letter-spacing: 0.08rem;
 }
-#space-mission-panel .mission-nav-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.28;
+#space-mission-panel .entity-card__title {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.1;
+  letter-spacing: 0.03rem;
 }
-#space-mission-panel .mission-nav-button span {
-  font-size: 18px;
-  line-height: 0;
-  vertical-align: -2px;
+/* The mission's status, as a chip under its name. */
+#space-mission-panel .mission-card__status {
+  justify-self: start;
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.45rem;
+  color: rgba(54, 220, 255, 0.9);
+  font: 500 0.56rem var(--font-mono);
+  letter-spacing: 0.06rem;
+  text-transform: uppercase;
+  background: rgba(54, 220, 255, 0.1);
+  border: 1px solid rgba(54, 220, 255, 0.3);
+  border-radius: 999px;
 }
-#space-mission-panel .mission-nav-index {
-  min-width: 58px;
+/* The top image while a replay runs: its phase and the vehicle's figures. */
+#space-mission-panel .entity-hero[data-hero='replay'] {
+  height: 168px;
+  background: radial-gradient(
+    ellipse 55% 60% at 50% 55%,
+    rgba(255, 159, 67, 0.12),
+    rgba(255, 255, 255, 0.02) 70%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+#space-mission-panel .mission-card__replay {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.35rem;
+  color: #ffc078;
+  font-family: var(--font-mono);
   text-align: center;
-  color: #d8ffff;
-  font:
-    11px 'JetBrains Mono',
-    monospace;
-  letter-spacing: 0.1em;
+}
+#space-mission-panel .mission-card__replay .material-symbols-outlined {
+  font-size: 2rem;
+}
+#space-mission-panel .mission-card__replay strong {
+  font-size: 0.8rem;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+}
+#space-mission-panel .mission-card__telemetry {
+  color: rgba(225, 236, 242, 0.75);
+  font-size: 0.66rem;
 }
 #space-mission-panel button {
   cursor: pointer;
@@ -1033,6 +977,10 @@ body.recording-mode .gev-panel-rail {
 /* Context is read for longer than other panels; it carries no halo. */
 #global-context-panel .panel-glow {
   display: none;
+}
+/* Context's tabs wrap. */
+.context-pin-tabs {
+  flex-wrap: wrap;
 }
 .global-context-panel-inner,
 .space-missions-panel-inner {

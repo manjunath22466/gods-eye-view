@@ -58,7 +58,8 @@
     "{speed} {direction}",
     "3D",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}"
   ],
   "de": [
     "1090 MHz",
@@ -127,7 +128,6 @@
     "Los Angeles",
     "MIL",
     "MINI",
-    "MISSION",
     "MM",
     "MONITOR",
     "Metal",
@@ -147,7 +147,6 @@
     "Normal",
     "OK",
     "ORBIT",
-    "ORBIT · ",
     "Oldies",
     "OpenStreetMap + optional Google Maps Places",
     "Operator",
@@ -187,7 +186,6 @@
     "START",
     "STATION",
     "STATUS",
-    "STATUS · ",
     "STD",
     "SW",
     "SYNC",
@@ -304,7 +302,13 @@
     "{seconds} s",
     "Mode",
     "UTC",
-    "Radius"
+    "Radius",
+    "{n} kn",
+    "FL{n}",
+    "Position",
+    "Codes",
+    "Feed",
+    "{value} km²"
   ],
   "es": [
     "1 min/s",
@@ -481,6 +485,7 @@
     "Inspector",
     "{n} m",
     "{n} km",
+    "Error",
     "Squawk",
     "MMSI",
     "ICAO24",
@@ -501,9 +506,12 @@
     "{utc} UTC",
     "Manual",
     "{seconds} s",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "{value} km²"
   ],
   "fr": [
+    "Pages",
     "1 min/s",
     "1090 MHz",
     "1900–1945",
@@ -529,7 +537,6 @@
     "Bus",
     "CAL {value}",
     "CAL · {badge}",
-    "CALIBRATION",
     "CARGO",
     "CAUSE",
     "CC BY 4.0",
@@ -587,7 +594,6 @@
     "MIC",
     "MIL",
     "MINI",
-    "MISSION",
     "MM",
     "Monorail",
     "MSG/S",
@@ -761,9 +767,16 @@
     "KT",
     "{utc} UTC",
     "{seconds} s",
+    "Volume, {percent}",
     "contact",
     "train",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "Position",
+    "Codes",
+    "Image",
+    "Projection",
+    "{value} km²"
   ],
   "it": [
     "1 min/s",
@@ -869,7 +882,6 @@
     "RADIO",
     "REC",
     "RESET",
-    "RESET CAL",
     "Radio",
     "Reggae",
     "Rock",
@@ -999,7 +1011,10 @@
     "KT",
     "{utc} UTC",
     "{seconds} s",
-    "UTC"
+    "Volume, {percent}",
+    "UTC",
+    "FL{n}",
+    "{value} km²"
   ],
   "ja": [
     "1090 MHz",
@@ -1084,7 +1099,9 @@
     "{n} mm",
     "3D",
     "KT",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "{value} km²"
   ],
   "pt": [
     "1 min/s",
@@ -1188,7 +1205,6 @@
     "STARLINK ···",
     "STARLINK ✕",
     "STATUS",
-    "STATUS · ",
     "Sahel",
     "Sentinel-2",
     "Sentinel-2 via HLS",
@@ -1282,7 +1298,11 @@
     "{utc} UTC",
     "Manual",
     "{seconds} s",
-    "UTC"
+    "Volume, {percent}",
+    "UTC",
+    "FL{n}",
+    "Feed",
+    "{value} km²"
   ],
   "ru": [
     "1900–1945",
@@ -1329,7 +1349,8 @@
     "{kind} {name}",
     "3D",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}"
   ],
   "sv": [
     "STATION",
@@ -1351,7 +1372,6 @@
     "▲ {frp} MW",
     "{value} KM",
     "{value} KM/S",
-    "STATUS · ",
     "DESTINATION",
     "STATUS",
     "T minus {seconds}",
@@ -1524,7 +1544,10 @@
     "KT",
     "{utc} UTC",
     "{seconds} s",
-    "UTC"
+    "UTC",
+    "FL{n}",
+    "Position",
+    "{value} km²"
   ],
   "uk": [
     "1900–1945",
@@ -1565,7 +1588,8 @@
     "{kind} {name}",
     "3D",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}"
   ],
   "zh-CN": [
     "1090 MHz",
@@ -1651,7 +1675,8 @@
     "{n}%",
     "{n} hPa",
     "3D",
-    "UTC"
+    "UTC",
+    "FL{n}"
   ],
   "zh-Hant": [
     "1090 MHz",
@@ -1737,7 +1762,8 @@
     "{n}%",
     "{n} hPa",
     "3D",
-    "UTC"
+    "UTC",
+    "FL{n}"
   ],
   "he": [
     "{speed} kn",
@@ -1856,6 +1882,7 @@
     "3D",
     "KT",
     "{utc} UTC",
-    "UTC"
+    "UTC",
+    "FL{n}"
   ]
 }

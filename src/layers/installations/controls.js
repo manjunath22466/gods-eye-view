@@ -17,6 +17,20 @@ export function createControls({
   source,
   overlayHost,
 }) {
+  async function searchNearbyFromRow() {
+    if (layerState.nearbySearchBusy || !layerState.enabled) return;
+    layerState.nearbySearchBusy = true;
+    layerState.rowControlsListener?.();
+    try {
+      await methods.searchNearby();
+    } catch (error) {
+      console.warn('[Installations] nearby search failed:', error);
+    } finally {
+      layerState.nearbySearchBusy = false;
+      layerState.rowControlsListener?.();
+    }
+  }
+
   const methods = {
     id: LAYER_ID,
 
@@ -38,6 +52,32 @@ export function createControls({
     searchNearby() {
       layerState.googleSearchRequested = true;
       return parts.ingestion.loadInstallations();
+    },
+
+    /**
+     * The Data Layers row offers the one-shot nearby search while the layer
+     * is on. One search runs at a time; the row repaints when it settles.
+     */
+    getRowControls() {
+      if (!layerState.enabled) return null;
+      return {
+        chips: [
+          {
+            id: 'search-nearby',
+            label: t('Search nearby sites'),
+            title: t('Search for mapped sites around the current view'),
+            icon: 'travel_explore',
+            action: true,
+            disabled: Boolean(layerState.nearbySearchBusy),
+            onClick: () => void searchNearbyFromRow(),
+          },
+        ],
+      };
+    },
+
+    setRowControlsListener(listener) {
+      layerState.rowControlsListener =
+        typeof listener === 'function' ? listener : null;
     },
 
     /**

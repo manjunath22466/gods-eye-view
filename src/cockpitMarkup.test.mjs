@@ -1489,3 +1489,60 @@ test('Contact folded for one Cockpit left panel comes back only once neither is 
     globalThis.document = previous;
   }
 });
+
+test('Cockpit hides the whole bottom-right corner row and the Stories entry', () => {
+  // Power up, the language picker and the Stories button go together, as
+  // the top row and the dock do; none is left half shown or pushed off screen.
+  assert.match(
+    css,
+    /body\.cockpit-mode #corner-actions,[^{]*\{\s*display: none;\s*\}/,
+  );
+  assert.match(
+    css,
+    /body\.cockpit-mode #gev-stories \.gs-entry,\s*body\.cockpit-mode #gev-stories \.gs-pop\s*\{\s*display: none;\s*\}/,
+  );
+  assert.match(css, /body\.cockpit-mode #key-setup-chip,/);
+  assert.doesNotMatch(
+    css,
+    /body\.cockpit-mode[^{,]*(?:#corner-actions|\.locale-picker|\.gs-entry)[^{,]*\{[^}]*display:\s*(?:flex|block|inline)/,
+    'no cockpit rule brings part of the corner back',
+  );
+  assert.doesNotMatch(
+    css,
+    /bottom: max\(clamp\(22px, 4vh, 42px\), 3\.5rem\)/,
+    'the readout no longer steps up for a picker the cockpit hides',
+  );
+});
+
+test('the Cockpit keyboard hint and position readout clear the map credits', () => {
+  const REM = 16;
+  const CREDIT_HEIGHT_PX = 28;
+  const CLEARANCE_PX = 8;
+  // From 1200px the credit row sits on the bottom edge.
+  const edgeCredit = css.match(
+    /body:not\(\.ui-clean-view\):not\(\.recording-mode\) #cesium-credits,[\s\S]*?\{\s*right: auto;\s*bottom: ([\d.]+)rem;/,
+  );
+  assert.ok(edgeCredit, 'the bottom-edge credit row is where it was');
+  const wide = css.match(
+    /@media \(min-width: 1200px\) \{\s*body\.cockpit-mode :is\(\.cockpit-help, \.cockpit-position-readout\) \{\s*bottom: ([\d.]+)rem;\s*\}\s*\}/,
+  );
+  assert.ok(wide, 'the hint steps above the credit row from 1200px');
+  const creditTop = Number(edgeCredit[1]) * REM + CREDIT_HEIGHT_PX;
+  assert.ok(Number(wide[1]) * REM - creditTop >= CLEARANCE_PX);
+  // Below 1200px the credits sit at 2vh + 5rem, over the hint's own place
+  // (at most 42px up, two 12px lines tall) at every height the phone and
+  // laptop sizes reach.
+  assert.match(
+    css,
+    /@media \(max-width: 1199px\) \{\s*body:not\(\.ui-clean-view\):not\(\.recording-mode\) #cesium-credits,[\s\S]*?bottom: calc\(2vh \+ 5rem \+ var\(--world-timeline-lift, 0px\)\);/,
+  );
+  assert.match(
+    css,
+    /\.cockpit-help \{[^}]*bottom: clamp\(22px, 4vh, 42px\);/,
+  );
+  for (const height of [500, 720, 844, 900]) {
+    const creditBottom = 0.02 * height + 5 * REM;
+    const hintTop = Math.min(42, Math.max(22, 0.04 * height)) + 2 * 12;
+    assert.ok(creditBottom - hintTop >= CLEARANCE_PX, `at ${height}px tall`);
+  }
+});

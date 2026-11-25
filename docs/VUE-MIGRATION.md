@@ -179,11 +179,11 @@ sky, application-row and Reset glyphs are `UiIcon`s with `:size="null"`, so
 the panel's rules still size them (`src/ui/kit/visualControls.test.mjs` pins
 it). The toggles' other glyphs (◎ ▣ ✈ □ ✨ 🔍) and the presets' style glyphs
 are text characters, not Material symbols, and stay plain spans.
-The entity card's buttons are ghost `UiButton`s: its four preview buttons
-(Photos, Route, 3D, Cockpit view) are pressed toggles with `active`, Follow
-is one with `entity-card__action--on`, and the cockpit entry, Fly to and
-Ask GEV are plain buttons; so are the camera preview's bigger-view and More
-info buttons and the nearby lists' rows (`SpotConditions`, which the
+The entity card's buttons are ghost `UiButton`s: its preview switch
+(Photos, Route, 3D, Cockpit view, Map, and Play or Pause) holds pressed
+toggles with `active`, Follow and Pin are ones with `entity-card__action--on`,
+and the cockpit entry, Fly to and Ask GEV are plain buttons; so are the
+camera preview's bigger-view button and the nearby lists' rows (`SpotConditions`, which the
 context view shows too). Their glyphs are `UiIcon`s with `:size="null"`,
 so entity-card.css and spot-conditions.css still size them
 (`src/ui/kit/entityCardControls.test.mjs` pins it). Ask GEV's chat bubble
@@ -477,7 +477,17 @@ slot whenever its view is drawn.
    keep their imperative entry points until their owners are components:
    the rail cards and card blocks (`src/ui/rail/`) render through
    Vue's synchronous `render()` behind `createRailCards()` and
-   `createRailCardBlocks()`. Order: Scenes (done: `SceneOptions` and
+   `createRailCardBlocks()`. A control that moves between panels can keep one
+   mounted tree in a Teleport. `PortalSlot` registers a destination for its
+   lifetime. The owner supplies whether the slot is visible and an optional
+   focus fallback. An enabled Teleport always receives a DOM element, even
+   for the embed overlay. At home, the disabled Teleport keeps its children
+   and uses `'body'` for server rendering. The source repairs focus only when
+   a move sent focus to the page body, trying the moved control and then the
+   slot and source fallbacks. A viewer keeps its provider host connected and
+   retains its media nodes through the move.
+
+   Order: Scenes (done: `SceneOptions` and
    `SceneShotList` over the `gev-scenes` store; the panel's buttons, status
    line, progress bar and the runtime chip render the panel SceneControls
    presents there, and the buttons and file chooser call its actions), Weather (done: the owner

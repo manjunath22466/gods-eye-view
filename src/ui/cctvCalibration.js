@@ -88,6 +88,18 @@ function calValueText(field, value) {
   return `${t(field.label)} ${isolate(`${number}${field.unit}`)}`;
 }
 
+/** A calibration value with its unit and no code ("67.5°", "145 m"). */
+function calNumberText(field, value) {
+  const number = formatNumber(Number(value), {
+    useGrouping: false,
+    minimumFractionDigits: field.decimals,
+    maximumFractionDigits: field.decimals,
+  });
+  return isolate(
+    field.unit === 'm' ? t('{n} m', { n: number }) : `${number}${field.unit}`,
+  );
+}
+
 export function _activeCctvCameraId() {
   return this._cctvState?.activeCameraId || this._cctvSelect?.value || '';
 }
@@ -172,11 +184,14 @@ export function presentCctvCalibration(state, enabled) {
   const canCalibrate = !!enabled && !!activeCamera;
   const adjustOn = !!state?.calibrationMode;
   const values = {};
+  // The number alone, with its unit, for the tools' label/value grid.
+  const numbers = {};
   for (const [id, field] of Object.entries(CCTV_CAL_FIELDS)) {
     const value = canCalibrate ? field.get(activeCamera) : null;
     values[id] = Number.isFinite(value)
       ? calValueText(field, value)
       : `${t(field.label)} --`;
+    numbers[id] = Number.isFinite(value) ? calNumberText(field, value) : '--';
   }
   return {
     disabled: !canCalibrate,
@@ -185,5 +200,6 @@ export function presentCctvCalibration(state, enabled) {
       text: adjustOn ? t('ADJUST ON') : t('ADJUST'),
     },
     values,
+    numbers,
   };
 }

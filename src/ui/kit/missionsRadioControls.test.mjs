@@ -1,9 +1,12 @@
 // The space missions, Contacts, Radio and provider settings controls are the
 // kit's: none of their views hand-writes a <button>, a Material Symbols span,
 // a select or a checkbox. Radio's Enable, the RTL-SDR card's Connect and its
-// FM and ADS-B modes are pressed toggles with `active`; Radio's Play and the
-// card's Locate keep their own `active` class, since their words change
-// with their state rather than saying they are pressed. The RTL-SDR card's
+// FM and ADS-B modes are pressed toggles with `active`; the pins of the
+// mission card, the radio mini player and Now playing are pressed toggles
+// with their own pressed class, as are the station tag chips and the
+// speaker's mute. Radio's Play and the card's Locate keep their own `active`
+// class, since their words change with their state rather than saying they
+// are pressed. The RTL-SDR card's
 // FM frequency stays a native number field (the kit has none), and the radio
 // tuner's range stays native: its owner moves the handle back to the
 // selected station on a drag's first input without changing the slot.
@@ -38,9 +41,9 @@ const byId = (markup, name, id) => {
 
 // Each view's UiButtons, UiCloseButtons, UiIcons, UiSelects and UiSliders.
 const VIEWS = {
-  // FOCUS, REPLAY ASCENT, the replay's pause, PREV, NEXT and SHOW ALL; the
-  // header's deselect and the replay's Cancel close.
-  'panels/MissionDetail.vue': [6, 2, 0, 0, 1],
+  // Replay, the replay's pause, Fly to and Pin; the header's deselect and
+  // the replay's Cancel close; the rocket and the three actions' glyphs.
+  'panels/MissionDetail.vue': [4, 2, 4, 0, 1],
   // A mission's row.
   'panels/MissionRoster.vue': [1, 0, 0, 0, 0],
   'panels/MissionReplayOverlay.vue': [0, 0, 0, 0, 0],
@@ -54,6 +57,15 @@ const VIEWS = {
   // Enable, PREV, PLAY, NEXT and STOP.
   'panels/RadioPanel.vue': [5, 0, 0, 1, 1],
   'panels/RadioTuner.vue': [0, 0, 0, 0, 0],
+  // Pin, Previous, Play or Pause, Next and Close; the station's glyph and
+  // the four buttons' glyphs.
+  'panels/RadioMiniPlayer.vue': [4, 1, 5, 0, 0],
+  // Play or Pause, Fly to, Pin, a tag chip, More tags, the two Widen the
+  // radius and a station's row; the heading's glyph, the three actions'
+  // glyphs and the playing row's.
+  'panels/RadioStations.vue': [8, 0, 5, 0, 0],
+  // The speaker and the popover's Mute, each with its glyph; the slider.
+  'panels/RadioVolume.vue': [2, 0, 2, 0, 1],
   // The POWER UP chip and its bolt, a key's REMOVE, the voice auth toggle
   // and SAVE KEYS; the dialog's close.
   'ProviderSettingsView.vue': [4, 1, 1, 0, 0],
@@ -105,6 +117,9 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
     'panels/MissionDetail.vue': 1,
     'panels/SdrCard.vue': 3,
     'panels/RadioPanel.vue': 1,
+    'panels/RadioMiniPlayer.vue': 1,
+    'panels/RadioStations.vue': 2,
+    'panels/RadioVolume.vue': 2,
   };
   for (const { file, markup } of views) {
     assert.doesNotMatch(
@@ -126,6 +141,22 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
     [radio, 'radio-enable-btn'],
   ])
     assert.match(byId(markup, 'UiButton', id), /\spressed-class="active"/, id);
+  // The pins keep the class their stylesheets key on.
+  for (const [file, pin, on] of [
+    ['panels/MissionDetail.vue', 'data-mission-pin', 'entity-card__action--on'],
+    ['panels/RadioMiniPlayer.vue', 'class="radio-mini__pin"', 'is-on'],
+    [
+      'panels/RadioStations.vue',
+      'class="entity-card__action entity-card__action--pin"',
+      'entity-card__action--on',
+    ],
+  ]) {
+    const markup = views.find((v) => v.file === file).markup;
+    const found = tags(markup, 'UiButton').filter((b) => b.includes(pin));
+    assert.equal(found.length, 1, file);
+    assert.match(found[0], /\s:pressed="isPinned"/, file);
+    assert.ok(found[0].includes(` pressed-class="${on}"`), file);
+  }
 });
 
 test('Play and Locate keep their own active class rather than pressed', () => {

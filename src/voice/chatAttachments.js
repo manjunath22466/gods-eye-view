@@ -1,6 +1,21 @@
 import { t } from '../i18n/index.js';
 
 /**
+ * Feed text (a callsign, a vessel's name) as the model reads it: one line,
+ * control characters replaced by spaces, and the bidi and zero-width format
+ * characters that could reorder or hide what it says dropped.
+ */
+const itemText = (value, maxLength) =>
+  String(value ?? '')
+    .replace(/[\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength)
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .trim();
+
+/**
  * Draft-only attachments, held on the voice control presenter. Providers
  * receive text only when the person sends.
  */
@@ -59,6 +74,29 @@ export function bindChatAttachments({ ui, dataManager, onChange, setStatus }) {
           kind: 'map-layer',
           id,
           name: entry.module.name || id,
+        });
+        close();
+        void ui.focus(['chatInput']);
+      } catch (error) {
+        setStatus(error.message);
+      }
+    }),
+    // The card's Ask icon: the picked item, attached to the draft so the
+    // person asks their own question about it. Nothing is sent yet.
+    ui.on('chat-item', (item) => {
+      if (locked || !item?.key) return;
+      try {
+        add(`item:${item.key}`, {
+          kind: 'map-item',
+          name: itemText(item.name, 120) || itemText(item.key, 120),
+          itemKind: itemText(item.itemKind, 60),
+          layer: itemText(item.layer, 80),
+          ...(Number.isFinite(item.lat) && Number.isFinite(item.lon)
+            ? {
+                lat: Number(item.lat.toFixed(4)),
+                lon: Number(item.lon.toFixed(4)),
+              }
+            : {}),
         });
         close();
         void ui.focus(['chatInput']);

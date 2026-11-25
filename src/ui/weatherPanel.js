@@ -2,11 +2,11 @@ import { h, render as renderVue } from 'vue';
 import { formatUtcDayMonth, t } from '../i18n/index.js';
 import { utcClock } from './rail/utcClock.js';
 import WeatherReadout from './weather/WeatherReadout.vue';
+import { setContextListPresence } from './contextLists.js';
 
 // Remounting controls must not reopen a panel the user already collapsed.
 // Keyed by the page's Weather panel, which outlives remounted controls.
 const appearedPanels = new WeakSet();
-const openPanels = new WeakMap();
 const ORDER = [
   'weather-cyclones',
   'wind',
@@ -52,32 +52,177 @@ const shownNow = (state) =>
 const set = (node, key, value) => {
   if (node[key] !== value) node[key] = value;
 };
-
+const OBSERVED_NAMES = {
+  'weather-radar': () => t('Rain radar'),
+  'weather-satellite': () => t('Satellite clouds'),
+  'weather-lightning': () => t('Lightning density'),
+};
+/** A layer's legend as a rail-card block, or null without one. */
+function legendBlockOf({ legend = [], legendCategorical, summary }) {
+  if (!legend.length) return null;
+  // Discrete classes (storm geometry, AQHI bands) list swatches, not a ramp.
+  const categorical = legendCategorical === true;
+  return {
+    id: 'legend',
+    type: 'legend',
+    legend: {
+      categorical,
+      colors: legend.map(({ color }) => color),
+      labels: legend.map(({ label }) => label),
+      units: categorical ? '' : summary.units,
+      ...(summary.unitsVerbatim === true ? { unitsVerbatim: true } : {}),
+      zeroIndex: legend.findIndex(({ label }) => label === '0'),
+    },
+  };
+}
 /**
- * Bring a newly opened card into the scrolled body: nearest alignment, or its
- * header at the top when the card is taller than the body. One write to the
- * body's own scroll position, without animation; ancestors never move.
+ * An observed product's briefing lines: its name and the age of the frame it
+ * shows while live, or the frame's clock time at a past time, then its
+ * status; without a frame, its status takes the place of the time.
  */
-function revealCard(scroller, card) {
-  const height = scroller?.clientHeight;
-  if (!(height > 0) || !scroller.getBoundingClientRect) return;
-  if (typeof card?.getBoundingClientRect !== 'function') return;
-  const view = scroller.getBoundingClientRect();
-  const box = card.getBoundingClientRect();
-  const top = box.top - view.top - (scroller.clientTop || 0);
-  const delta =
-    top < 0 || box.height > height
-      ? top
-      : Math.max(0, top + box.height - height);
-  if (delta) scroller.scrollTop = (scroller.scrollTop || 0) + delta;
+function observedLines(entry, state) {
+  const name = OBSERVED_NAMES[entry.id]();
+  const { status } = entry.summary;
+  const product = state.products?.find((item) => item.id === entry.id);
+  const shown = product?.shown ?? entry.summary.shownTime;
+  let time = null;
+  if (state.mode === 'history' && product?.selected === null)
+    time = t('No frame at this time');
+  else if (Number.isFinite(Date.parse(shown)))
+    time =
+      state.mode === 'history'
+        ? clockTime(shown)
+        : minutesBefore(shown) >= 60
+          ? age(shown)
+          : t('{n} min ago', { n: minutesBefore(shown) });
+  if (!time)
+    return [
+      {
+        id: entry.id,
+        text: `${name} · ${status || t('Waiting for observation')}`,
+      },
+    ];
+  return [
+    { id: entry.id, text: `${name} · ${time}` },
+    ...(status
+      ? [{ id: `${entry.id}-status`, text: status, muted: true }]
+      : []),
+  ];
 }
 
-/** Map weather descriptors and the observed clock into reusable rail readouts. */
+/**
+ * Weather's briefing, in reading order: conditions at the map center, the
+ * observed frames with the radar legend, the wind forecast, then storm
+ * alerts. A section shows only while a layer behind it is on, and each line
+ * is a plain status rather than an empty value. `layerId` is the layer its
+ * controls act on.
+ * @param {object[]} active The weather entries that show, with summaries.
+ * @param {object} state The weather clock's state.
+ * @param {{follows?: (id: string) => boolean}} [clock]
+ * @returns {{id: string, title: string, layerId: string, blocks: object[]}[]}
+ */
+export function weatherBriefing(active, state, clock) {
+  const byId = new Map(active.map((entry) => [entry.id, entry]));
+  const sections = [];
+  const wind = byId.get('wind');
+  if (wind) {
+    // The wind layer reads the forecast at the map center on request:
+    // temperature or pressure with the field shown, then the wind itself.
+    const result = wind.summary.result;
+    const lines = ['scalar', 'wind']
+      .map((id) => result?.lines?.find((line) => line.id === id))
+      .filter((line) => line?.text);
+    const read = wind.summary.actions?.find(({ id }) => id === 'read-wind');
+    sections.push({
+      id: 'here',
+      title: lines.length && result.label ? result.label : t('At map center'),
+      layerId: 'wind',
+      blocks: lines.length
+        ? [{ id: 'reading', type: 'lines', lines }]
+        : read
+          ? [{ id: 'read', type: 'actions', actions: [read] }]
+          : [],
+    });
+  }
+  const observed = ORDER.filter((id) => OBSERVED.has(id) && byId.has(id)).map(
+    (id) => byId.get(id),
+  );
+  if (observed.length) {
+    const blocks = [];
+    for (const entry of observed) {
+      blocks.push({
+        id: entry.id,
+        type: 'lines',
+        lines: observedLines(entry, state),
+      });
+      const legend = entry.id === 'weather-radar' && legendBlockOf(entry);
+      if (legend) blocks.push(legend);
+    }
+    sections.push({
+      id: 'observed',
+      title: t('Observed'),
+      layerId: observed[0].id,
+      blocks,
+    });
+  }
+  if (wind) {
+    const { summary } = wind;
+    const valid = Number.isFinite(Date.parse(summary.validTime));
+    const lines = [
+      {
+        id: 'valid',
+        text: valid
+          ? t('Forecast · valid {valid}', { valid: utc(summary.validTime) })
+          : summary.status || t('Loading forecast'),
+      },
+    ];
+    if (valid && summary.status)
+      lines.push({ id: 'status', text: summary.status, muted: true });
+    if (state.mode === 'history' && !clock?.follows?.('wind'))
+      lines.push({
+        id: 'history',
+        text: t('Forecast · does not follow history'),
+        muted: true,
+      });
+    sections.push({
+      id: 'wind',
+      title: t('Wind'),
+      layerId: 'wind',
+      blocks: [{ id: 'forecast', type: 'lines', lines }],
+    });
+  }
+  const storms = byId.get('weather-cyclones');
+  if (storms) {
+    const { summary, list } = storms;
+    const lines = [];
+    if (!list?.items?.length && summary.detail)
+      lines.push({ id: 'detail', text: summary.detail });
+    if (summary.status)
+      lines.push({ id: 'status', text: summary.status, muted: true });
+    sections.push({
+      id: 'alerts',
+      title: t('Alerts'),
+      layerId: 'weather-cyclones',
+      blocks: [
+        ...(list?.items?.length ? [{ id: 'list', type: 'list', list }] : []),
+        ...(lines.length ? [{ id: 'lines', type: 'lines', lines }] : []),
+      ],
+    });
+  }
+  return sections.filter(({ blocks }) => blocks.length);
+}
+
+/**
+ * Map weather descriptors and the observed clock into reusable rail readouts.
+ * It also reports through `onPresence` whether a weather layer is on, and how
+ * many products show, so Context shows Weather's list tab only then.
+ */
 export function createWeatherPanel({
   container,
   clock,
   setLayerParams = () => {},
   onAction = () => {},
+  onPresence = (state) => setContextListPresence('weather', state),
 } = {}) {
   const document = container?.ownerDocument;
   if (!document?.createElement) return null;
@@ -85,31 +230,17 @@ export function createWeatherPanel({
   const count = panel?.querySelector('#weather-panel-count');
   let entries = [];
   let destroyed = false;
-  let previousIds = null;
-  let hasAppeared = false;
-  const page = panel || document;
-  let openId = openPanels.get(page) || null;
-  // Open card as last shown; null until cards are on screen.
-  let shownOpenId = null;
+  // The product whose details show, or null for the list.
+  let selected = null;
   const handlers = {
     onParams: (id, params) => setLayerParams(id, params, { origin: 'user' }),
-    onOpen: (id) => {
-      openId = id;
-      openPanels.set(page, id);
+    onSelect: (id) => {
+      selected = id;
       render();
     },
   };
-  // The readout patches synchronously, so a newly opened card can be measured.
   const paint = (view) =>
-    renderVue(h(WeatherReadout, { view, ...handlers }), container);
-  paint({
-    hidden: true,
-    observed: false,
-    scope: '',
-    frameTime: '',
-    cards: [],
-    observedCards: [],
-  });
+    renderVue(h(WeatherReadout, { view, selected, ...handlers }), container);
   const render = () => {
     if (destroyed) return;
     const state = clock?.getState() || {
@@ -120,13 +251,7 @@ export function createWeatherPanel({
     const active = entries
       .filter(({ summary }) => summary)
       .sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-    const observed = active.filter(({ id }) => OBSERVED.has(id));
-    const showObserved = observed.length > 0;
-    const names = {
-      'weather-radar': t('Rain radar'),
-      'weather-satellite': t('Satellite clouds'),
-      'weather-lightning': t('Lightning density'),
-    };
+    const showObserved = active.some(({ id }) => OBSERVED.has(id));
     // While live, the newest frame and its age; at a past time, the timeline
     // time alone. The world timeline moves the time. Live, each product's
     // newest frame counts, suspended or not (reduced motion, a hidden page),
@@ -146,9 +271,7 @@ export function createWeatherPanel({
           : historyTime(shownTime)
         : '';
     const models = active.map((entry) => {
-      const { id, icon, summary, legend = [], list } = entry;
-      // Discrete classes (storm geometry, AQHI bands) list swatches, not a ramp.
-      const categorical = entry.legendCategorical === true;
+      const { id, icon, summary, list } = entry;
       let detail = summary.detail;
       const product = state.products.find((item) => item.id === id);
       if (OBSERVED.has(id)) {
@@ -186,22 +309,11 @@ export function createWeatherPanel({
         ...action,
         onClick: action.onClick || (() => onAction(id, action.id)),
       }));
-      const legendBlock = {
-        id: 'legend',
-        type: 'legend',
-        legend: {
-          categorical,
-          colors: legend.map(({ color }) => color),
-          labels: legend.map(({ label }) => label),
-          units: categorical ? '' : summary.units,
-          ...(summary.unitsVerbatim === true ? { unitsVerbatim: true } : {}),
-          zeroIndex: legend.findIndex(({ label }) => label === '0'),
-        },
-      };
+      const legendBlock = legendBlockOf(entry);
       const blocks = [
         ...(list?.items?.length ? [{ id: 'list', type: 'list', list }] : []),
         { id: 'details', type: 'lines', lines },
-        ...(legend.length ? [legendBlock] : []),
+        ...(legendBlock ? [legendBlock] : []),
         ...(summary.settings?.length
           ? [{ id: 'settings', type: 'settings', settings: summary.settings }]
           : []),
@@ -215,7 +327,6 @@ export function createWeatherPanel({
         icon,
         title: summary.label,
         badge: summary.coverage,
-        open: id === openId,
         compact:
           summary.status ||
           summary.compact ||
@@ -227,22 +338,13 @@ export function createWeatherPanel({
       };
     });
     const hidden = active.length === 0;
+    if (!active.some(({ id }) => id === selected)) selected = null;
     paint({
       hidden,
-      observed: showObserved,
-      scope: observed.map(({ id }) => names[id]).join(' · '),
+      briefing: weatherBriefing(active, state, clock),
       frameTime,
-      cards: models.filter(({ id }) => !OBSERVED.has(id)),
-      observedCards: models.filter(({ id }) => OBSERVED.has(id)),
+      cards: models,
     });
-    // Only a change of open card moves the scroll position; refreshes leave it.
-    if (shownOpenId !== null && openId !== shownOpenId) {
-      const open = [
-        ...container.querySelectorAll('.weather-cards > [data-card-id]'),
-      ].find((node) => node.dataset.cardId === openId);
-      revealCard(container, open);
-    }
-    shownOpenId = active.length ? openId : null;
     if (count) set(count, 'textContent', String(active.length));
     if (panel) set(panel, 'hidden', hidden);
     if (!hidden && panel && !appearedPanels.has(panel)) {
@@ -256,33 +358,12 @@ export function createWeatherPanel({
       )
         panel.querySelector('[data-collapse-target="weather-panel"]')?.click();
     }
+    onPresence(hidden ? null : { count: active.length });
   };
   const unsubscribe = clock?.subscribe(render);
   return {
     update(nextEntries) {
       entries = nextEntries.filter(({ summary }) => summary);
-      const ids = new Set(entries.map(({ id }) => id));
-      const ordered = [...entries].sort(
-        (a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id),
-      );
-      const added =
-        previousIds && entries.filter(({ id }) => !previousIds.has(id));
-      if (hasAppeared && added?.length) {
-        openId = added.at(-1).id;
-        openPanels.set(page, openId);
-      } else if (ids.size && !ids.has(openId)) {
-        openId =
-          (!hasAppeared &&
-            !openId &&
-            ordered.find(
-              ({ id, list }) =>
-                id === 'weather-cyclones' && list?.items?.length,
-            )?.id) ||
-          ordered[0]?.id ||
-          null;
-      }
-      if (ids.size) hasAppeared = true;
-      previousIds = ids;
       render();
     },
     destroy() {
@@ -291,6 +372,7 @@ export function createWeatherPanel({
       renderVue(null, container);
       if (panel) set(panel, 'hidden', true);
       if (count) set(count, 'textContent', '0');
+      onPresence(null);
     },
   };
 }

@@ -247,7 +247,11 @@ const clickAction = (id) => click(`${PANEL} [data-action-id="${id}"]`);
 const clickMode = (mode) => click(`${PANEL} .ri-mode-btn[data-mode="${mode}"]`);
 const focusStrip = () =>
   page.evaluate(() =>
-    document.getElementById('ri-strip')?.focus({ preventScroll: true }),
+    document
+      .querySelector(
+        '#recent-imagery-panel .ri-card.focused .ri-card-open, #recent-imagery-panel .ri-card-open',
+      )
+      ?.focus({ preventScroll: true }),
   );
 const pressOnStrip = async (key) => {
   await focusStrip();
@@ -296,7 +300,7 @@ const CONTROLS = {
   clear: `${PANEL} [data-action-id="clear"]`,
   notice: '#ri-notice',
   'zoom-in': '#ri-zoom-in',
-  strip: '#ri-strip',
+  strip: '#recent-imagery-panel .ri-strip',
   hint: '#ri-hint',
   'mode-image': `${PANEL} .ri-mode-btn[data-mode="image"]`,
   'mode-basemap': `${PANEL} .ri-mode-btn[data-mode="basemap"]`,
@@ -470,11 +474,14 @@ try {
     actionIds === 'select-box,use-view,clear',
     actionIds,
   );
-  const blocks = await listOf(`${PANEL} .recent-imagery-readout > *`, 'none');
+  const blocks = await listOf(
+    `${PANEL} .recent-imagery-readout > *`,
+    'listCard',
+  );
   check(
-    'the body is the fixed stack: actions, notice, strip, hint, selection, controls, details',
+    'the body is the stack: actions, notice, days list, hint, selection, controls, details',
     blocks ===
-      'ri-actions,ri-notice,ri-strip,ri-hint,ri-selection,ri-controls,ri-details',
+      'ri-actions,ri-notice,recent-imagery,ri-hint,ri-selection,ri-controls,ri-details',
     blocks,
   );
   let current = await state();

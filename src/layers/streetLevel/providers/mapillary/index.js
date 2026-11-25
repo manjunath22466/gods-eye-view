@@ -173,6 +173,8 @@ export function createMapillaryProvider({ source, photoViewer = null }) {
         },
 
         coverageStats: () => parts.coverage.stats(),
+        coverageNear: (point, radiusKm) =>
+          parts.coverage.linesNear(point, radiusKm),
 
         /** A line selects its sequence; a cone opens its image. */
         handlePick(pickId) {

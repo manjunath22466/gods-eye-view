@@ -26,6 +26,7 @@ import { useStatusStore } from './stores/status.js';
 import { applicationPinia } from './vueRuntime.js';
 import { onLocaleChange } from '../i18n/index.js';
 import { createQuebecCctvOverlay } from './quebecCctvOverlay.js';
+import { CCTV_VIDEO_HOST_EVENT } from './cctvEvents.js';
 
 /**
  * Own camera-panel interaction and presentation; receive the camera port and
@@ -56,6 +57,7 @@ export class CctvControls {
     this._cctvSummaryTypingTimer = null;
     this._lastCctvSummaryText = '';
     this._lastSeenCctvActiveId = null;
+    this._lastSeenCctvEnabled = false;
     this._wasCctvEnabled = false;
     this._cctvChipHideTimer = null;
     this._cctvChipWasBusy = false;
@@ -75,28 +77,39 @@ export class CctvControls {
       if (state) this._renderCctvState(state);
       if (this._cctvChip) this._publishCctvChip({});
     });
-    if (
-      (this._cctvVideo || this._cctvFrame) &&
-      typeof MutationObserver !== 'undefined'
-    ) {
-      this._videoVisibilityObserver = new MutationObserver(() =>
-        this._renderCctvState(this._cctvState),
-      );
-      if (this._cctvPanel)
-        this._videoVisibilityObserver.observe(this._cctvPanel, {
-          attributes: true,
-          attributeFilter: ['class', 'hidden'],
-        });
-      // On phones the panel is on screen only while the Cameras sheet is open.
-      this._videoVisibilityObserver.observe(document.body, {
-        attributes: true,
-        attributeFilter: ['class', MOBILE_SHEET_ATTR],
-      });
+    // The live video plays while its canvas is in a camera card's top image:
+    // the card says when it moves the canvas in or out, and a hidden tab
+    // pauses it. The still is fetched only while the camera tools, the
+    // camera card or its bigger view can show it.
+    // Built without a page (tests, workers), there is no document to watch.
+    const doc = globalThis.document;
+    if (this._cctvVideo || this._cctvFrame) {
+      if (this._cctvVideo)
+        this.listen(doc, CCTV_VIDEO_HOST_EVENT, () =>
+          this._renderCctvState(this._cctvState),
+        );
+      if (typeof MutationObserver !== 'undefined') {
+        this._videoVisibilityObserver = new MutationObserver(() =>
+          this._renderCctvState(this._cctvState),
+        );
+        if (this._cctvPanel)
+          this._videoVisibilityObserver.observe(this._cctvPanel, {
+            attributes: true,
+            attributeFilter: ['class', 'hidden'],
+          });
+        // On phones the panel and the card are on screen only while their
+        // sheet is open.
+        if (doc?.body)
+          this._videoVisibilityObserver.observe(doc.body, {
+            attributes: true,
+            attributeFilter: ['class', MOBILE_SHEET_ATTR],
+          });
+      }
       this._offPreviewCards = watch(
         () => this.store.previewCards,
         () => this._renderCctvState(this._cctvState),
       );
-      this.listen(document, 'visibilitychange', () =>
+      this.listen(doc, 'visibilitychange', () =>
         this._renderCctvState(this._cctvState),
       );
     }

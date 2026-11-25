@@ -307,7 +307,7 @@ test('› and ‹ step along the picture’s links without moving the camera, as
   assert.ok(await until(() => env.poses.at(-1) === 's-1'));
   assert.deepEqual(env.actions.opened.at(-1), {
     id: 's-1',
-    options: { frame: false },
+    options: { frame: false, request: false },
   });
   env.next.fire('click');
   assert.ok(await until(() => env.poses.at(-1) === 's-2'));
@@ -1191,4 +1191,19 @@ test('a busy or timed-out tile keeps its own message; only a body that is not a 
     assert.ok(await until(() => env.instance.sequenceStats().error));
     assert.equal(env.instance.sequenceStats().error, failure.message);
   }
+});
+
+test('a Nearby line row asks for its own sequence’s picture first', async () => {
+  const items = [
+    ...sequence('other', 2, { offset: 0 }),
+    ...sequence('row', 3, { offset: 8 }),
+  ];
+  const { instance, source } = setup({ items });
+  assert.equal(
+    await instance.nearestImage(east(1), { sequenceId: 'row' }),
+    'row-0',
+  );
+  assert.equal(source.calls.nearest[0].collections, 'row');
+  // Without one, any sequence's nearest picture.
+  assert.equal(await instance.nearestImage(east(1)), 'other-0');
 });

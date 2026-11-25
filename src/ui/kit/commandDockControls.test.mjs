@@ -5,8 +5,7 @@
 // glyphs (◯ ▦ 🌙 🌡️ ✦ ◐, the search 🔎 and the collapse +) are text
 // characters, not Material symbols, and stay plain text. Context's tabs and
 // its Contacts mode button are `role="tab"` controls: they say they are
-// chosen with `aria-selected` and keep their own `active` class, never
-// `aria-pressed`.
+// chosen with `aria-selected`, never `aria-pressed`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -40,15 +39,20 @@ const views = {
   // source chips, Location's collapse, its landmark and city pills and the
   // search toggle.
   'CommandDockView.vue': { markup: dock, buttons: 15, icons: 0, closes: 0 },
-  // Search and Expand in the header, the two tabs, Contacts, the cockpit
-  // entry, SEARCH NEARBY SITES and the TR-3B chip.
-  'ContextView.vue': { markup: context, buttons: 8, icons: 7, closes: 0 },
-  // The Data Layers pointer and a row nearest the centre. The glyphs: the
-  // layer tiles' three and the pointer's layers. The chips and the rows
-  // with a motion glyph are in the suggested layers and nearby lists below;
-  // Ask GEV and a layer's Turn off are gone. A globe-view block's head wears
-  // its layer's mark (EntityMark.vue), not a UiIcon of its own.
-  'panels/ViewContext.vue': { markup: inView, buttons: 2, icons: 5, closes: 0 },
+  // The collapsed title's Expand, Search and Expand in the header, the
+  // Inspector and Properties tabs, Contacts, the cockpit entry, SEARCH
+  // NEARBY SITES and the TR-3B chip, the Inspect, Camera settings, Lists
+  // and Pinned tabs and a list's own sub-tab. The glyphs: Search, Expand,
+  // the two layer tabs', a Properties section's, Contacts' and the cockpit
+  // entry's.
+  'ContextView.vue': { markup: context, buttons: 14, icons: 7, closes: 0 },
+  // Pin this view, the Data Layers pointer and a row nearest the centre.
+  // The glyphs: the pin, the layer tiles' four and the pointer's layers.
+  // The rework moved the chips and the rows with a motion glyph to the
+  // suggested layers and nearby lists below, and dropped Ask GEV and a
+  // layer's Turn off here. A globe-view block's head wears its layer's mark
+  // (EntityMark.vue), not a UiIcon of its own.
+  'panels/ViewContext.vue': { markup: inView, buttons: 3, icons: 6, closes: 0 },
   // Open in Data Layers; a layer's glyph and the pointer's layers.
   'panels/SuggestedLayers.vue': {
     markup: suggested,
@@ -56,8 +60,8 @@ const views = {
     icons: 2,
     closes: 0,
   },
-  // An item's row; a list's glyph and an item's motion.
-  'panels/NearbyLists.vue': { markup: nearby, buttons: 1, icons: 2, closes: 0 },
+  // An item's row and Show all; a list's glyph and an item's motion.
+  'panels/NearbyLists.vue': { markup: nearby, buttons: 2, icons: 2, closes: 0 },
 };
 
 test('the dock and Context hand-write no button; each is a UiButton', () => {
@@ -105,18 +109,20 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
   assert.equal(pressed(dock), 11);
   // Search, Expand and TR-3B.
   assert.equal(pressed(context), 3);
-  assert.equal(pressed(inView), 0);
+  // Pin this view.
+  assert.equal(pressed(inView), 1);
   assert.equal(pressed(suggested), 0);
   assert.equal(pressed(nearby), 0);
 });
 
 test("Context's tabs say they are chosen, not pressed", () => {
+  // Inspector, Properties, Contacts, then Inspect, Camera settings, Lists,
+  // Pinned and a list's own sub-tab.
   const tabs = tags(context, 'UiButton').filter((b) => /\srole="tab"/.test(b));
-  assert.equal(tabs.length, 3);
+  assert.equal(tabs.length, 8);
   for (const button of tabs) {
     assert.match(button, /\s:aria-selected=/);
     assert.doesNotMatch(button, /\s:pressed=/);
-    assert.match(button, /\s(?::class|v-class-toggle)="\{ active: /);
   }
 });
 

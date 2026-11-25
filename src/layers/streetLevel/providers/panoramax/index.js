@@ -413,7 +413,7 @@ export function createPanoramaxProvider({
             ),
         step,
         onStep: (photoId) =>
-          context.actions.openImage(photoId, { frame: false }),
+          context.actions.openImage(photoId, { frame: false, request: false }),
         onShown: recentreCones,
         // Esc in the viewer clears the selected sequence, as the panel says.
         onEscape: () => {
@@ -482,6 +482,8 @@ export function createPanoramaxProvider({
           cones.rerender();
         },
 
+        coverageNear: (point, radiusKm) => coverage.linesNear(point, radiusKm),
+
         coverageStats() {
           const stats = coverage.stats();
           let fallback = '';
@@ -541,12 +543,16 @@ export function createPanoramaxProvider({
          * imagery filter, or null. After a click on a line, that line's
          * sequence is asked first.
          */
-        async nearestImage({ lat, lon }, { signal } = {}) {
+        async nearestImage({ lat, lon }, { signal, sequenceId = null } = {}) {
           const point = { lat, lon };
           const filter = context.getFilter();
-          // Only the lookup the click itself asked for (the same point).
-          const wanted =
-            preferred && metresBetween(preferred, point) < 1 ? preferred : null;
+          // Only the lookup the click itself asked for (the same point), or
+          // a Nearby line row naming its sequence.
+          const wanted = sequenceId
+            ? { sequenceId, radius: NEAREST_RADIUS_M }
+            : preferred && metresBetween(preferred, point) < 1
+              ? preferred
+              : null;
           preferred = null;
           const ask = (collections, radius = NEAREST_RADIUS_M) =>
             source.nearestItems(

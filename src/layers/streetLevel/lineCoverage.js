@@ -1,7 +1,12 @@
 import { passesImageryFilter } from './filter.js';
 import { STREET_LEVEL_SET_PREFIX } from './policy.js';
-import { groundUnderCamera, viewFocus, visibleBbox } from './view.js';
-import { tilesForBbox } from './tileMath.js';
+import {
+  groundUnderCamera,
+  metresBetween,
+  viewFocus,
+  visibleBbox,
+} from './view.js';
+import { tilesForBbox, wrapLon } from './tileMath.js';
 import { msg } from '../../i18n/index.js';
 import { fromDegrees } from '../../geo/ellipsoid.js';
 import { cssColor } from '../../render/color.js';
@@ -185,6 +190,62 @@ export function createLineCoverage({
   const perTilePointCap = tuning.maxPoints
     ? Math.floor(tuning.maxPoints / tuning.maxTiles)
     : Infinity;
+  /** Bumped whenever the drawn lines change, so a lookup can be reused. */
+  let drawnVersion = 0;
+  // Decoded sequences and their parts are immutable until their tile is
+  // replaced. Bounds keep camera moves from rereading every drawn vertex.
+  const nearbyChunks = new WeakMap();
+
+  function chunksOf(sequence) {
+    let chunks = nearbyChunks.get(sequence);
+    if (chunks) return chunks;
+    chunks = [];
+    for (const part of sequence.parts) {
+      for (let start = 0; start < part.length; start += 32) {
+        const end = Math.min(start + 32, part.length);
+        let west = Infinity;
+        let east = -Infinity;
+        let south = Infinity;
+        let north = -Infinity;
+        for (let i = start; i < end; i++) {
+          const [lon, lat] = part[i];
+          if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+          west = Math.min(west, lon);
+          east = Math.max(east, lon);
+          south = Math.min(south, lat);
+          north = Math.max(north, lat);
+        }
+        chunks.push({ part, start, end, west, east, south, north });
+      }
+    }
+    nearbyChunks.set(sequence, chunks);
+    return chunks;
+  }
+
+  // A conservative lower bound for metresBetween's street-scale metric.
+  // Use the smallest longitude scale anywhere in the chunk; wrapped
+  // endpoint distances also cover lines crossing the antimeridian.
+  function chunkDistanceSquared(point, chunk) {
+    const { west, east, south, north } = chunk;
+    const dy = Math.max(south - point.lat, point.lat - north, 0) * 110_540;
+    const offset = (((point.lon - west) % 360) + 360) % 360;
+    const dlon =
+      offset <= east - west || east - west >= 360
+        ? 0
+        : Math.min(
+            Math.abs(wrapLon(west - point.lon)),
+            Math.abs(wrapLon(east - point.lon)),
+          );
+    const meanLatitude = Math.max(
+      Math.abs((point.lat + south) / 2),
+      Math.abs((point.lat + north) / 2),
+    );
+    const scale =
+      meanLatitude < 90 ? Math.cos((meanLatitude * Math.PI) / 180) : 0;
+    const dx = dlon * 111_320 * scale;
+    // Leave a little rounding slack at the radius/best-distance boundary.
+    return (dx * dx + dy * dy) * (1 - 1e-12);
+  }
 
   function requestRender() {
     render?.governorRequestRender?.(renderKey);
@@ -317,7 +378,9 @@ export function createLineCoverage({
   function drawTile(entry) {
     // Lookup, picking and counts follow what is drawn, not the whole tile.
     const sequences = drawnSequences(entry);
+    drawnVersion++;
     entry.sequences = new Map(sequences.map((s) => [s.id, s]));
+    for (const sequence of sequences) chunksOf(sequence);
     const hidden = highlighted();
     const items = lineItems(
       sequences,
@@ -357,6 +420,7 @@ export function createLineCoverage({
     if (!entry) return;
     undrawTile(entry);
     state.coverage.tiles.delete(key);
+    drawnVersion++;
   }
 
   async function loadTile(tile) {
@@ -575,6 +639,58 @@ export function createLineCoverage({
     return ids.size;
   }
 
+  let near = { asked: '', found: [] };
+
+  /**
+   * The drawn lines within `radiusKm` of a point, one entry per sequence at
+   * its point nearest there, nearest first: what Context counts and lists
+   * beside the count the panel shows. The same question about the same lines
+   * is answered from the last answer.
+   * @param {{lat: number, lon: number}} point
+   * @param {number} radiusKm
+   * @returns {Array<{sequenceId: string, lat: number, lon: number, km: number,
+   *   capturedAt: number, isPano: boolean}>}
+   */
+  function linesNear(point, radiusKm) {
+    if (!Number.isFinite(point?.lat) || !Number.isFinite(point?.lon)) return [];
+    if (!(radiusKm > 0)) return [];
+    const asked = `${drawnVersion}|${point.lat}|${point.lon}|${radiusKm}`;
+    if (near.asked === asked) return near.found;
+    const radiusM = radiusKm * 1000;
+    const best = new Map();
+    for (const entry of state.coverage.tiles.values())
+      for (const sequence of entry.sequences.values()) {
+        let closest = best.get(sequence.id)?.metres ?? Infinity;
+        let at = null;
+        for (const chunk of chunksOf(sequence)) {
+          const reach = Math.min(closest, radiusM);
+          if (chunkDistanceSquared(point, chunk) > reach * reach) continue;
+          for (let i = chunk.start; i < chunk.end; i++) {
+            const [lon, lat] = chunk.part[i];
+            const metres = metresBetween(point, { lat, lon });
+            if (metres < closest) {
+              closest = metres;
+              at = { lat, lon };
+            }
+          }
+        }
+        if (at && closest <= radiusM)
+          best.set(sequence.id, { sequence, metres: closest, ...at });
+      }
+    const found = [...best.values()]
+      .sort((a, b) => a.metres - b.metres)
+      .map(({ sequence, metres, lat, lon }) => ({
+        sequenceId: sequence.id,
+        lat,
+        lon,
+        km: metres / 1000,
+        capturedAt: sequence.capturedAt || 0,
+        isPano: sequence.isPano === true,
+      }));
+    near = { asked, found };
+    return found;
+  }
+
   /** What the panel and the layer list show: count, LOADING, key gate, error. */
   function stats() {
     const { blocked } = state.coverage;
@@ -607,6 +723,7 @@ export function createLineCoverage({
     reload,
     highlight,
     sequenceCount,
+    linesNear,
     stats,
   };
 }

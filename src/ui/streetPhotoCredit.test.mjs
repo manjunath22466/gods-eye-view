@@ -1,0 +1,264 @@
+// A street-level photo's picture away from its viewer (a pinned tile, the
+// dock) carries its provider's credit, with who took it and its licence when
+// known, for as long as the picture shows.
+import '../testSupport/registerDom.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { createPinia } from 'pinia';
+import { createApp, h, nextTick } from 'vue';
+import { streetPhotoCredit } from './streetPhotoCredit.js';
+import { createPhotoHistory } from '../layers/streetLevel/photos.js';
+import { createStreetLevelLayer } from '../layers/streetLevel/index.js';
+import { KARTAVIEW_CREDIT_HTML } from '../layers/streetLevel/providers/kartaview/policy.js';
+import { fakeStreetLevelProvider } from '../testSupport/streetLevelFakes.mjs';
+import PinnedGrid from './views/panels/PinnedGrid.vue';
+import DockedView from './views/panels/DockedView.vue';
+import StreetViewHero from './views/panels/StreetViewHero.vue';
+import { usePinnedStore } from './stores/pinned.js';
+import { useDockedStore } from './stores/docked.js';
+import { useEntityCardStore } from './stores/entityCard.js';
+
+const KARTAVIEW_TEXT =
+  'Street Level: imagery © KartaView contributors, CC BY-SA 4.0';
+
+const record = (overrides = {}) => ({
+  id: 'kartaview:42',
+  providerId: 'kartaview',
+  provider: 'KartaView',
+  creator: null,
+  license: null,
+  still: 'https://example.org/42.jpg',
+  ...overrides,
+});
+
+/** A Street Level module as the card reads it: its photos and credits. */
+const streetModule = (photos, credits = { kartaview: KARTAVIEW_TEXT }) => ({
+  getAnalystRecords: () => [],
+  photo: (id) => photos[id] || null,
+  providerCredit: (id) => credits[id] || '',
+});
+
+test('the credit is the provider’s own, then who took it and the picture’s licence', () => {
+  const photos = {
+    'kartaview:42': record({ creator: 'mapfool' }),
+    'panoramax:7': record({
+      id: 'panoramax:7',
+      providerId: 'panoramax',
+      provider: 'Panoramax',
+      license: 'CC-BY-SA-4.0',
+    }),
+  };
+  const module = streetModule(photos, {
+    kartaview: KARTAVIEW_TEXT,
+    panoramax:
+      'Street Level: imagery © Panoramax contributors, licence per picture',
+  });
+  assert.equal(
+    streetPhotoCredit(module, 'kartaview:42'),
+    `${KARTAVIEW_TEXT} · Image by mapfool`,
+  );
+  assert.equal(
+    streetPhotoCredit(module, 'panoramax:7'),
+    'Street Level: imagery © Panoramax contributors, licence per picture · CC-BY-SA-4.0',
+  );
+  // A photo the layer no longer remembers is still credited to its source,
+  // named in its id.
+  assert.equal(streetPhotoCredit(module, 'kartaview:99'), KARTAVIEW_TEXT);
+  // Without the provider's credit, its name, as the card's source line has it.
+  assert.equal(
+    streetPhotoCredit(streetModule(photos, {}), 'kartaview:42'),
+    'KartaView · Image by mapfool',
+  );
+  assert.equal(streetPhotoCredit(null, 'kartaview:42'), '');
+  assert.equal(streetPhotoCredit(streetModule({}, {}), 'nowhere'), '');
+});
+
+test('the layer hands out a provider’s credit as plain text, and remembers a picture’s licence', () => {
+  const layer = createStreetLevelLayer({
+    providers: [
+      fakeStreetLevelProvider({
+        id: 'kartaview',
+        pickPrefix: 'kv:',
+        html: KARTAVIEW_CREDIT_HTML,
+      }),
+    ],
+  });
+  assert.equal(layer.providerCredit('kartaview'), KARTAVIEW_TEXT);
+  assert.equal(layer.providerCredit('nowhere'), '');
+  const history = createPhotoHistory();
+  const kept = history.remember({
+    open: true,
+    providerId: 'panoramax',
+    providerName: 'Panoramax',
+    imageId: '7',
+    position: { lat: 48.85, lon: 2.35 },
+    creator: 'someone',
+    license: 'CC-BY-SA-4.0',
+  });
+  assert.equal(kept.license, 'CC-BY-SA-4.0');
+});
+
+function connect(cards, module, { streetOn = true } = {}) {
+  const layer = {
+    id: 'street-level',
+    name: 'Street Level',
+    enabled: streetOn,
+    module,
+  };
+  cards.connect({
+    dataManager: () => ({
+      layers: new Map([[layer.id, layer]]),
+      isEnabled: (id) => (id === layer.id ? layer.enabled : true),
+      getAll: () => [layer],
+      subscribe: () => () => {},
+    }),
+    regionalBrief: async () => null,
+    previews: () => null,
+    canFollow: () => false,
+    follow() {},
+    flyTo() {},
+    ask() {},
+  });
+}
+
+function mount(t, component) {
+  document.body.replaceChildren();
+  const host = document.body.appendChild(document.createElement('div'));
+  const pinia = createPinia();
+  const cards = useEntityCardStore(pinia);
+  const app = createApp({ render: () => h(component) }).use(pinia);
+  t.after(() => {
+    app.unmount();
+    cards.connect(null);
+  });
+  return { host, pinia, cards, mount: () => app.mount(host) };
+}
+
+test('a pinned street still shows its provider’s credit on its tile; other pins carry none', async (t) => {
+  const { host, pinia, cards, mount: go } = mount(t, PinnedGrid);
+  connect(
+    cards,
+    streetModule({ 'kartaview:42': record({ creator: 'mapfool' }) }),
+    { streetOn: false },
+  );
+  const pinned = usePinnedStore(pinia);
+  pinned.pin({
+    key: 'street-level:kartaview:42',
+    kind: 'street',
+    title: 'Drottninggatan',
+    icon: 'streetview',
+    identity: { layerId: 'street-level', id: 'kartaview:42' },
+    still: 'https://example.org/42.jpg',
+  });
+  pinned.pin({
+    key: 'street-level:kartaview:43',
+    kind: 'street',
+    title: 'No picture',
+    icon: 'streetview',
+    identity: { layerId: 'street-level', id: 'kartaview:43' },
+  });
+  pinned.pin({
+    key: 'place:a',
+    kind: 'place',
+    title: 'Zilker Park',
+    icon: 'location_on',
+    identity: { layerId: 'place', id: 'a' },
+    still: '/still/a.png',
+  });
+  go();
+  await nextTick();
+  const tiles = [...host.querySelectorAll('.pinned-grid__tile')];
+  const credit = (tile) =>
+    tile.querySelector('.pinned-grid__photo-credit')?.textContent ?? null;
+  assert.equal(
+    credit(tiles[0]),
+    `${KARTAVIEW_TEXT} · Image by mapfool`,
+    'with the picture, on its tile',
+  );
+  assert.equal(
+    tiles[0].querySelector('.pinned-grid__frame')?.getAttribute('src'),
+    'https://example.org/42.jpg',
+  );
+  assert.equal(credit(tiles[1]), null, 'no picture, nothing to credit');
+  assert.equal(credit(tiles[2]), null, 'a map still is credited below');
+});
+
+test('a docked street still shows its provider’s credit under the picture', async (t) => {
+  const { host, pinia, cards, mount: go } = mount(t, DockedView);
+  connect(cards, streetModule({ 'kartaview:42': record({ license: null }) }), {
+    streetOn: false,
+  });
+  useDockedStore(pinia).dock({
+    key: 'street-level:kartaview:42',
+    kind: 'street',
+    title: 'Drottninggatan',
+    identity: { layerId: 'street-level', id: 'kartaview:42' },
+  });
+  go();
+  await nextTick();
+  assert.equal(
+    host.querySelector('.docked-view__frame img')?.getAttribute('src'),
+    'https://example.org/42.jpg',
+  );
+  assert.equal(
+    host.querySelector('.docked-view__credit')?.textContent,
+    KARTAVIEW_TEXT,
+  );
+});
+
+test('a street card’s own still shows the same credit, under its Street Level off note', async (t) => {
+  const {
+    host,
+    cards,
+    mount: go,
+  } = mount(t, {
+    render: () =>
+      h(StreetViewHero, {
+        card: {
+          key: 'street-level:kartaview:42',
+          layerId: 'street-level',
+          identity: { layerId: 'street-level', id: 'kartaview:42' },
+        },
+      }),
+  });
+  connect(
+    cards,
+    streetModule({ 'kartaview:42': record({ creator: 'mapfool' }) }),
+    { streetOn: false },
+  );
+  go();
+  await nextTick();
+  assert.equal(
+    host.querySelector('.sl-hero__still img')?.getAttribute('src'),
+    'https://example.org/42.jpg',
+  );
+  const foot = host.querySelector('.sl-hero__foot');
+  assert.equal(
+    foot?.querySelector('.sl-hero__note')?.textContent,
+    'Street Level off · last image',
+  );
+  assert.equal(
+    foot?.querySelector('.sl-hero__credit')?.textContent,
+    `${KARTAVIEW_TEXT} · Image by mapfool`,
+  );
+});
+
+test('the stills’ credits wrap in full: no clip or ellipsis', () => {
+  const css = fs
+    .readFileSync(new URL('./styles/entity-card.css', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const selector of [
+    '.pinned-grid__photo-credit',
+    '.docked-view__credit',
+    '.sl-hero__credit',
+  ]) {
+    const escaped = selector.replace(/[.]/g, '\\.');
+    const body = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+    assert.ok(body, selector);
+    assert.doesNotMatch(
+      body,
+      /white-space:\s*nowrap|text-overflow|line-clamp|overflow:\s*hidden/,
+    );
+  }
+});

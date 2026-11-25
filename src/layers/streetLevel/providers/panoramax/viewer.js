@@ -77,6 +77,8 @@ export const PANORAMAX_SOURCES = Object.freeze({
     creator: photo.creator,
     license: photo.license,
     externalUrl: panoramaxPictureUrl(photo.id),
+    // The small one, for its card to keep.
+    still: photo.urls.thumb || photo.urls.sd || null,
   }),
 });
 

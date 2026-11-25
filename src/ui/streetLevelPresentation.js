@@ -188,9 +188,11 @@ function presentViewer(state) {
   if (street.creator)
     left.push(t('Image by {creator}', { creator: street.creator }));
   if (street.license) left.push(street.license);
+  const photo = state.acceptedPhoto ?? null;
   return {
     open: street.open === true,
-    loading: street.loading === true && !street.imageId,
+    photo,
+    loading: street.loading === true && !photo,
     renderMode: street.renderMode === 'fill' ? 'fill' : 'letterbox',
     renderModes: street.renderModes !== false,
     captionLeft: left.join(' · '),
@@ -338,6 +340,11 @@ export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
     since: presentSince(filter.sinceDays, now),
     sinceNote: state.sinceNote || null,
     viewer: presentViewer(state),
+    dockPhotoLoading: state.dockPhotoLoading === true,
+    dockPhotoUnavailable: state.dockPhotoUnavailable === true,
+    dockPhotoRestoring: state.dockPhotoRestoring === true,
+    // 'failed' or 'restoring': a replacement the dock could not show.
+    dockPhotoNotice: state.dockPhotoNotice || null,
     meta: presentMeta(state),
     nearest: presentNearest(state),
   };

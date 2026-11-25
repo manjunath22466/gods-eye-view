@@ -39,8 +39,10 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
   let element = null;
   let host = null;
   let service = null;
-  let pendingOpen = null;
-  let cancelShown = null;
+  let opening = null;
+  let active = false;
+  let confirmed = null;
+  let walkPosition = null;
   /** Bumped by `unmount`: a construction it overtook builds nothing. */
   let generation = 0;
   let subscriptions = [];
@@ -121,17 +123,35 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
     lookingUp.clear();
   }
 
+  function selectedPanorama(instance) {
+    const id = instance.getPano();
+    const location = instance.getLocation?.();
+    if (location?.pano && location.pano !== id) return null;
+    const coordinates = location?.latLng ?? instance.getPosition();
+    const lat = coordinates?.lat();
+    const lon = coordinates?.lng();
+    return id && Number.isFinite(lat) && Number.isFinite(lon)
+      ? { id, position: { lat, lon } }
+      : null;
+  }
+
   function publishPose() {
-    const panoId = panorama?.getPano?.();
-    const latLng = panorama?.getPosition?.();
-    if (!panoId || !latLng || pendingOpen === null) return;
+    if (
+      !active ||
+      opening ||
+      !confirmed ||
+      panorama?.getPano() !== confirmed.id ||
+      panorama.getStatus() !== 'OK'
+    )
+      return;
+    const { id: panoId, position } = confirmed;
     const meta = described.get(panoId);
     if (!meta) describe(panoId);
     const pov = panorama.getPov() || {};
     emit({
       providerId: GOOGLE_PROVIDER_ID,
       imageId: panoId,
-      position: { lon: latLng.lng(), lat: latLng.lat() },
+      position,
       bearing: Number.isFinite(pov.heading) ? pov.heading : null,
       tilt: Number.isFinite(pov.pitch) ? pov.pitch : 0,
       altitude: null,
@@ -149,6 +169,18 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
     requestRender();
   }
 
+  function publishWalk(instance) {
+    if (
+      walkPosition &&
+      instance.getPano() === walkPosition.id &&
+      instance.getStatus() === 'OK'
+    ) {
+      confirmed = walkPosition;
+      walkPosition = null;
+      publishPose();
+    }
+  }
+
   async function ensurePanorama(target) {
     if (panorama && host === target) return panorama;
     const built = generation;
@@ -161,15 +193,30 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
     element.style.cssText = 'position:absolute;inset:0;';
     target.append(element);
     host = target;
-    panorama = new StreetViewPanorama(element, PANORAMA_OPTIONS);
-    // Not pano_changed: it can fire with the old panorama's position.
-    subscriptions = ['position_changed', 'pov_changed'].map((name) =>
-      panorama.addListener(name, () => publishPose()),
-    );
-    return panorama;
+    const instance = new StreetViewPanorama(element, PANORAMA_OPTIONS);
+    panorama = instance;
+    // The ID can change before its position arrives. POV and status alone
+    // may refresh a confirmed panorama but cannot establish a new one.
+    subscriptions = [
+      instance.addListener('position_changed', () => {
+        if (panorama !== instance || !active || opening || !confirmed) return;
+        walkPosition = selectedPanorama(instance);
+        publishWalk(instance);
+      }),
+      instance.addListener('status_changed', () => {
+        if (panorama === instance && active && !opening) publishWalk(instance);
+      }),
+      instance.addListener('pov_changed', publishPose),
+    ];
+    return instance;
   }
 
   function destroyPanorama() {
+    opening?.cancel?.();
+    opening = null;
+    active = false;
+    confirmed = null;
+    walkPosition = null;
     for (const subscription of subscriptions) subscription.remove();
     subscriptions = [];
     try {
@@ -183,13 +230,8 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
     host = null;
   }
 
-  /**
-   * Resolves once `panoId` shows (OK status, or a new position when the
-   * status stays OK); rejects on no imagery, a refused key or no answer.
-   */
-  function shown(instance, panoId) {
-    if (instance.getPano() === panoId && instance.getStatus() === 'OK')
-      return Promise.resolve();
+  /** Wait for a current panorama ID, position and successful status. */
+  function showPanorama(instance, request) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => finish(reject, new Error(NO_ANSWER_MESSAGE)),
@@ -198,32 +240,46 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
       const stopAuthWatch = loader.onAuthFailure(() =>
         finish(reject, new Error(KEY_REJECTED_MESSAGE)),
       );
-      cancelShown = () => finish(resolve);
-      // At a position event the status may still be the last panorama's failure.
-      const onStatus = () => {
-        if (pendingOpen !== panoId) return finish(resolve);
-        const status = instance.getStatus();
-        if (status === 'OK') finish(resolve);
-        else if (status)
-          finish(
-            reject,
-            new Error(msg('Street View has no imagery for this place')),
-          );
-      };
-      const onPosition = () => {
-        if (pendingOpen !== panoId || instance.getStatus() === 'OK')
-          finish(resolve);
-      };
+      request.cancel = () => finish(resolve);
+      let position = null;
+      function accept() {
+        if (
+          opening === request &&
+          position &&
+          instance.getPano() === position.id &&
+          instance.getStatus() === 'OK' &&
+          (position.id === request.id || !request.superseded.has(position.id))
+        )
+          finish(resolve, position);
+      }
       const subscriptions = [
-        instance.addListener('status_changed', onStatus),
-        instance.addListener('position_changed', onPosition),
+        instance.addListener('position_changed', () => {
+          position = selectedPanorama(instance);
+          accept();
+        }),
+        instance.addListener('status_changed', () => {
+          if (opening !== request) return;
+          const status = instance.getStatus();
+          if (status === 'OK') accept();
+          else if (status && instance.getPano() === request.id)
+            finish(
+              reject,
+              new Error(msg('Street View has no imagery for this place')),
+            );
+        }),
       ];
       function finish(settle, value) {
-        cancelShown = null;
+        request.cancel = null;
         clearTimeout(timer);
         for (const subscription of subscriptions) subscription.remove();
         stopAuthWatch();
         settle(value);
+      }
+      try {
+        instance.setPano(request.id);
+        instance.setVisible(true);
+      } catch (error) {
+        finish(reject, error);
       }
     });
   }
@@ -235,24 +291,61 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
     },
 
     async open(imageId) {
-      const panoId = String(imageId);
+      const id = String(imageId);
       if (!host) throw new Error('Street View is not mounted');
       if (loader.authFailed()) throw new Error(KEY_REJECTED_MESSAGE);
-      cancelShown?.();
-      pendingOpen = panoId;
-      const instance = await ensurePanorama(host);
-      if (pendingOpen !== panoId) return;
-      const ready = shown(instance, panoId);
-      instance.setPano(panoId);
-      instance.setVisible(true);
-      await ready;
-      if (pendingOpen !== panoId) return;
-      publishPose();
+      const prior = opening;
+      const request = { id, superseded: prior?.superseded ?? new Set() };
+      if (prior) request.superseded.add(prior.id);
+      // The panorama already shown can still report its position while the
+      // SDK loads a replacement. That event does not confirm the new open.
+      if (confirmed) request.superseded.add(confirmed.id);
+      opening = request;
+      prior?.cancel?.();
+      walkPosition = null;
+      try {
+        const instance = await ensurePanorama(host);
+        if (opening !== request) return;
+        let selection;
+        if (
+          confirmed?.id === id &&
+          instance.getPano() === id &&
+          instance.getStatus() === 'OK'
+        ) {
+          instance.setVisible(true);
+          selection = confirmed;
+        } else {
+          // A replacement can change the SDK's display before it reports
+          // whether it succeeded. A failed load leaves no confirmed pose.
+          if (confirmed) {
+            confirmed = null;
+            emit(null);
+          }
+          if (opening !== request) return;
+          selection = await showPanorama(instance, request);
+        }
+        if (opening !== request) return;
+        if (
+          !selection ||
+          instance.getPano() !== selection.id ||
+          instance.getStatus() !== 'OK'
+        )
+          throw new Error(NO_ANSWER_MESSAGE);
+        confirmed = selection;
+        active = true;
+        opening = null;
+        publishPose();
+        return selection.id;
+      } finally {
+        if (opening === request) opening = null;
+      }
     },
 
     close() {
-      pendingOpen = null;
-      cancelShown?.();
+      opening?.cancel?.();
+      opening = null;
+      active = false;
+      walkPosition = null;
       try {
         panorama?.setVisible(false);
       } catch {
@@ -261,8 +354,6 @@ export function createGoogleViewer({ loader, getService, render } = {}) {
     },
 
     unmount() {
-      pendingOpen = null;
-      cancelShown?.();
       releaseLookups();
       generation++;
       destroyPanorama();

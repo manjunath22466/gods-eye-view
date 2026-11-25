@@ -1,6 +1,7 @@
 import { CCTV_AMBIENT_CARD_MAX } from '../../data/cctvLod.js';
-import { isolate, msg, t } from '../../i18n/index.js';
+import { isolate, msg, t, tn } from '../../i18n/index.js';
 import { ACTIVE_FRAME_REFRESH_MS, IDLE_FRAME_REFRESH_MS } from './policy.js';
+import { CAL_STATUS_WORDS } from '../../data/cctvCalibrationWords.js';
 import { headingHudToken, isHeadingEstimated } from './headingConfidence.js';
 import {
   specSummary,
@@ -36,6 +37,19 @@ export function summaryCalLabel(badge) {
     ? t(CAL_BADGE_LABELS[key])
     : key.replace('-', ' ').toUpperCase();
 }
+
+// The camera tools' scene summary, as short labelled lines in sentence case.
+const SOURCE_KIND_WORDS = Object.freeze({
+  snapshot: msg('Snapshot'),
+  live: msg('Live video'),
+  fallback: msg('Fallback image'),
+  upstream: msg('Upstream image'),
+  synthetic: msg('Synthetic'),
+  configured: msg('Configured'),
+  seed: msg('Seed'),
+  image: msg('Image'),
+  unknown: msg('Unknown'),
+});
 
 /** Source kind ('image', 'snapshot') for the summary; HLS, MJPEG… stay codes. */
 export function summarySourceLabel(kind) {
@@ -144,6 +158,50 @@ export function createPresentation({
       .filter(Boolean)
       .map(isolate)
       .join(' · ');
+  }
+
+  /**
+   * The scene summary as labelled lines for the camera tools: what the
+   * active camera covers, how many others overlap it, whether its picture
+   * is projected, its calibration and its source. Empty with no camera.
+   * @returns {Array<{label: string, value: string}>}
+   */
+  function buildSummaryLines() {
+    const active = parts.selection.getActiveRecord();
+    if (!active) return [];
+    const area = parts.model.sectorAreaKm2(
+      active.camera.rangeM,
+      active.camera.fovDeg,
+    );
+    const overlap = parts.geometry.coverageNeighborCount(active);
+    const health = layerState._healthById.get(active.camera.id) || null;
+    const badge = parts.calibration.deriveCalBadge(active.camera);
+    const kind = health?.sourceKind || active.camera.feedType || 'image';
+    return [
+      {
+        label: t('Coverage'),
+        value: isolate(t('{value} km²', { value: area.toFixed(2) })),
+      },
+      {
+        label: t('Overlap'),
+        value:
+          overlap > 0
+            ? tn(overlap, '{count} camera', '{count} cameras')
+            : t('No other camera'),
+      },
+      {
+        label: t('Projection'),
+        value: layerState._showProjection ? t('On') : t('Off'),
+      },
+      {
+        label: t('Calibration'),
+        value: CAL_STATUS_WORDS[badge] ? t(CAL_STATUS_WORDS[badge]) : badge,
+      },
+      {
+        label: t('Source'),
+        value: SOURCE_KIND_WORDS[kind] ? t(SOURCE_KIND_WORDS[kind]) : kind,
+      },
+    ];
   }
 
   /**
@@ -267,6 +325,7 @@ export function createPresentation({
       autoHop: layerState._autoHop,
       autoHopSuspended: layerState._autoHopSuspended,
       autoHopSec: layerState._autoHopSec,
+      summaryLines: buildSummaryLines(),
       count: layerState._count,
       lastUpdate: layerState._lastUpdate,
       error: layerState._lastError,
@@ -289,6 +348,12 @@ export function createPresentation({
         hoverId: layerState._hoverCardId,
       },
       activeCameraId: activeId,
+      // Layer-owned opening, restored and timed steps leave Context on its
+      // current card. A manual or voice step is a pick even with Auto-hop on.
+      openingCamera: Boolean(
+        activeId &&
+        (layerState._openingCameraProvisional || layerState._quietActivation),
+      ),
       activeCameraReselection: layerState._activeCameraReselection,
       activeCamera: active ? getPublicCameraState(active, activeId) : null,
       cameraIndex: cameraIndex(),

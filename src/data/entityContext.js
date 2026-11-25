@@ -1,3 +1,4 @@
+import { aircraftCountryCode } from './aircraftCountry.js';
 import { getContextStore } from './contextStore.js';
 import { msg } from '../i18n/marker.js';
 import { AIRCRAFT_CLASS_LABELS } from './aircraftClass.js';
@@ -773,6 +774,26 @@ export function layerRecords(dataManager, layerId, maxCount = ALL_RECORDS) {
   return records.filter((record) => recordPosition(record));
 }
 
+/**
+ * The items a layer offers for an area around a point, not yet filtered by
+ * distance or sorted: those it hands out for the area when it keeps more
+ * than its analyst records (`getRecordsNear`, Street Level's photos and
+ * drawn lines), else its loaded items.
+ */
+function layerRecordsAround(dataManager, layerId, here, radiusKm) {
+  if (dataManager?.isEnabled && !dataManager.isEnabled(layerId)) return [];
+  const module = dataManager?.layers?.get?.(layerId)?.module;
+  if (typeof module?.getRecordsNear !== 'function')
+    return layerRecords(dataManager, layerId);
+  let records = [];
+  try {
+    records = module.getRecordsNear(here, radiusKm) || [];
+  } catch {
+    records = [];
+  }
+  return records.filter((record) => recordPosition(record));
+}
+
 function layerName(dataManager, layerId) {
   const layer = dataManager?.layers?.get?.(layerId);
   return text(layer?.name) || text(layer?.module?.name) || layerId;
@@ -1049,6 +1070,49 @@ function cardPhoto(dataManager, layerId, record) {
   };
 }
 
+/**
+ * What picks the fleet model an item is drawn with (`fleet` names the
+ * table: aircraft, vessel or transit), from its layer's record; null for
+ * an item drawn without one.
+ * @param {string} layerId
+ * @param {string} kind
+ * @param {object|null} record
+ * @returns {object|null}
+ */
+function modelSubject(layerId, kind, record) {
+  if (!record) return null;
+  if (kind === 'aircraft')
+    return {
+      fleet: 'aircraft',
+      typeCode: text(record.typeCode ?? record.type) || null,
+      category: record.category ?? null,
+      callsign: text(record.callsign) || null,
+    };
+  if (kind === 'vessel')
+    return {
+      fleet: 'vessel',
+      type: text(record.shipType ?? record.type) || null,
+      mmsi: text(record.mmsi) || null,
+      virtual: record.virtual === true,
+      length: finite(record.length),
+      beam: finite(record.beam),
+      name: text(record.name) || null,
+    };
+  if (layerId === 'transit')
+    return {
+      fleet: 'transit',
+      mode: text(record.mode) || null,
+      routeType: record.routeType ?? null,
+    };
+  if (layerId === 'rail')
+    return {
+      fleet: 'transit',
+      railCategory: text(record.category) || null,
+      railMode: text(record.mode) || null,
+    };
+  return null;
+}
+
 export function describeEntity(
   dataManager,
   identity,
@@ -1134,18 +1198,15 @@ export function describeEntity(
     warningWords: warnings.map((entry) => entry.words),
     // For the aircraft card's model and route line.
     aircraftClass,
-    // What picks the fleet model the globe draws this aircraft with.
-    aircraftModel:
-      kind.kind === 'aircraft' && record
-        ? {
-            typeCode: text(record.typeCode ?? record.type) || null,
-            category: record.category ?? null,
-            callsign: text(record.callsign) || null,
-          }
-        : null,
+    // What picks the fleet model the globe draws it with, for any item
+    // drawn as one (aircraft, vessels, transit and rail); null otherwise.
+    modelSubject: modelSubject(layerId, kind.kind, record),
     photo: cardPhoto(dataManager, layerId, record),
     // Its class's English name, for the UI to translate; null when unknown.
     aircraftClassName: AIRCRAFT_CLASS_LABELS[aircraftClass] || null,
+    // The country it is registered in (ISO code), when that can be told.
+    countryCode:
+      kind.kind === 'aircraft' && record ? aircraftCountryCode(record) : null,
     insights:
       kind.kind === 'aircraft' ? aircraftInsights(record, { nowMs }) : [],
     operator: text(record?.operator) || null,
@@ -1254,7 +1315,12 @@ export function nearbyEntities(
   });
   const nearest = (layerId, count) => {
     const found = [];
-    for (const record of layerRecords(dataManager, layerId)) {
+    for (const record of layerRecordsAround(
+      dataManager,
+      layerId,
+      here,
+      radiusKm,
+    )) {
       const key = recordKey(layerId, record);
       if (key === card.key) continue;
       const { at, km } = nearestPart(here, record);
@@ -1274,90 +1340,6 @@ export function nearbyEntities(
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, limit);
   return { same, other };
-}
-
-/**
- * What the loaded layers have within a radius of a point, in the groups every
- * Context card lists: aircraft, vessels, and the closest item of each other
- * enabled layer. Each group is nearest first; `count` is how many are inside
- * the radius, of which `items` holds the first few.
- * @param {object} dataManager
- * @param {{lat: number, lon: number}} here
- * @param {object} [options]
- * @param {number} [options.radiusKm]
- * @param {number} [options.limit] Rows per group.
- * @param {string} [options.excludeKey] A record to leave out (the selected one).
- * @param {string[]} [options.excludeLayers] Layers already presented by another section.
- * @returns {{flights: {count: number, items: Array<object>}, vessels: {count: number, items: Array<object>}, other: Array<object>}}
- */
-export function nearbyByKind(
-  dataManager,
-  here,
-  {
-    radiusKm = 250,
-    limit = 4,
-    excludeKey = '',
-    excludeLayers = [],
-    query = '',
-  } = {},
-) {
-  const needle = text(query).toLowerCase();
-  const groups = {
-    flights: { count: 0, items: [] },
-    vessels: { count: 0, items: [] },
-    other: [],
-  };
-  if (!here || !Number.isFinite(here.lat) || !Number.isFinite(here.lon))
-    return groups;
-  const found = { aircraft: [], vessel: [] };
-  const other = [];
-  for (const layer of enabledLayers(dataManager)) {
-    if (excludeLayers.includes(layer.id)) continue;
-    const kind = entityKind(layer.id).kind;
-    const group = found[kind];
-    let closest = null;
-    for (const record of layerRecords(dataManager, layer.id)) {
-      if (excludeKey && recordKey(layer.id, record) === excludeKey) continue;
-      const { at, km } = nearestPart(here, record);
-      if (!(km <= radiusKm)) continue;
-      if (needle && !recordMatches(record, needle, layer.name)) continue;
-      if (group) group.push({ layerId: layer.id, record, km, at });
-      // A search lists every match, not only each layer's closest item.
-      else if (needle) other.push({ layerId: layer.id, record, km, at });
-      else if (!closest || km < closest.km)
-        closest = { layerId: layer.id, record, km, at };
-    }
-    if (closest) other.push(closest);
-  }
-  const row = ({ layerId, record, km, at }) => ({
-    key: recordKey(layerId, record),
-    layerId,
-    layerName: layerName(dataManager, layerId),
-    icon: entityKind(layerId).icon,
-    title: recordTitle(record) || layerName(dataManager, layerId),
-    distanceKm: km,
-    identity: {
-      layerId,
-      id: recordKey(layerId, record).slice(layerId.length + 1),
-      label: recordTitle(record),
-      ...at,
-      record,
-    },
-  });
-  const nearest = (rows) => ({
-    count: rows.length,
-    items: rows
-      .sort((a, b) => a.km - b.km)
-      .slice(0, limit)
-      .map(row),
-  });
-  groups.flights = nearest(found.aircraft);
-  groups.vessels = nearest(found.vessel);
-  groups.other = other
-    .sort((a, b) => a.km - b.km)
-    .slice(0, limit)
-    .map(row);
-  return groups;
 }
 
 /**
@@ -1398,7 +1380,12 @@ export function nearbyByLayer(
     if (typeof module?.getAnalystRecords !== 'function') continue;
     const found = [];
     let count = 0;
-    for (const record of layerRecords(dataManager, layer.id)) {
+    for (const record of layerRecordsAround(
+      dataManager,
+      layer.id,
+      here,
+      radiusKm,
+    )) {
       if (excludeKey && recordKey(layer.id, record) === excludeKey) continue;
       const { at, km } = nearestPart(here, record);
       if (!(km <= radiusKm)) continue;
@@ -1436,6 +1423,32 @@ export function nearbyByLayer(
     });
   }
   return lists;
+}
+
+/**
+ * A layer's loaded items within a radius of a point, nearest first, each with
+ * its distance: what a card's charts count (fire hits by the hour, quakes
+ * nearby). Empty while the layer is off.
+ * @param {object} dataManager
+ * @param {string} layerId
+ * @param {{lat: number, lon: number}} here
+ * @param {number} radiusKm
+ * @returns {Array<{record: object, km: number}>}
+ */
+export function layerRecordsNear(dataManager, layerId, here, radiusKm) {
+  if (!here || !Number.isFinite(here.lat) || !Number.isFinite(here.lon))
+    return [];
+  const found = [];
+  for (const record of layerRecordsAround(
+    dataManager,
+    layerId,
+    here,
+    radiusKm,
+  )) {
+    const km = distanceKm(here, recordPosition(record));
+    if (km <= radiusKm) found.push({ record, km });
+  }
+  return found.sort((a, b) => a.km - b.km);
 }
 
 /** Counts of records by a label, largest first, the tail folded into "Other". */
@@ -1693,13 +1706,17 @@ function unitVector(lat, lon) {
 }
 
 /**
- * A layer's analyst records for "in view" lists, positions unchecked: the
- * caller checks them in its single pass.
+ * A layer's records for "in view" lists: its view records where it has them
+ * (satellites give the renderer's drawn positions, so nothing is
+ * propagated), else its analyst records.
  */
 function layerViewRecords(dataManager, layerId) {
   if (dataManager?.isEnabled && !dataManager.isEnabled(layerId)) return [];
+  // Positions are checked in the caller's single pass, not filtered here.
   const module = dataManager?.layers?.get?.(layerId)?.module;
   try {
+    if (typeof module?.getViewRecords === 'function')
+      return module.getViewRecords() || [];
     return module?.getAnalystRecords?.(ALL_RECORDS) || [];
   } catch {
     return [];

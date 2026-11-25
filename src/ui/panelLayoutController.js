@@ -41,6 +41,12 @@ const LEFT_STACK_OBSTACLE_SELECTOR = [
  * visible without tying the layout to one screen height.
  */
 const RIGHT_STACK_OBSTACLE_SELECTOR = [
+  // The docked view and the radio mini player while they sit in the corner
+  // (in the column under Context they are room the column keeps instead,
+  // --right-stack-reserve), and the corner buttons (Power up, the language
+  // picker): the rail stops above them.
+  '.context-corner:not(.context-corner--column)',
+  '#corner-actions',
   '#cockpit-hud .cockpit-topline',
   '#cockpit-hud .cockpit-topline > div',
   '#title-bar',

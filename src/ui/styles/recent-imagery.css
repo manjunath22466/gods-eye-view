@@ -1,6 +1,6 @@
 /* Recent Imagery: a right-rail readout laid out by the rail like WEATHER; only
-   the body scrolls. Every block has a fixed height, so no click moves a
-   control. Card typography comes from the rail-card rules in weather.css. */
+   the body scrolls. Every block but the list of days has a fixed height, so
+   no click moves a control. Card typography comes from the rail-card rules in weather.css. */
 .recent-imagery-panel-inner {
   position: relative;
   display: flex;
@@ -157,53 +157,51 @@
   color: var(--text-secondary);
 }
 
-/* 3. The strip: fixed height, newest day first. */
+/* 3. The days: a Context list card (kit/ContextListCard.vue), newest first.
+   Its empty state holds the draw action. */
 .recent-imagery-readout .ri-strip {
-  display: flex;
-  gap: 6px;
-  height: 120px;
-  padding: 2px 2px 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x proximity;
-  outline: none;
-  border-radius: 6px;
+  margin-top: 0;
 }
-.recent-imagery-readout .ri-strip:focus-visible {
-  box-shadow: 0 0 0 1px var(--accent);
+.recent-imagery-readout .ri-draw-area {
+  max-width: 100%;
+  height: auto;
+  min-height: 22px;
+  padding: 4px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.recent-imagery-readout .ri-strip.searching {
-  opacity: 0.7;
-}
-/* A UiEmpty in the readout's own colour and type, not the shared empty
-   line's (empty-state.css). */
-.recent-imagery-readout .ri-strip-empty {
-  color: inherit;
-  font: inherit;
-  flex: 1 0 100%;
-  align-self: center;
-  text-align: center;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
+/* A row: the day (thumbnail, date, sensor, cloud) as one button, then its
+   chips. */
 .recent-imagery-readout .ri-card {
-  position: relative;
-  flex: 0 0 94px;
-  height: 112px;
-  box-sizing: border-box;
   display: grid;
-  grid-template-rows: 42px 13px 11px 11px 18px;
-  row-gap: 2px;
-  padding: 3px 2px;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  align-items: center;
+  gap: 6px;
+  margin-block: 2px;
+  padding: 2px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-secondary);
-  cursor: pointer;
-  scroll-snap-align: start;
   transition:
     border-color var(--transition-fast),
     background-color var(--transition-fast);
+}
+.recent-imagery-readout .ri-card-open {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-rows: 13px 11px 11px;
+  column-gap: 6px;
+  row-gap: 1px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  text-align: start;
+}
+.recent-imagery-readout .ri-card-open .ri-thumb {
+  grid-row: 1 / -1;
+  height: 37px;
 }
 .recent-imagery-readout .ri-card:hover {
   border-color: var(--glass-border-hover);
@@ -287,7 +285,7 @@
   gap: 4px;
 }
 .recent-imagery-readout .ri-card-chips .data-toggle-chip {
-  height: 18px;
+  height: 20px;
   font-weight: 700;
 }
 /* Outside A / B there is one chip (SHOW): in a translation it takes the

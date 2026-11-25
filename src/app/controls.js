@@ -6,6 +6,7 @@ import { createViewSky } from '../viewSky.js';
 import { findGlobe } from '../render/rendererOf.js';
 import { useDisplayStore } from '../ui/stores/display.js';
 import { useLayerFinderStore } from '../ui/stores/layerFinder.js';
+import { usePortalTargetsStore } from '../ui/stores/portalTargets.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
 import { t } from '../i18n/index.js';
 
@@ -98,5 +99,6 @@ export function createApplicationControls({
     weatherEffects,
     cockpitCloudEffects,
     finder: { inputs, publish, onInputs },
+    portal: usePortalTargetsStore(applicationPinia()),
   };
 }

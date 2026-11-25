@@ -13,8 +13,12 @@ const fakeLibrary = `export class Viewer {
   constructor() { globalThis.__replacePlayViewer = this; this.playing = false; this.id = null; this.stops = 0; }
   on() {} remove() {} resize() {} setRenderMode() {}
   getComponent() { return { play: () => {this.playing = true;}, stop: () => {this.playing = false; this.stops++;} }; }
-  async moveTo(id) { this.id = id; return { id, sequenceId: 'fixture-sequence', cameraType: 'perspective' }; }
-  async getPosition() { return { lng: 2, lat: 48 }; }
+  async moveTo(id) {
+    this.id = id;
+    this.image = { id, sequenceId: 'fixture-sequence', cameraType: 'perspective', lngLat: { lng: 2, lat: 48 } };
+    return this.image;
+  }
+  async getImage() { return this.image; }
   async getPointOfView() { return { bearing: 0 }; }
 }
 export class GraphDataProvider {}
@@ -27,6 +31,10 @@ const hooks = registerHooks({
   },
 });
 globalThis.fetch = async () => { throw new Error('Unexpected network use in offline test'); };
+test.after(() => {
+  hooks.deregister();
+  delete globalThis.__replacePlayViewer;
+});
 test('a photo the action asks for stops sequence PLAY', async t => {
   const provider = fakeStreetLevelProvider({ nearestImage: async () => 'B' });
   const create = provider.create;
@@ -35,7 +43,7 @@ test('a photo the action asks for stops sequence PLAY', async t => {
   const layer = createStreetLevelLayer({ providers: [provider] });
   layer.init(viewer); layer.enable(viewer);
   layer.attachViewerHost(document.body.appendChild(document.createElement('div')));
-  t.after(() => { layer.destroy(); hooks.deregister(); delete globalThis.__replacePlayViewer; document.body.replaceChildren(); });
+  t.after(() => { layer.destroy(); document.body.replaceChildren(); });
   await Promise.resolve();
   await layer.openImage('mapillary', 'A', { frame: false });
   const libraryViewer = globalThis.__replacePlayViewer;
@@ -53,4 +61,38 @@ test('a photo the action asks for stops sequence PLAY', async t => {
   assert.equal(libraryViewer.id, 'B');
   assert.equal(layer.getUIState().street.open, true);
   assert.equal(libraryViewer.playing, false, 'requested image must stay selected rather than continue sequence PLAY');
+});
+
+test('an old Mapillary pose cannot overwrite the image that replaced it', async (t) => {
+  const adapter = createMapillaryViewer({ source: { token: '' } });
+  const host = document.body.appendChild(document.createElement('div'));
+  t.after(() => {
+    adapter.unmount();
+    host.remove();
+  });
+  await adapter.mount(host);
+  const viewer = globalThis.__replacePlayViewer;
+  const getPointOfView = viewer.getPointOfView;
+  let release;
+  let reading;
+  const oldPoseStarted = new Promise((resolve) => {
+    reading = resolve;
+  });
+  const readingOldPose = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release({ bearing: 90 }));
+  viewer.getPointOfView = () => {
+    viewer.getPointOfView = getPointOfView;
+    reading();
+    return readingOldPose;
+  };
+  const poses = [];
+  adapter.onPose((pose) => poses.push(pose.imageId));
+  const older = adapter.open('A');
+  await oldPoseStarted;
+  await adapter.open('B');
+  release({ bearing: 90 });
+  await older;
+  assert.deepEqual(poses, ['B']);
 });

@@ -167,7 +167,8 @@ test('Context header holds its title, search, expand, edge switch and collapse c
         .join(' ')}`,
   );
   assert.deepEqual(tags, [
-    'span.panel-title',
+    // Folded (as it renders first), the name is a button that opens it.
+    'button.panel-title context-title-open',
     'span.panel-divider',
     'button.context-dock-btn',
     'span.material-symbols-outlined',

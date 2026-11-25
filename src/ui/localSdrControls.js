@@ -144,7 +144,27 @@ export class LocalSdrControls {
   }
 
   _onRadioState(state) {
+    const wasSource = this._radioState?.source;
     this._radioState = state;
+    // Radio switched from the local receiver to the internet stations: the
+    // receiver's FM stops and the device stays connected and tuned (its
+    // ADS-B, feeding Local ADS-B, goes on). Back on the local receiver, the
+    // FM it held plays again.
+    if (
+      wasSource === 'local' &&
+      state?.source === 'internet' &&
+      this._fmAudioActive
+    ) {
+      this.receiver.holdFm?.({
+        message: () => t('Local FM stopped: internet stations chosen'),
+      });
+    } else if (
+      wasSource === 'internet' &&
+      state?.source === 'local' &&
+      this._state?.status === 'held'
+    ) {
+      this.receiver.resumeFm?.();
+    }
     const radioAudioActive = internetRadioAudioActive(state);
     // Internet radio just started: it takes over from local FM.
     if (radioAudioActive && !this._radioAudioActive && this._fmAudioActive) {

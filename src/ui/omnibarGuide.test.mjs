@@ -3,7 +3,8 @@ import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp, h, onMounted } from 'vue';
-import { startGuide } from './omnibarGuide.js';
+import { layerSettingsGuide, startGuide } from './omnibarGuide.js';
+import { CAMERA_SETTINGS_EVENT } from './contextEvents.js';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const $ = (selector) => document.querySelector(selector);
@@ -169,4 +170,52 @@ test('each further target of a step gets its own ring after the callout', async 
   await frame();
   assert.deepEqual(subs(), [sub]);
   assert.equal(sub.style.opacity, '0');
+});
+
+// One Esc does one thing: with a camera's enlarged view open (a dialog that
+// keeps its own Esc), Esc closes that and the walk goes on.
+test('Esc is left to an open dialog that owns it; the next Esc ends the walk', async (t) => {
+  fixture(t);
+  startGuide([{ text: () => 'Look' }]);
+  await settle();
+  const popup = document.body.appendChild(document.createElement('div'));
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('data-owns-escape', '');
+  const esc = () =>
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+  esc();
+  await settle();
+  assert.ok($('.gev-guide'), 'the walk is still on');
+  popup.remove();
+  esc();
+  await settle();
+  assert.equal($('.gev-guide'), null);
+});
+
+test("the cameras' walk ends on Context's Camera settings tab, while a camera card is open", () => {
+  document.body.replaceChildren();
+  const shown = [];
+  const onShow = () => shown.push('camera-settings');
+  document.addEventListener(CAMERA_SETTINGS_EVENT, onShow);
+  const step = () =>
+    layerSettingsGuide({ id: 'cctv', shown: 'Cameras' }).find((each) =>
+      /Camera settings/.test(each.text?.() || ''),
+    );
+  assert.ok(step(), 'a Camera settings step');
+  assert.equal(step().skip(), true, 'skipped with no camera card open');
+  const tab = document.body.appendChild(document.createElement('button'));
+  tab.id = 'context-tab-camera';
+  assert.equal(step().skip(), false);
+  assert.deepEqual(step().targets(), [tab]);
+  step().prepare();
+  assert.deepEqual(shown, ['camera-settings'], 'it shows the tab');
+  document.removeEventListener(CAMERA_SETTINGS_EVENT, onShow);
+  assert.equal(
+    layerSettingsGuide({ id: 'flights', shown: 'Live Flights' }).some((each) =>
+      /Camera settings/.test(each.text?.() || ''),
+    ),
+    false,
+  );
 });

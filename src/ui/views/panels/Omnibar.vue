@@ -4,6 +4,8 @@ import { storeToRefs } from 'pinia';
 import { getLocale, t, tn } from '../../../i18n/index.js';
 import { EXCLUSIVE_SURFACE_CLASSES } from '../../../exclusiveSurfaces.js';
 import { createOmnibar, drawAsked, escapeRegExp, readLine, VILLAGES } from '../../omnibarRows.js';
+import { announcePlacePick } from '../../placePick.js';
+import { findAirportByCode } from '../../../data/airports.js';
 import { FEATURE_GUIDES, layerGuide, layerSettingsGuide, startGuide } from '../../omnibarGuide.js';
 import { citiesInRegion, createPlaceSuggester, inExtent, mayBePrivate, minPlaceChars } from '../../../search/placeSuggestions.js';
 import { greatCircleKm } from '../../../geoDistance.js';
@@ -166,6 +168,28 @@ watch(query, (value) => {
 onBeforeUnmount(() => {
   clearTimeout(placesTimer);
   placesAbort?.abort();
+});
+
+// The airport a line is exactly the code of ("SFO"), from the bundled pack:
+// nothing leaves the app for it.
+const codeAirport = ref({ for: '', airport: null });
+const CODE_LINE = /^[A-Za-z]{3,4}$/;
+// The lookup still running for the line, if any: the first code of a
+// session waits on the pack, and Enter waits for it rather than taking the
+// row that was the default before the airport's row arrived.
+let codeLookup = null;
+watch(query, async (value) => {
+  const text = value.trim();
+  if (!CODE_LINE.test(text)) {
+    codeAirport.value = { for: '', airport: null };
+    codeLookup = null;
+    return;
+  }
+  const lookup = findAirportByCode(text).catch(() => null);
+  codeLookup = lookup;
+  const airport = await lookup;
+  if (codeLookup === lookup) codeLookup = null;
+  if (query.value.trim() === text) codeAirport.value = { for: text, airport };
 });
 
 // ── Place strip ──────────────────────────────────────────────────────
@@ -391,8 +415,15 @@ async function goTo({ latitude, longitude }) {
   const location = locationStore.controls;
   if (!location || location.destroyed) throw new Error();
   searchedFor.value = query.value;
-  await location.search(`${latitude}, ${longitude}`);
-  return true;
+  return (await location.search(`${latitude}, ${longitude}`)) === true;
+}
+
+function ownsPlaceChoice(current, selection) {
+  return current === generation && entityCard.selectionGeneration() === selection;
+}
+
+function publishPlaceChoice(place, current, selection) {
+  announcePlacePick({ ...place, isCurrent: () => ownsPlaceChoice(current, selection) });
 }
 
 function chooseChip(chip, { viaKey = false } = {}) {
@@ -419,24 +450,39 @@ function chooseChip(chip, { viaKey = false } = {}) {
     reset();
     return;
   }
+  let deferredPoi = false;
   // The city whose landmarks are open would only fold them: it is flown to.
   if (chip.kind === 'city' && locationView.value?.poiCity === chip.cityId && runner.value)
-    void runner.value('fly_to_location', { locationId: chip.cityId });
+    // This chip announces the card itself.
+    void runner.value('fly_to_location', { locationId: chip.cityId, waitForArrival: true });
   else if (chip.kind === 'city') locationStore.controls?.chooseCity(chip.cityId);
   else if (chip.kind === 'landmark') {
     if (locationView.value?.poiCity === chip.cityId) locationStore.controls?.choosePoi(chip.index);
     else {
       locationStore.controls?.chooseCity(chip.cityId);
-      if (chip.index > 0) setTimeout(() => locationStore.controls?.choosePoi(chip.index), 0);
+      deferredPoi = chip.index > 0;
     }
   }
   // Preset cities and landmarks are the app's own data, not Photon's.
   rememberPlace(chip.kind === 'city' || chip.kind === 'landmark' ? { ...chip, source: 'preset' } : chip);
   reset({ blur: !keepsFocus(viaKey) });
-  if (chip.kind === 'city' || chip.kind === 'landmark') return;
-  // A refused flight shows its error under the field, as a row's does.
+  // A place picked opens its card in Context (placePick.js).
+  const picked = { name: chip.name, latitude: chip.latitude, longitude: chip.longitude };
   const current = generation;
-  goTo(chip).catch((failure) => {
+  const selection = entityCard.selectionGeneration();
+  if (deferredPoi) {
+    setTimeout(() => {
+      if (!ownsPlaceChoice(current, selection) || locationView.value?.poiCity !== chip.cityId) return;
+      locationStore.controls?.choosePoi(chip.index);
+      publishPlaceChoice(picked, current, selection);
+    }, 0);
+    return;
+  }
+  if (chip.kind === 'city' || chip.kind === 'landmark') return publishPlaceChoice(picked, current, selection);
+  // A refused flight shows its error under the field, as a row's does.
+  goTo(chip).then((ok) => {
+    if (ok && ownsPlaceChoice(current, selection)) publishPlaceChoice(picked, current, selection);
+  }).catch((failure) => {
     if (current === generation)
       error.value = failure?.reason
         ? t('Unable to complete this action: {reason}', { reason: failure.reason })
@@ -521,6 +567,7 @@ const built = computed(() => {
   const card = selected.value;
   return reader.value.rows(text, {
     places: placesFor.value === text ? places.value : [],
+    airport: codeAirport.value.for === text ? codeAirport.value.airport : null,
     entities: (needle, options) => entityCard.search(needle, options),
     selection: card
       ? { title: card.title, layerName: card.layerName, canFollow: entityCard.canFollow(), canCockpit: entityCard.canCockpit() }
@@ -846,6 +893,7 @@ async function choose(item, { viaKey = false } = {}) {
     else if (item.kind === 'sel-close') entityCard.clear();
     else if (item.kind === 'count-show' || item.kind === 'place') {
       const { coords, place } = item;
+      const selection = entityCard.selectionGeneration();
       if (coords && runner.value) {
         // The coordinates alone: a name would win over them (see goTo).
         if (!settled(await runner.value('fly_to_location', { ...coords }))) return;
@@ -858,8 +906,17 @@ async function choose(item, { viaKey = false } = {}) {
         // one (undefined) keeps the line, as the plan path does.
         if (result !== true || locationView.value?.searchOrigin !== 'omnibar' || searchError.value) return;
       }
+      if (!ownsPlaceChoice(current, selection)) return;
       // A typed spot is the user's own; a looked-up place keeps its source.
       if (coords && item.kind === 'place') rememberPlace({ name: place, ...coords, source: item.source || 'typed' });
+      if (item.kind === 'place') {
+        reset({ blur: !keepsFocus(viaKey) });
+        const picked = coords
+          ? { name: place, ...coords, ...(item.airport && { airport: item.airport }) }
+          : { name: place, query: place };
+        publishPlaceChoice(picked, generation, selection);
+        return;
+      }
     } else if (item.kind === 'layer') {
       if (!controls.value) throw new Error();
       // A layer already as asked ("show flights" with Flights on) is left alone.
@@ -958,7 +1015,24 @@ function onKeydown(event) {
     // flight; an edited line (which clears busy) runs.
     if (event.repeat || busy.value) return;
     if (inStrip.value && chips[chipIndex.value]) chooseChip(chips[chipIndex.value], { viaKey: true });
-    else choose(items.value[active.value], { viaKey: true });
+    else if (codeLookup && !navigated.value) {
+      // A code line whose airport is still being looked up: Enter picks
+      // once the rows settle. Hold this Enter while it still owns the field
+      // and the user has not picked anything else.
+      const current = ++generation;
+      const selection = entityCard.selectionGeneration();
+      busy.value = true;
+      void codeLookup
+        .then(() => nextTick())
+        .then(() => {
+          if (current === generation && open.value && !navigated.value && entityCard.selectionGeneration() === selection) {
+            return choose(items.value[active.value], { viaKey: true });
+          }
+        })
+        .finally(() => {
+          if (current === generation) busy.value = false;
+        });
+    } else choose(items.value[active.value], { viaKey: true });
   } else if (event.key === 'Escape' && !showResults.value && !query.value.trim()) {
     // An empty, closed field lets go, so the app's own keys work again.
     input.value?.blur();

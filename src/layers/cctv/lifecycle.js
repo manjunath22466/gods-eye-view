@@ -195,6 +195,7 @@ export function createLifecycle({
       if (record) record.probeToken = (record.probeToken || 0) + 1;
     layerState._records = [];
     layerState._recordById = new Map();
+    layerState._cameraWalk = null;
     layerState._viewRecords = [];
     layerState._pickerRecords = [];
     layerState._cameraIndexCache = null;

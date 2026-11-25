@@ -45,12 +45,21 @@ export function createState({ services }) {
   // the view, so a share flight that lands after enable still opens nearby.
 
   layerState._openingCameraProvisional = false;
+  // True during notification of a layer-owned activation such as a timed
+  // Auto-hop step, a settled-view re-pick or a restored opening camera.
+  layerState._quietActivation = false;
 
   // An explicit empty-space deselect keeps AUTO HOP configured but prevents its
   // timer from silently choosing a replacement. A later explicit activation or
   // AUTO HOP toggle-on releases the hold.
 
   layerState._autoHopSuspended = false;
+
+  // The Prev/Next walk through the cameras nearest the view (see
+  // navigation.stepNearbyCamera): its order, and the camera it last reached.
+  layerState._cameraWalk = null;
+  // Context's Cameras list area, `{lat, lon, radiusKm}`, or null.
+  layerState._nearbyArea = null;
 
   layerState._autoHopSec = 18;
 

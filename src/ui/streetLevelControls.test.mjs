@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createPinia } from 'pinia';
 import { createApp, nextTick } from 'vue';
 import { StreetLevelControls } from './streetLevelControls.js';
+import { placeStreetLevelViewer } from './streetLevelViewerPlacement.js';
 import { useStreetLevelStore } from './stores/streetLevel.js';
 import StreetLevelPanel from './views/panels/StreetLevelPanel.vue';
 import { createStreetLevelLayer } from '../layers/streetLevel/index.js';
@@ -995,6 +996,40 @@ test('outside embed mode a photo stays in the panel', () =>
     assert.equal(overGlobe(dom), false);
     assertSameNode(dom.wrap.parentNode, home);
     controls.destroy();
+  }));
+
+test('leaving embed puts the open viewer in the current slot after its original slot is removed', () =>
+  withDom(async (dom) => {
+    const { layer, controls } = await stubPanel(dom, uiState({ open: true }));
+    try {
+      const addSlot = () => {
+        const slot = dom.document.body.appendChild(
+          document.createElement('div'),
+        );
+        slot.id = 'sl-viewer-slot';
+        return slot;
+      };
+      const original = addSlot();
+      placeStreetLevelViewer();
+      assertSameNode(dom.wrap.parentNode, original);
+      dom.document.body.classList.add('ui-embed');
+      await layer.publish(uiState({ open: true }));
+      assert.equal(overGlobe(dom), true);
+
+      original.remove();
+      const current = addSlot();
+      dom.document.body.classList.remove('ui-embed');
+      const published = layer.publish(uiState({ open: true }));
+      assertSameNode(
+        dom.wrap.parentNode,
+        current,
+        'the same wrap reaches the current slot immediately',
+      );
+      await published;
+      assert.equal(dom.wrap.hidden, false);
+    } finally {
+      controls.destroy();
+    }
   }));
 
 test('an opening photo brings its panel into view (a phone’s tab sheet); embed mode lifts it instead', () =>

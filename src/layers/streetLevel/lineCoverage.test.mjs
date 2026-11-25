@@ -8,6 +8,7 @@ import {
   ZOOM_IN_HINT,
 } from './lineCoverage.js';
 import { resolveFilter } from './filter.js';
+import { metresBetween } from './view.js';
 import { encodeCoverageTile } from './providers/mapillary/coverageFixture.mjs';
 import { decodeCoverageTile } from './providers/mapillary/decode.js';
 import {
@@ -480,6 +481,150 @@ test('a sequence that crosses a tile edge is counted once', async () => {
   await settle();
   assert.equal(coverage.stats().count, 3, 'across, plus one per tile');
   coverage.clear();
+});
+
+test('the lines near a point: each sequence once, at its nearest point, within the radius, nearest first', async () => {
+  const { viewer, source, coverage, centre } = setup();
+  const { east } = tileBounds(centre.tile.x, centre.tile.y, 14);
+  viewer.view.lon = east;
+  coverage.refresh();
+  // One line crosses the edge (in both tiles), one is 0.002° east of it.
+  const across = [
+    [
+      [east - 0.001, centre.lat],
+      [east + 0.001, centre.lat],
+    ],
+  ];
+  const beyond = [
+    [
+      [east + 0.002, centre.lat],
+      [east + 0.003, centre.lat],
+    ],
+  ];
+  for (const call of source.calls) {
+    const [, x, y] = call.key.split('/').map(Number);
+    call.resolve(
+      encodeCoverageTile(
+        { x, y, z: 14 },
+        {
+          sequences: [
+            { id: 'across', parts: across },
+            ...(x === centre.tile.x ? [] : [{ id: 'beyond', parts: beyond }]),
+          ],
+        },
+      ),
+    );
+  }
+  await settle();
+  assert.equal(coverage.stats().count, 2);
+  const here = { lat: centre.lat, lon: east - 0.001 };
+  const near = coverage.linesNear(here, 1);
+  assert.deepEqual(
+    near.map((line) => line.sequenceId),
+    ['across', 'beyond'],
+    'every line the panel counts, once each, nearest first',
+  );
+  assert.ok(near[0].km < 0.001, 'at the point of the line nearest here');
+  assert.ok(Math.abs(near[1].lon - (east + 0.002)) < 1e-6);
+  assert.equal(
+    coverage.linesNear(here, 1),
+    near,
+    'the same question is not worked out again',
+  );
+  assert.deepEqual(
+    coverage.linesNear(here, 0.1).map((line) => line.sequenceId),
+    ['across'],
+    'a line past the radius is left out',
+  );
+  coverage.clear();
+  assert.deepEqual(
+    coverage.linesNear(here, 1),
+    [],
+    'nothing drawn, nothing near',
+  );
+});
+
+test('drawn-line lookup matches every vertex across chunk edges, wrapped longitudes and the poles', () => {
+  const state = { coverage: freshCoverage({ keyless: true }), services: {} };
+  let seed = 1234567;
+  const random = () => (seed = (1664525 * seed + 1013904223) >>> 0) / 2 ** 32;
+  const sequences = Array.from({ length: 30 }, (_, id) => ({
+    id: String(id),
+    capturedAt: id,
+    isPano: id % 2 === 0,
+    parts: Array.from({ length: 2 }, () =>
+      Array.from({ length: 97 }, () => [
+        170 + random() * 30,
+        id < 15 ? 85 + random() * 5 : -90 + random() * 5,
+      ]),
+    ),
+  }));
+  // The closest point can arrive late, after a whole distant chunk.
+  sequences.push({
+    id: 'late',
+    parts: [
+      Array.from({ length: 64 }, (_, i) =>
+        i < 32 ? [170, 85] : [180.5 + (i - 32) * 0.0001, 89.5],
+      ),
+    ],
+  });
+  // A tie spanning chunk boundaries keeps the first point, including -180/180.
+  sequences.push({
+    id: 'tie',
+    parts: [Array.from({ length: 65 }, (_, i) => [i === 0 ? -180 : 180, 89])],
+  });
+  const entries = [sequences.slice(0, 20), sequences.slice(10)];
+  entries.forEach((rows, i) =>
+    state.coverage.tiles.set(String(i), {
+      sequences: new Map(rows.map((sequence) => [sequence.id, sequence])),
+    }),
+  );
+  const coverage = createLineCoverage({
+    state,
+    tuning: { maxTiles: 2, maxSequences: 100 },
+    messages: {},
+    colors: {},
+  });
+  const reference = (point, radiusKm) => {
+    const best = new Map();
+    for (const rows of entries)
+      for (const sequence of rows) {
+        let closest = best.get(sequence.id)?.metres ?? Infinity;
+        let at = null;
+        for (const part of sequence.parts)
+          for (const [lon, lat] of part) {
+            const metres = metresBetween(point, { lat, lon });
+            if (metres < closest) {
+              closest = metres;
+              at = { lat, lon };
+            }
+          }
+        if (at && closest <= radiusKm * 1000)
+          best.set(sequence.id, { sequence, metres: closest, ...at });
+      }
+    return [...best.values()]
+      .sort((a, b) => a.metres - b.metres)
+      .map(({ sequence, metres, lat, lon }) => ({
+        sequenceId: sequence.id,
+        lat,
+        lon,
+        km: metres / 1000,
+        capturedAt: sequence.capturedAt || 0,
+        isPano: sequence.isPano === true,
+      }));
+  };
+  for (const point of [
+    { lat: 89, lon: -180 },
+    { lat: 89.5, lon: -179.5 },
+    { lat: -89.5, lon: 181 },
+    { lat: 90, lon: 0 },
+  ]) {
+    for (const radius of [1, 100, 1000])
+      assert.deepEqual(
+        coverage.linesNear(point, radius),
+        reference(point, radius),
+      );
+  }
 });
 
 /** A camera over a 100×100 canvas with a 60°×40° view (see rayCamera). */
