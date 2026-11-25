@@ -122,7 +122,7 @@ const sourceLine = computed(() => {
 
 const position = computed(() => {
   const current = card.value;
-  if (!Number.isFinite(current?.lat) || !Number.isFinite(current?.lon)) return '';
+  if (locationWithheld.value || !Number.isFinite(current?.lat) || !Number.isFinite(current?.lon)) return '';
   if (current.obscured) return t('Location obscured to a 0.2° cell');
   const lat = `${Math.abs(current.lat).toFixed(3)}°${current.lat >= 0 ? 'N' : 'S'}`;
   const lon = `${Math.abs(current.lon).toFixed(3)}°${current.lon >= 0 ? 'E' : 'W'}`;
