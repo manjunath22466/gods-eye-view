@@ -134,10 +134,8 @@ test('the views take turns once Play is pressed, each once drawn, round to the f
   await settle(wrapper);
   assert.deepEqual(shown(wrapper), ['Map']);
 
-  // The map's tiles load; then round to the photo again.
-  wrapper
-    .findComponent({ name: 'CloseUpMap' })
-    .element.dispatchEvent(new Event('load'));
+  // The map has drawn; then round to the photo again.
+  wrapper.findComponent({ name: 'CloseUpMap' }).vm.$emit('state', 'ready');
   await settle(wrapper);
   context.mock.timers.tick(HERO_AUTOPLAY_MS);
   await settle(wrapper);

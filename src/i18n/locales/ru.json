@@ -2831,6 +2831,7 @@
   "KartaView refused the request (code {code})": "KartaView отклонил запрос (код {code})",
   "Stopped by voice": "Остановлено голосовой командой",
   "Light aircraft": "Лёгкий самолёт",
+  "Light map": "Светлая карта",
   "Glider": "Планёр",
   "Turboprop": "Турбовинтовой самолёт",
   "Airliner": "Авиалайнер",
@@ -4585,8 +4586,6 @@
   "Airport": "Аэропорт",
   "Reclassify the followed aircraft as TR-3B": "Переклассифицировать отслеживаемый самолёт как TR-3B",
   "More details": "Подробнее",
-  "Close-up satellite map · {place}": "Спутниковая карта крупным планом · {place}",
-  "Close-up satellite map": "Спутниковая карта крупным планом",
   "How it is changing": "Как меняется",
   "Last 24 hours": "Последние 24 часа",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4770,7 +4769,6 @@
   "Next station": "Следующая станция",
   "Previous camera": "Предыдущая камера",
   "Next camera": "Следующая камера",
-  "Show all {n}": "Показать все ({n})",
   "No cameras within {radius} of the view centre": "Нет камер в радиусе {radius} от центра вида",
   "No cameras here match the search": "Здесь нет камер, подходящих под поиск",
   "VIDEO · STALLED": "ВИДЕО · ЗАВИСЛО",
@@ -4821,7 +4819,6 @@
   "Alerts": "Оповещения",
   "Back": "Назад",
   "{from}–{to} of {total}": "{from}–{to} из {total}",
-  "{range} · {size}/page": "{range} · {size}/стр.",
   "Pages": "Страницы",
   "Previous": "Назад",
   "{name} per page, showing {range}": "{name} на странице, показаны {range}",
@@ -4829,5 +4826,7 @@
   "Open Context to view street-level imagery": "Откройте «Контекст», чтобы увидеть уличные снимки",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Подписи включённых слоёв: плотность задаёт, сколько из них подписано. Собственные настройки каждого слоя — в его строке в слоях данных",
   "Upcoming": "Скоро",
-  "Nothing matches “{text}”.": "Нет совпадений с «{text}»."
+  "Nothing matches “{text}”.": "Нет совпадений с «{text}».",
+  "Close-up map · {place}": "Карта крупным планом · {place}",
+  "Close-up map": "Карта крупным планом"
 }

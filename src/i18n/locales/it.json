@@ -131,6 +131,7 @@
   "Data provided by:": "Dati forniti da:",
   "Close data attribution": "Chiudi le attribuzioni dei dati",
   "Light aircraft": "Aereo leggero",
+  "Light map": "Mappa chiara",
   "Glider": "Aliante",
   "Turboprop": "Turboelica",
   "Airliner": "Aereo di linea",
@@ -4482,8 +4483,6 @@
   "Airport": "Aeroporto",
   "Reclassify the followed aircraft as TR-3B": "Riclassifica l’aereo seguito come TR-3B",
   "More details": "Altri dettagli",
-  "Close-up satellite map · {place}": "Mappa satellitare ravvicinata · {place}",
-  "Close-up satellite map": "Mappa satellitare ravvicinata",
   "How it is changing": "Come sta cambiando",
   "Last 24 hours": "Ultime 24 ore",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4661,7 +4660,6 @@
   "Next station": "Stazione successiva",
   "Previous camera": "Telecamera precedente",
   "Next camera": "Telecamera successiva",
-  "Show all {n}": "Mostra tutte ({n})",
   "No cameras within {radius} of the view centre": "Nessuna telecamera entro {radius} dal centro della vista",
   "No cameras here match the search": "Nessuna telecamera qui corrisponde alla ricerca",
   "VIDEO · STALLED": "VIDEO · BLOCCATO",
@@ -4712,7 +4710,6 @@
   "Alerts": "Allerte",
   "Back": "Indietro",
   "{from}–{to} of {total}": "{from}–{to} di {total}",
-  "{range} · {size}/page": "{range} · {size}/pagina",
   "Pages": "Pagine",
   "Previous": "Precedente",
   "{name} per page, showing {range}": "{name} per pagina, mostrate {range}",
@@ -4720,5 +4717,7 @@
   "Open Context to view street-level imagery": "Apri Contesto per vedere le immagini a livello stradale",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Etichette dei livelli attivi: la densità stabilisce quante vengono etichettate. Le opzioni di ogni livello sono nella sua riga in Livelli dati",
   "Upcoming": "In arrivo",
-  "Nothing matches “{text}”.": "Nessun risultato per «{text}»."
+  "Nothing matches “{text}”.": "Nessun risultato per «{text}».",
+  "Close-up map · {place}": "Mappa ravvicinata · {place}",
+  "Close-up map": "Mappa ravvicinata"
 }

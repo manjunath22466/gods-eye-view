@@ -115,6 +115,7 @@
   "Data provided by:": "数据提供方：",
   "Close data attribution": "关闭数据来源说明",
   "Light aircraft": "轻型飞机",
+  "Light map": "浅色地图",
   "Glider": "滑翔机",
   "Turboprop": "涡桨飞机",
   "Airliner": "民航客机",
@@ -4276,8 +4277,6 @@
   "Airport": "机场",
   "Reclassify the followed aircraft as TR-3B": "将跟随的飞机重新归类为 TR-3B",
   "More details": "更多详情",
-  "Close-up satellite map · {place}": "卫星近景地图 · {place}",
-  "Close-up satellite map": "卫星近景地图",
   "How it is changing": "变化情况",
   "Last 24 hours": "过去 24 小时",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4443,7 +4442,6 @@
   "Next station": "下一个电台",
   "Previous camera": "上一个摄像头",
   "Next camera": "下一个摄像头",
-  "Show all {n}": "显示全部 {n} 个",
   "No cameras within {radius} of the view centre": "视图中心 {radius} 范围内没有摄像头",
   "No cameras here match the search": "这里没有符合搜索的摄像头",
   "VIDEO · STALLED": "视频 · 卡住",
@@ -4494,7 +4492,6 @@
   "Alerts": "警报",
   "Back": "返回",
   "{from}–{to} of {total}": "第 {from}–{to} 项，共 {total} 项",
-  "{range} · {size}/page": "{range} · 每页 {size} 项",
   "Pages": "页面",
   "Previous": "上一页",
   "{name} per page, showing {range}": "每页{name}，当前显示 {range}",
@@ -4502,5 +4499,7 @@
   "Open Context to view street-level imagery": "打开“态势”以查看街景图像",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "已开启图层的标签：密度决定标注多少个。每个图层自己的选项在数据图层中它的那一行",
   "Upcoming": "即将到来",
-  "Nothing matches “{text}”.": "没有与“{text}”匹配的内容。"
+  "Nothing matches “{text}”.": "没有与“{text}”匹配的内容。",
+  "Close-up map · {place}": "近景地图 · {place}",
+  "Close-up map": "近景地图"
 }

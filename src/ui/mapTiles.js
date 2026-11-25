@@ -110,22 +110,33 @@ export function tileBlock(lat, lon, zoom, template = ESRI_TILES) {
   return list;
 }
 
+const MAP_STILL = /^card-map:(\d{1,2})\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)$/;
+
 /**
- * One Esri World Imagery tile with a spot on it, for a still that never
- * changes (a pinned place, or where a moving item was when it was pinned).
+ * A map still that never changes (a pinned place, or where a moving item was
+ * when it was pinned), as a pin keeps it: the spot and the zoom, drawn as a
+ * card map (CardMapCanvas.vue) where it shows.
  * @param {number} lat
  * @param {number} lon
  * @param {number} [zoom]
- * @returns {string} The tile's address, or '' without a position.
+ * @returns {string} The still, or '' without a position.
  */
 export function mapStill(lat, lon, zoom = 13) {
-  return (
-    tileBlock(lat, lon, zoom).find(
-      (tile) =>
-        tile.left <= 0 &&
-        tile.left > -TILE &&
-        tile.top <= 0 &&
-        tile.top > -TILE,
-    )?.src || ''
-  );
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+  return `card-map:${zoom}/${lat.toFixed(5)}/${lon.toFixed(5)}`;
+}
+
+/**
+ * The spot and zoom of a map still ({@link mapStill}), or null for any
+ * other still (a picture's address).
+ * @param {string} still
+ * @returns {{lat: number, lon: number, zoom: number}|null}
+ */
+export function parseMapStill(still) {
+  const match = MAP_STILL.exec(String(still || ''));
+  if (!match) return null;
+  const [zoom, lat, lon] = match.slice(1).map(Number);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && zoom <= 22
+    ? { lat, lon, zoom }
+    : null;
 }

@@ -131,6 +131,7 @@
   "Data provided by:": "Données fournies par :",
   "Close data attribution": "Fermer l'attribution des données",
   "Light aircraft": "Avion léger",
+  "Light map": "Carte claire",
   "Glider": "Planeur",
   "Turboprop": "Turbopropulseur",
   "Airliner": "Avion de ligne",
@@ -4482,8 +4483,6 @@
   "Airport": "Aéroport",
   "Reclassify the followed aircraft as TR-3B": "Reclasser l’appareil suivi en TR-3B",
   "More details": "Plus de détails",
-  "Close-up satellite map · {place}": "Carte satellite rapprochée · {place}",
-  "Close-up satellite map": "Carte satellite rapprochée",
   "How it is changing": "Son évolution",
   "Last 24 hours": "Dernières 24 heures",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4661,7 +4660,6 @@
   "Next station": "Station suivante",
   "Previous camera": "Caméra précédente",
   "Next camera": "Caméra suivante",
-  "Show all {n}": "Tout afficher ({n})",
   "No cameras within {radius} of the view centre": "Aucune caméra à moins de {radius} du centre de la vue",
   "No cameras here match the search": "Aucune caméra ici ne correspond à la recherche",
   "VIDEO · STALLED": "VIDÉO · BLOQUÉE",
@@ -4712,7 +4710,6 @@
   "Alerts": "Alertes",
   "Back": "Retour",
   "{from}–{to} of {total}": "{from}–{to} sur {total}",
-  "{range} · {size}/page": "{range} · {size} par page",
   "Pages": "Pages",
   "Previous": "Précédent",
   "{name} per page, showing {range}": "{name} par page, affichage {range}",
@@ -4720,5 +4717,7 @@
   "Open Context to view street-level imagery": "Ouvrez Contexte pour voir les images au niveau de la rue",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Étiquettes des couches activées : la densité fixe combien sont étiquetées. Les options propres à chaque couche sont sur sa ligne dans Couches de données",
   "Upcoming": "À venir",
-  "Nothing matches “{text}”.": "Rien ne correspond à « {text} »."
+  "Nothing matches “{text}”.": "Rien ne correspond à « {text} ».",
+  "Close-up map · {place}": "Carte rapprochée · {place}",
+  "Close-up map": "Carte rapprochée"
 }

@@ -1018,6 +1018,7 @@
   "Data attribution": "Datenquellen",
   "Data provided by:": "Daten bereitgestellt von:",
   "Light aircraft": "Leichtflugzeug",
+  "Light map": "Helle Karte",
   "Glider": "Segelflugzeug",
   "Turboprop": "Turboprop",
   "Airliner": "Verkehrsflugzeug",
@@ -4379,8 +4380,6 @@
   "Airport": "Flughafen",
   "Reclassify the followed aircraft as TR-3B": "Verfolgtes Flugzeug als TR-3B umklassifizieren",
   "More details": "Weitere Details",
-  "Close-up satellite map · {place}": "Nahaufnahme aus dem All · {place}",
-  "Close-up satellite map": "Nahaufnahme aus dem All",
   "How it is changing": "Wie es sich verändert",
   "Last 24 hours": "Letzte 24 Stunden",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4552,7 +4551,6 @@
   "Next station": "Nächster Sender",
   "Previous camera": "Vorherige Kamera",
   "Next camera": "Nächste Kamera",
-  "Show all {n}": "Alle {n} anzeigen",
   "No cameras within {radius} of the view centre": "Keine Kameras im Umkreis von {radius} um die Bildmitte",
   "No cameras here match the search": "Keine Kameras hier passen zur Suche",
   "VIDEO · STALLED": "VIDEO · STOCKT",
@@ -4603,7 +4601,6 @@
   "Alerts": "Warnungen",
   "Back": "Zurück",
   "{from}–{to} of {total}": "{from}–{to} von {total}",
-  "{range} · {size}/page": "{range} · {size}/Seite",
   "Pages": "Seiten",
   "Previous": "Zurück",
   "{name} per page, showing {range}": "{name} pro Seite, angezeigt {range}",
@@ -4611,5 +4608,7 @@
   "Open Context to view street-level imagery": "Öffne Kontext, um Straßenbilder zu sehen",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Beschriftungen der eingeschalteten Ebenen: Die Dichte legt fest, wie viele beschriftet werden. Die eigenen Optionen jeder Ebene stehen in ihrer Zeile unter Datenebenen",
   "Upcoming": "Bevorstehend",
-  "Nothing matches “{text}”.": "Nichts passt zu „{text}“."
+  "Nothing matches “{text}”.": "Nichts passt zu „{text}“.",
+  "Close-up map · {place}": "Nahkarte · {place}",
+  "Close-up map": "Nahkarte"
 }

@@ -2765,6 +2765,7 @@
   "KartaView refused the request (code {code})": "KartaView rechazó la petición (código {code})",
   "Stopped by voice": "Detenido por voz",
   "Light aircraft": "Avioneta",
+  "Light map": "Mapa claro",
   "Glider": "Planeador",
   "Turboprop": "Turbohélice",
   "Airliner": "Avión comercial",
@@ -4482,8 +4483,6 @@
   "Airport": "Aeropuerto",
   "Reclassify the followed aircraft as TR-3B": "Reclasificar la aeronave seguida como TR-3B",
   "More details": "Más detalles",
-  "Close-up satellite map · {place}": "Mapa satelital de cerca · {place}",
-  "Close-up satellite map": "Mapa satelital de cerca",
   "How it is changing": "Cómo está cambiando",
   "Last 24 hours": "Últimas 24 horas",
   "{count} satellite fire hits within {km} km in the last 24 hours": {
@@ -4661,7 +4660,6 @@
   "Next station": "Emisora siguiente",
   "Previous camera": "Cámara anterior",
   "Next camera": "Cámara siguiente",
-  "Show all {n}": "Ver los {n}",
   "No cameras within {radius} of the view centre": "No hay cámaras a menos de {radius} del centro de la vista",
   "No cameras here match the search": "Ninguna cámara de aquí coincide con la búsqueda",
   "VIDEO · STALLED": "VÍDEO · DETENIDO",
@@ -4712,7 +4710,6 @@
   "Alerts": "Alertas",
   "Back": "Volver",
   "{from}–{to} of {total}": "{from}–{to} de {total}",
-  "{range} · {size}/page": "{range} · {size}/pág.",
   "Pages": "Páginas",
   "Previous": "Anterior",
   "{name} per page, showing {range}": "{name} por página, mostrando {range}",
@@ -4720,5 +4717,7 @@
   "Open Context to view street-level imagery": "Abre Contexto para ver imágenes a pie de calle",
   "Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row": "Etiquetas de las capas activadas: la densidad fija cuántas se etiquetan. Las opciones propias de cada capa están en su fila de Capas de datos",
   "Upcoming": "Próxima",
-  "Nothing matches “{text}”.": "Nada coincide con «{text}»."
+  "Nothing matches “{text}”.": "Nada coincide con «{text}».",
+  "Close-up map · {place}": "Mapa de cerca · {place}",
+  "Close-up map": "Mapa de cerca"
 }

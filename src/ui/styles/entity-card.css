@@ -3199,7 +3199,7 @@ select.context-list-card__range:focus-visible {
   border-radius: 5px;
 }
 
-/* ── Close-up satellite map: the hero for items without a photo ── */
+/* ── Close-up map: the hero for items without a photo ── */
 .close-up-map {
   overflow: hidden;
   background: #05080b;
@@ -3213,21 +3213,48 @@ select.context-list-card__range:focus-visible {
   height: 0;
 }
 
-/* Tiles sit whole pixels apart (mapTiles.js) and each is drawn 1 px larger
-   than its step, so no seam shows between them even when the block's
-   centre falls between pixels. */
-.close-up-map__tile {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 257px;
-  height: 257px;
-  max-width: none;
+/* A card's map (CardMapCanvas.vue): dark land while its tiles load or
+   when they cannot be drawn. */
+.card-map {
+  display: block;
+  background: #06080b;
   user-select: none;
 }
 
-/* The item's mark (its map sprite, or its glyph) at the centre of an amber
-   ring on the spot. */
+/* The block of tiles is placed from the spot, in whole pixels, at the centre
+   of the hero; a map is never mirrored. */
+.close-up-map__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+}
+
+.close-up-map__theme {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 0.4rem;
+  inset-inline-end: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  color: #e8fbff;
+  background: #111921;
+  border: 1px solid #667480;
+  border-radius: 5px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.close-up-map__theme:hover,
+.close-up-map__theme[aria-pressed='true'] {
+  color: var(--accent, #00d4ff);
+  border-color: currentColor;
+}
+
+/* The item's mark (its map sprite, or its glyph) at the centre of a ring
+   glowing in the app's accent on the spot. */
 .close-up-map .close-up-map__icon {
   position: absolute;
   top: 50%;
@@ -3237,34 +3264,38 @@ select.context-list-card__range:focus-visible {
   box-sizing: border-box;
   width: 2.2rem;
   height: 2.2rem;
-  color: #ffb547;
+  color: var(--accent, #00d4ff);
   font-size: 1.4rem;
   line-height: 1;
   text-align: center;
   background: rgba(5, 8, 11, 0.7);
-  border: 1px solid rgba(255, 181, 71, 0.7);
+  border: 1px solid var(--accent, #00d4ff);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 6px rgba(255, 181, 71, 0.15);
+  box-shadow:
+    0 0 0 6px var(--accent-dim, rgba(0, 212, 255, 0.15)),
+    0 0 18px 4px var(--accent-glow, rgba(0, 212, 255, 0.4));
 }
 
 /* A pinned place wears the same marker as its card's map: its glyph in the
-   amber ring above. */
+   accent ring above. */
 .pinned-grid__icon.pinned-grid__icon--place.material-symbols-outlined {
   display: grid;
   place-items: center;
   box-sizing: border-box;
   width: 2rem;
   height: 2rem;
-  color: #ffb547;
+  color: var(--accent, #00d4ff);
   font-size: 1.25rem;
   line-height: 1;
   text-align: center;
   text-shadow: none;
   background: rgba(5, 8, 11, 0.7);
-  border: 1px solid rgba(255, 181, 71, 0.7);
+  border: 1px solid var(--accent, #00d4ff);
   border-radius: 50%;
-  box-shadow: 0 0 0 6px rgba(255, 181, 71, 0.15);
+  box-shadow:
+    0 0 0 6px var(--accent-dim, rgba(0, 212, 255, 0.15)),
+    0 0 14px 3px var(--accent-glow, rgba(0, 212, 255, 0.4));
 }
 
 .close-up-map__label {
@@ -3668,6 +3699,18 @@ select.context-list-card__range:focus-visible {
 
 .pinned-grid__unpin .material-symbols-outlined {
   font-size: 0.85rem;
+}
+
+.pinned-grid__credits {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 0.15rem 0 0.2rem;
+  background: linear-gradient(
+    to top,
+    rgba(8, 12, 16, 0.92) 70%,
+    rgba(8, 12, 16, 0)
+  );
 }
 
 .pinned-grid__credit {
