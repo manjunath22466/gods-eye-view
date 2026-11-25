@@ -15,7 +15,7 @@ import { useEntityCardStore } from './stores/entityCard.js';
 import { useDockedStore } from './stores/docked.js';
 import { usePinnedStore } from './stores/pinned.js';
 import { _setFrameStillCaptureForTest } from './frameStill.js';
-import CctvPanel from './views/panels/CctvPanel.vue';
+import CctvTools from './views/panels/CctvTools.vue';
 import CctvPreview from './views/panels/CctvPreview.vue';
 import DockedView from './views/panels/DockedView.vue';
 
@@ -73,7 +73,7 @@ const liveState = (camera = streamCamera) => ({
 function scene(t, { video }) {
   document.body.replaceChildren();
   const pinia = createPinia();
-  const tools = createApp(CctvPanel).use(pinia);
+  const tools = createApp(CctvTools).use(pinia);
   tools.mount(document.body.appendChild(document.createElement('div')));
   const byId = (id) => document.getElementById(id);
   const draws = [];
@@ -81,19 +81,14 @@ function scene(t, { video }) {
   const store = useCctvStore(pinia);
   const controls = new CctvControls({
     elements: {
-      _cctvPanel: byId('cctv-panel'),
+      _cctvPanel: byId('cctv-tools'),
       _cctvFrame: byId('cctv-frame'),
       _cctvFrameWrap: byId('cctv-frame-wrap'),
       _cctvVideo: byId('cctv-video'),
       _cctvSummary: byId('cctv-summary'),
-      _cctvSelect: byId('cctv-camera-select'),
     },
     cctv: { getActiveVideoElement: () => video },
-    actions: {
-      isEnabled: () => true,
-      syncViewport() {},
-      setPanelCollapsed() {},
-    },
+    actions: { isEnabled: () => true },
     store,
   });
   const mounted = [];
@@ -136,6 +131,7 @@ test("a card opened on a live stream camera plays the map's decoder in its top i
     host.getAttribute('aria-label'),
     'Sussex County · US 113 @ US 9',
   );
+  assert.equal(byId('cctv-video').getAttribute('role'), 'img');
   assert.equal(
     byId('cctv-video').getAttribute('aria-label'),
     'Sussex County · US 113 @ US 9',

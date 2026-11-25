@@ -126,15 +126,6 @@ test('Cockpit has one reset action beside its bottom exit path', () => {
     'Cockpit Reset must sit before the exit button',
   );
 
-  const actions = html.match(
-    /<div class="global-context-actions"[\s\S]*?<\/div>/,
-  );
-  assert.ok(actions, 'Contact Context actions are missing');
-  assert.ok(
-    actions[0].indexOf('id="cockpit-entry"') <
-      actions[0].indexOf('id="installations-search-btn"'),
-    'Cockpit must precede Search Nearby Sites',
-  );
   assert.match(
     css,
     /body\.cockpit-mode #view-switcher \{[\s\S]*?bottom: max\(clamp\(128px, 15vh, 150px\), env\(safe-area-inset-bottom\)\);[\s\S]*?margin-bottom: -95px;/,
@@ -203,17 +194,6 @@ test('Cockpit vision cycle exposes every map preset exactly once', () => {
     'changing the map preset in Cockpit must refresh the exit restore baseline without replacing Normal',
   );
   assert.match(ui, /setStyle\([\s\S]*?this\._syncCockpitInheritedStyle\(\);/);
-});
-
-test('Contacts uses the approved radar icon', () => {
-  const button = html.match(
-    /<button\b[^>]*\bid="global-context-flights-btn"[\s\S]*?<\/button>/,
-  );
-  assert.ok(button, 'Contacts button is missing');
-  assert.match(
-    button[0],
-    /material-symbols-outlined"[^>]*aria-hidden="true">radar<\/span>/,
-  );
 });
 
 test('Cockpit Escape handling precedes form-control shortcut suppression and focus is restored', () => {
@@ -594,10 +574,8 @@ test('Clear Selected Layers uses one adopted batch and discards Context restorat
     _restoreContextSession.toString(),
     /if \(restoreState\.cancelled\) return;[\s\S]*?settleContextIntentReplay/,
   );
-  assert.match(
-    radioPresentation,
-    /!this\.actions\.preservePanelStateDuringClear\(\)[\s\S]*?this\.actions\.setPanelCollapsed\('radio-panel', true\)/,
-  );
+  // Radio has no panel of its own to close when it turns off.
+  assert.doesNotMatch(radioPresentation, /setPanelCollapsed\('radio-panel'/);
   assert.match(
     clearSelectedLayers.toString(),
     /this\._userFacingContextNotificationTokens\.add\(notificationToken\)/,
@@ -688,13 +666,10 @@ test('fresh Cockpit entry temporarily collapses map panels and exit restores the
   assert.ok(entryPanels, 'Cockpit entry panel list is missing');
   for (const panelId of [
     'data-panel',
-    'cctv-panel',
     'utilities-panel',
     'scene-panel',
     'pp-toggles',
     'global-context-panel',
-    'space-missions-panel',
-    'radio-panel',
   ]) {
     assert.match(
       entryPanels[1],
@@ -908,7 +883,7 @@ test('Cockpit Radio station changes preserve first-person camera ownership', () 
   assert.match(cycleHelper[1], /cycleStation\(direction, \{[\s\S]*?rotate,/);
   assert.match(radioBindings, /\n    cycleRadio,\n/);
   const panel = fs.readFileSync(
-    new URL('./ui/views/panels/RadioPanel.vue', import.meta.url),
+    new URL('./ui/views/panels/RadioFold.vue', import.meta.url),
     'utf8',
   );
   const cockpit = fs.readFileSync(
@@ -1269,21 +1244,7 @@ test('Cockpit Contact navigation omits the redundant Focus camera action', () =>
   assert.doesNotMatch(ui, /contextFocus|militaryAwarenessLayer\.focusCurrent/);
 });
 
-test('Global Context names its mixed contact cycle without changing the stable mode id', () => {
-  const match = html.match(
-    /<button\b[^>]*\bid="global-context-flights-btn"[\s\S]*?<\/button>/,
-  );
-  assert.ok(match, 'Global Context contacts button is missing');
-  assert.match(match[0], />CONTACTS</);
-  assert.match(match[0], /aria-label="CONTACTS"/);
-  assert.match(
-    match[0],
-    /title="Cycles the nearest contacts of whatever type you select — planes, vessels, installations\. Satellites track independently\."/,
-  );
-  assert.doesNotMatch(match[0], />FLIGHTS</);
-});
-
-test('Global Context uses its dedicated right rail without a duplicate Data Layers row', () => {
+test('Global Context uses its dedicated right rail, with no Contacts control and no duplicate Data Layers row', () => {
   assert.match(
     contextLayer,
     /id:\s*'military-awareness'[\s\S]*?showInTogglePanel:\s*false/,
@@ -1301,16 +1262,10 @@ test('Global Context uses its dedicated right rail without a duplicate Data Laye
     /getLayers: \(\) => this\.manager\.getAll\(\)/,
   );
   assert.match(html, /id="global-context-panel"/);
-  assert.match(html, /id="global-context-flights-btn"/);
+  assert.doesNotMatch(html, /id="global-context-flights-btn"/);
   assert.doesNotMatch(html, /id="global-context-missions-btn"/);
-  assert.match(html, /id="space-missions-panel"/);
-});
-
-test('Global Context standby describes Contacts', () => {
-  const match = html.match(/<div id="context-mode-standby"[\s\S]*?<\/div>/);
-  assert.ok(match, 'Global Context standby is missing');
-  assert.match(match[0], /CONTACTS — nearest planes · vessels · sites/);
-  assert.doesNotMatch(match[0], /SPACE MISSIONS/);
+  // Space Missions' list is a tab in Context; its own panel is retired.
+  assert.doesNotMatch(html, /id="space-missions-panel"/);
 });
 
 test('cockpit briefing cycle control keeps its state as the accessible name', () => {

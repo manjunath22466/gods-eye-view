@@ -243,7 +243,8 @@ const schemas = [
       properties: {
         mode: {
           type: 'string',
-          enum: ['off', 'contacts', 'flights', 'space-missions', 'missions'],
+          // Contacts is retired (Context's Nearby view replaced it).
+          enum: ['off', 'nearby', 'space-missions', 'missions'],
         },
       },
       required: ['mode'],

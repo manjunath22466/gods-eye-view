@@ -58,7 +58,6 @@ export class CctvControls {
     this._lastCctvSummaryText = '';
     this._lastSeenCctvActiveId = null;
     this._lastSeenCctvEnabled = false;
-    this._wasCctvEnabled = false;
     this._cctvChipHideTimer = null;
     this._cctvChipWasBusy = false;
     // The camera grid chip as last published; its label stays while hidden.
@@ -67,7 +66,6 @@ export class CctvControls {
     this._cctvFramePreloader = null;
     this._frame = EMPTY_CCTV_FRAME;
     this._calibrationEdit = null;
-    this._actionGeneration = 0;
     this._initCctvPanel();
     // The panel and the grid chip hold translated text; show it again in a
     // new locale, from a fresh layer state when there is one (its summary is
@@ -97,8 +95,8 @@ export class CctvControls {
             attributes: true,
             attributeFilter: ['class', 'hidden'],
           });
-        // On phones the panel and the card are on screen only while their
-        // sheet is open.
+        // On phones the tools and the card are on screen only while the
+        // Context sheet is open.
         if (doc?.body)
           this._videoVisibilityObserver.observe(doc.body, {
             attributes: true,
@@ -182,7 +180,6 @@ export class CctvControls {
     this._cctvVideoSurface?.stop();
     this._videoVisibilityObserver?.disconnect();
     this._offPreviewCards?.();
-    this._actionGeneration++;
     this.listeners.abort();
     this._cctvUnsubscribe?.();
     this._cctvUnsubscribe = null;

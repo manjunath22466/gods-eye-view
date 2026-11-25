@@ -87,7 +87,7 @@ Object.assign(globalThis.Element.prototype, {
   },
 });
 
-/** The static rail panel skeleton from views/ContextView.vue. */
+/** The list's skeleton from views/ContextView.vue: a body in Context's list. */
 function fakeDocument() {
   document.body.textContent = '';
   resetListCardMemory();
@@ -95,27 +95,16 @@ function fakeDocument() {
     configurable: true,
     value: 1200,
   });
-  const panel = document.createElement('div');
-  panel.id = 'recent-imagery-panel';
-  panel.className = 'panel-collapsible collapsed';
-  panel.hidden = true;
-  const count = document.createElement('span');
-  count.id = 'recent-imagery-panel-count';
-  const collapse = document.createElement('button');
-  collapse.dataset.collapseTarget = 'recent-imagery-panel';
-  collapse.clicked = 0;
-  collapse.click = () => {
-    collapse.clicked += 1;
-    panel.classList.toggle('collapsed');
-  };
+  const list = document.createElement('div');
+  list.id = 'context-list-recent-imagery';
   const body = document.createElement('div');
   body.id = 'recent-imagery-panel-body';
-  panel.append(count, collapse, body);
-  document.body.appendChild(panel);
-  // Whether Context's list tab shows, and its count, as the readout reports.
+  list.append(body);
+  document.body.appendChild(list);
+  // Whether the list's tab shows, and its count, as the readout reports it.
   const reports = [];
   const presence = () => reports.at(-1);
-  return { document, panel, count, collapse, body, reports, presence };
+  return { document, list, body, reports, presence };
 }
 
 // ---- the real layer, with fakes for everything it injects ------------------
@@ -269,31 +258,16 @@ function part(f, id, name) {
 }
 
 // ---- tests ---------------------------------------------------------------------
-test('the readout mounts in the rail body, hides while the layer is off and opens the panel once on first appearance', async () => {
+test('the readout mounts in its list body, and reports its tab only while the layer is on', async () => {
   const f = fixture();
   assertSameNode(f.root.parentNode, f.body);
-  assert.equal(f.panel.hidden, true);
-  assert.equal(f.count.textContent, '');
+  assert.equal(f.presence(), null);
   await f.ready();
-  const panel = f.document.getElementById('recent-imagery-panel');
-  assert.equal(panel.hidden, false);
-  assert.equal(f.collapse.clicked, 1, 'first appearance expands');
-  assert.equal(panel.classList.contains('collapsed'), false);
-  assert.equal(f.count.textContent, '4 DAYS');
-  f.collapse.click();
+  assert.deepEqual(f.presence(), { count: 4 }, 'the days found in the box');
   f.layer.disable();
+  assert.equal(f.presence(), null);
   f.layer.enable();
-  assert.equal(f.collapse.clicked, 2, 'never again: the user collapsed it');
-  f.layer.disable();
-  assert.equal(panel.hidden, true);
-  assert.equal(f.count.textContent, '');
-  // A stored or shared collapse choice wins over the first appearance.
-  const g = fixture();
-  g.document.getElementById(
-    'recent-imagery-panel',
-  ).dataset.collapsedPreference = 'stored';
-  g.layer.enable();
-  assert.equal(g.collapse.clicked, 0);
+  assert.notEqual(f.presence(), null);
 });
 
 test('the body is a fixed stack of seven blocks in a fixed order, each with a fixed height in the stylesheet', () => {
@@ -1228,7 +1202,7 @@ test('opening DETAILS scrolls its card into view, and closing it does not scroll
   assert.equal(f.body.scrollTop, 150);
 });
 
-test('destroy returns every listener, the divider and the panel state', async () => {
+test('destroy returns every listener, the divider and the list tab', async () => {
   const f = fixture();
   await f.ready();
   await f.settleLease();
@@ -1239,7 +1213,7 @@ test('destroy returns every listener, the divider and the panel state', async ()
   assert.equal(f.root.listenerCount(), 0);
   assert.equal(f.strip.listenerCount(), 0);
   assertSameNode(f.root.parentNode, null);
-  assert.equal(f.document.getElementById('recent-imagery-panel').hidden, true);
+  assert.equal(f.presence(), null, 'its tab goes with it');
   f.layer.setMode('ab');
   assert.equal(f.splits.length, 1, 'no renders after destroy');
   f.readout.destroy();

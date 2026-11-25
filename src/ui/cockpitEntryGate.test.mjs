@@ -21,8 +21,6 @@ import { CockpitCoordinator } from './cockpitCoordinator.js';
 import { ContextControls } from './contextControls.js';
 import { _handleContextLayerChange } from './contextLayerChanges.js';
 import { useCockpitStore } from './stores/cockpit.js';
-import { useHudStore } from './stores/hud.js';
-import ContextView from './views/ContextView.vue';
 import IntelHudView from './views/IntelHudView.vue';
 
 const CIVIL = Object.freeze({
@@ -71,7 +69,7 @@ function fixture(
   const host = document.body.appendChild(document.createElement('div'));
   const pinia = createPinia();
   const app = createApp(
-    defineComponent(() => () => [h(ContextView), h(IntelHudView)]),
+    defineComponent(() => () => [h(IntelHudView)]),
   ).use(pinia);
   app.mount(host);
   const store = useCockpitStore(pinia);
@@ -365,28 +363,25 @@ test('other layers may be turned off during a session; the ridden layer ends it'
   assert.equal(cockpit.active, false, 'the ridden layer going off ends it');
 });
 
-test('the readout offers the same entry, labelled by kind, and enters on click', async (t) => {
-  const { $, cockpit, pinia } = fixture(t, {
+test("a tracked aircraft offers the entry, and the card's request enters it", async (t) => {
+  const { $, cockpit, store } = fixture(t, {
     enabled: ['flights'],
     tracked: { layerId: 'flights', info: CIVIL },
   });
-  useHudStore(pinia);
-  const readoutEntry = $('#cockpit-entry-readout');
-  assert.equal(readoutEntry.hidden, true, 'hidden until entry is available');
+  assert.ok(!store.presence?.entryAvailable, 'no entry until it is available');
   cockpit.syncEntry();
   await nextTick();
-  assert.equal(readoutEntry.hidden, false);
-  assert.match(readoutEntry.textContent, /flight/);
-  assert.match(readoutEntry.textContent, /COCKPIT/);
-  assert.equal(
-    $('#cockpit-entry').hidden,
-    false,
-    'the Contacts entry follows the same presence',
-  );
-  readoutEntry.click();
+  assert.equal(store.presence.entryAvailable, true);
+  assert.equal(store.presence.entryKind, 'aircraft');
+  assert.equal($('#intel-hud button'), null, 'the HUD has no entry of its own');
+  store.act('enter', { layerId: 'flights', id: CIVIL.icao24 });
   await nextTick();
   assert.equal(cockpit.active, true);
-  assert.equal(readoutEntry.hidden, true, 'inside, there is nothing to enter');
+  assert.equal(
+    store.presence.entryAvailable,
+    false,
+    'inside, there is nothing to enter',
+  );
 });
 
 const AIR_AND_SEA = [
@@ -621,24 +616,8 @@ test('without a Cockpit, ending Contacts restores the layers it found', async (t
   assert.deepEqual(on(manager), [], 'Live Flights goes back off');
 });
 
-test('the readout entry reads BRIDGE for a selected vessel', async (t) => {
-  const { $, store } = fixture(t);
-  store.publishPresence({
-    active: false,
-    entryAvailable: true,
-    entryKind: 'vessel',
-    subjectKind: null,
-    tr3b: null,
-  });
-  await nextTick();
-  const readoutEntry = $('#cockpit-entry-readout');
-  assert.equal(readoutEntry.hidden, false);
-  assert.match(readoutEntry.textContent, /directions_boat/);
-  assert.match(readoutEntry.textContent, /BRIDGE/);
-});
-
-test('without providers the built-in order decides: a vessel selected after an aircraft still reads COCKPIT', async (t) => {
-  const { $, cockpit, store, selectVessel } = fixture(t, {
+test('without providers the built-in order decides: a vessel selected after an aircraft still offers the aircraft', async (t) => {
+  const { cockpit, store, selectVessel } = fixture(t, {
     enabled: ['flights', 'ais-live-vessels'],
     tracked: { layerId: 'flights', info: CIVIL },
   });
@@ -649,7 +628,6 @@ test('without providers the built-in order decides: a vessel selected after an a
   cockpit.syncEntry();
   await nextTick();
   assert.equal(store.presence.entryKind, 'aircraft');
-  assert.match($('#cockpit-entry-readout').textContent, /COCKPIT/);
   // And the other way round: an aircraft tracked after the vessel.
   const later = fixture(t, {
     enabled: ['flights', 'ais-live-vessels'],
@@ -663,32 +641,32 @@ test('without providers the built-in order decides: a vessel selected after an a
   assert.equal(later.store.presence.entryKind, 'aircraft');
 });
 
-test('a tracked satellite needs Satellites on for the ORBIT entry', async (t) => {
-  const { $, cockpit } = fixture(t, { satellite: SATELLITE });
+test('a tracked satellite needs Satellites on for the orbital entry', async (t) => {
+  const { cockpit, store } = fixture(t, { satellite: SATELLITE });
   cockpit.syncEntry();
   await nextTick();
-  assert.equal($('#cockpit-entry').hidden, true, 'Satellites off: no entry');
+  assert.equal(
+    store.presence.entryAvailable,
+    false,
+    'Satellites off: no entry',
+  );
   assert.equal(cockpit.enter(), false);
 });
 
-test('with Satellites on, the tracked satellite offers ORBIT and reports itself', async (t) => {
-  const { $, cockpit, coordinator, pinia } = fixture(t, {
+test('with Satellites on, the tracked satellite offers the orbital view and reports itself', async (t) => {
+  const { cockpit, coordinator, store } = fixture(t, {
     enabled: ['satellites'],
     satellite: SATELLITE,
   });
-  useHudStore(pinia);
   cockpit.syncEntry();
   await nextTick();
-  for (const selector of ['#cockpit-entry', '#cockpit-entry-readout']) {
-    assert.equal($(selector).hidden, false, selector);
-    assert.match($(selector).textContent, /satellite_alt/);
-    assert.match($(selector).textContent, /ORBIT/);
-  }
+  assert.equal(store.presence.entryAvailable, true);
+  assert.equal(store.presence.entryKind, 'satellite');
   // Voice stays aircraft-only: it neither offers nor takes the satellite.
   assert.equal(coordinator.getCockpitState().entryAllowed, false);
   assert.equal(coordinator.controlCockpit('enter').ok, false);
   assert.equal(cockpit.active, false);
-  $('#cockpit-entry-readout').click();
+  store.act('enter', { layerId: 'satellites', id: SATELLITE.id });
   await nextTick();
   assert.equal(cockpit.active, true);
   assert.equal(cockpit.subjectKind, 'satellite');
@@ -703,8 +681,8 @@ test('with Satellites on, the tracked satellite offers ORBIT and reports itself'
   });
 });
 
-test('tracked debris offers no ORBIT entry and refuses to be entered', async (t) => {
-  const { $, cockpit } = fixture(t, {
+test('tracked debris offers no orbital entry and refuses to be entered', async (t) => {
+  const { cockpit, store } = fixture(t, {
     enabled: ['satellites'],
     satellite: {
       ...SATELLITE,
@@ -717,8 +695,7 @@ test('tracked debris offers no ORBIT entry and refuses to be entered', async (t)
   });
   cockpit.syncEntry();
   await nextTick();
-  for (const selector of ['#cockpit-entry', '#cockpit-entry-readout'])
-    assert.equal($(selector).hidden, true, selector);
+  assert.equal(store.presence.entryAvailable, false);
   assert.equal(cockpit.enter(), false);
   assert.equal(cockpit.enter({ kind: 'satellite' }), false);
   assert.equal(cockpit.active, false);
@@ -778,7 +755,11 @@ test("a provider's subject needs only its own layer, and never a Context change 
   const off = fixture(t, { subjects: [provider] });
   off.cockpit.syncEntry();
   await nextTick();
-  assert.equal(off.$('#cockpit-entry').hidden, true, 'its layer is off');
+  assert.equal(
+    off.store.presence.entryAvailable,
+    false,
+    'its layer is off',
+  );
   assert.equal(off.cockpit.enter(), false);
   const on = fixture(t, {
     enabled: ['example-layer'],
@@ -788,13 +769,19 @@ test("a provider's subject needs only its own layer, and never a Context change 
   changing = true;
   on.cockpit.syncEntry();
   await nextTick();
-  assert.equal(on.$('#cockpit-entry').hidden, true, 'Context is changing');
+  assert.equal(
+    on.store.presence.entryAvailable,
+    false,
+    'Context is changing',
+  );
   changing = false;
   on.cockpit.syncEntry();
   await nextTick();
-  assert.equal(on.$('#cockpit-entry').hidden, false);
-  assert.match(on.$('#cockpit-entry').textContent, /RIDE/);
-  assert.match(on.$('#cockpit-entry-readout').textContent, /commute/);
+  assert.equal(on.store.presence.entryAvailable, true);
+  assert.deepEqual(on.store.presence.entryFace, {
+    icon: 'commute',
+    label: 'RIDE',
+  });
 });
 
 test("a provider's view reports its subject, refuses voice entry and ends with its layer", async (t) => {

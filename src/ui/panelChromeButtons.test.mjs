@@ -296,7 +296,7 @@ test('dock trays name their state and pins press without opening the tray', asyn
 function panelChrome(store) {
   return new PanelChrome({
     elements: {},
-    operations: { _showToast() {}, _syncCctvPanelViewport() {} },
+    operations: { _showToast() {} },
     readHud: () => ({ visible: false, getVariant: () => null }),
     readCockpit: () => null,
     readShareLinks: () => null,
@@ -429,27 +429,31 @@ test('destroying the chrome inside Cockpit puts back the panels its entry closed
   assert.equal(data.classList.contains('collapsed'), false);
 });
 
-test('Cockpit entry folds the Space Missions panel away and exit brings it back', () => {
-  document.body.innerHTML = `<div id="space-missions-panel"></div>`;
+test('Cockpit entry folds Context, which holds the Space Missions list, away and exit brings it back', () => {
+  document.body.innerHTML = `<div id="global-context-panel"></div>`;
   const store = usePanelChromeStore(createPinia());
   const chrome = panelChrome(store);
-  const missions = document.getElementById('space-missions-panel');
-  followPanelState(store, 'space-missions-panel', missions);
+  const context = document.getElementById('global-context-panel');
+  followPanelState(store, 'global-context-panel', context);
   chrome.enterCockpit();
-  assert.equal(missions.classList.contains('collapsed'), true);
+  assert.equal(context.classList.contains('collapsed'), true);
   chrome.exitCockpit();
-  assert.equal(missions.classList.contains('collapsed'), false);
+  assert.equal(context.classList.contains('collapsed'), false);
   chrome.destroy();
 });
 
-test('a share link records whether the Space Missions panel is open', () => {
-  document.body.innerHTML = `<div id="space-missions-panel"></div>`;
+test('a share link records no state for the retired list panels', () => {
+  // Space Missions, Weather, News and Recent Imagery are lists in Context:
+  // their old panels' codes still decode (viewCodec), but none is written.
+  document.body.innerHTML = ['space-missions-panel', 'weather-panel', 'news-panel', 'recent-imagery-panel', 'global-context-panel']
+    .map((id) => `<div id="${id}"></div>`)
+    .join('');
   const store = usePanelChromeStore(createPinia());
   const chrome = panelChrome(store);
   const state = chrome._buildSharePanelState();
   assert.deepEqual(
-    state.specs.filter((spec) => spec.id === 'space-missions-panel'),
-    [{ id: 'space-missions-panel', collapsed: false }],
+    state.specs.map((spec) => spec.id).filter((id) => id !== 'global-context-panel'),
+    [],
   );
   chrome.destroy();
 });

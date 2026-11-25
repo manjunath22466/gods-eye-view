@@ -46,8 +46,8 @@ test('the entity card hand-writes no button; each is a UiButton', () => {
   // Play/Pause, a satellite's Play/Pause, a place's Street View photo, TR-3B
   // and Dock.
   assert.equal(preview.match(/<UiButton\b/g)?.length, 11);
-  // A camera's bigger view; its popup closes with a UiCloseButton. More info
-  // gave way to the card's Camera settings tab.
+  // A camera's bigger view; its popup closes with a UiCloseButton. There is
+  // no More info: a camera's details are on its card.
   assert.equal(camera.match(/<UiButton\b/g)?.length, 1);
   assert.equal(camera.match(/<UiCloseButton\b/g)?.length, 1);
   // The hazard row and the alert row; the traffic and other nearby rows are

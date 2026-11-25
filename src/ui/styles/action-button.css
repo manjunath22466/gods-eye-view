@@ -95,9 +95,9 @@
 }
 
 /* Tool buttons: outlined rounded rectangles with uppercase mono labels, cyan
- * when on, primary or pressed (the look of the CCTV panel's controls).
- * Context's cards, Camera tools, the Pinned tabs and the radio mini player
- * share these tokens. The idle text is brighter than
+ * when on, primary or pressed (the look of the retired CCTV panel's
+ * controls). Context's cards, Camera tools, the Pinned tabs and the radio
+ * mini player share these tokens. The idle text is brighter than
  * --text-secondary so its small capitals keep their contrast on the dark
  * panels. */
 :root {

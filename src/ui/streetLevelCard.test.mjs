@@ -21,11 +21,17 @@ import {
   placeStreetLevelViewer,
   registerStreetLevelViewerHome,
 } from './streetLevelViewerPlacement.js';
-import StreetLevelPanel from './views/panels/StreetLevelPanel.vue';
+import { StyleManager } from './applicationShell.js';
+import StreetLevelViewer from './views/panels/StreetLevelViewer.vue';
 import { usePanelChromeStore } from './stores/panelChrome.js';
 import { useDockedStore } from './stores/docked.js';
+import { useDisplayStore } from './stores/display.js';
+import { usePinnedStore } from './stores/pinned.js';
 import { fakeInput } from '../input/testDoubles.mjs';
 import * as Cesium from 'cesium';
+import { parseOmnibar } from './omnibarIntent.js';
+import { createGevActionRunner, showStreetLevel } from '../voice/gevActions.js';
+import { applicationPinia } from './vueRuntime.js';
 import {
   STREET_LEVEL_PHOTO_EVENT,
   STREET_LEVEL_PHOTO_REQUEST_EVENT,
@@ -35,6 +41,12 @@ import {
   fakeCesiumViewer,
   fakeStreetLevelProvider,
 } from '../testSupport/streetLevelFakes.mjs';
+import {
+  initMobileShell,
+  MOBILE_SHEET_PANELS,
+  MOBILE_TABS,
+  sheetForPanelId,
+} from './mobileShell.js';
 
 // A street-level photo's card in Context: the layer remembers the photos
 // opened, a card reads them, the bridge opens the card of each new photo
@@ -123,7 +135,12 @@ async function layerWithPoses(
   beforePose = null,
   nearestImage,
   sources = ['mapillary'],
-  { viewer = fakeCesiumViewer(), afterPose, walker = null } = {},
+  {
+    viewer = fakeCesiumViewer(),
+    afterPose,
+    groundClick = false,
+    walker = null,
+  } = {},
 ) {
   const providers = sources.map((id) => {
     const provider = fakeStreetLevelProvider({
@@ -131,6 +148,7 @@ async function layerWithPoses(
       pickPrefix: `${id}:`,
       nearestImage,
     });
+    provider.groundClick = groundClick;
     const create = provider.create;
     provider.create = (context) => {
       const instance = create(context);
@@ -276,6 +294,11 @@ test('a docked replacement publishes its position and moves the camera only afte
   assert.equal(layer.getUIState().dockPhotoLoading, true);
   assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
   assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(
+    layer.settledPhotoId(),
+    null,
+    'the stable dock card does not claim a live frame during replacement',
+  );
   assert.equal(viewer.flights.started, 0);
   assert.equal(store.card?.identity.id, 'mapillary:A');
   assert.equal(docked.view?.identity.id, 'mapillary:A');
@@ -286,6 +309,7 @@ test('a docked replacement publishes its position and moves the camera only afte
   assert.equal(docked.view?.identity.id, 'panoramax:B');
   assert.equal(store.card?.identity.id, 'panoramax:B');
   assert.equal(layer.getUIState().acceptedPhoto?.id, 'panoramax:B');
+  assert.equal(layer.settledPhotoId(), 'panoramax:B');
   assert.equal(layer.getUIState().dockPhotoLoading, undefined);
   assert.equal(layer.getUIState().street.providerId, 'panoramax');
   assert.equal(layer.getUIState().street.imageId, 'B');
@@ -910,6 +934,11 @@ test('an unavailable original ends the recovery deadline with its last known ide
   assert.equal(layer.getUIState().dockPhotoUnavailable, true);
   assert.equal(layer.getUIState().street.imageId, 'A');
   assert.deepEqual(layer.getUIState().street.position, { lat: 48, lon: 2 });
+  assert.equal(
+    layer.settledPhotoId(),
+    null,
+    'a docked photo that could not be restored is not settled',
+  );
   assert.equal(viewer.flights.started, 0);
 
   assert.equal(
@@ -1125,7 +1154,8 @@ function bridge(t, streetLayer = null) {
       }),
     );
   };
-  const announce = (imageId, requestId = pendingRequestId) => {
+  const announce = (imageId, explicit = false) => {
+    const requestId = pendingRequestId;
     pendingRequestId = null;
     document.dispatchEvent(
       new CustomEvent(STREET_LEVEL_PHOTO_EVENT, {
@@ -1133,6 +1163,7 @@ function bridge(t, streetLayer = null) {
           layerId: 'street-level',
           id: `mapillary:${imageId}`,
           requestId,
+          ...(explicit ? { explicit: true } : {}),
           lat: 59.33,
           lon: 18.06,
         },
@@ -1182,7 +1213,7 @@ test('a photo asked for while Context is open shows its card; the photo on show 
   );
 });
 
-test('on a phone, a photo leaves the Cameras sheet showing even with Context open behind it', (t) => {
+test('on a phone, a photo leaves the Layers sheet showing even with Context open behind it', (t) => {
   const { store, request, announce, opened, setContextOpen } = bridge(t);
   const body = document.body;
   t.after(() => {
@@ -1191,12 +1222,12 @@ test('on a phone, a photo leaves the Cameras sheet showing even with Context ope
   });
   setContextOpen(true);
   body.classList.add('mobile-shell');
-  body.setAttribute('data-mobile-sheet', 'cameras');
+  body.setAttribute('data-mobile-sheet', 'layers');
   request();
   announce('A');
-  assert.equal(store.card, null, 'no card while the Cameras sheet shows');
+  assert.equal(store.card, null, 'no card while the Layers sheet shows');
   assert.equal(opened(), 0, 'the sheet is not switched');
-  assert.equal(body.getAttribute('data-mobile-sheet'), 'cameras');
+  assert.equal(body.getAttribute('data-mobile-sheet'), 'layers');
   // With the Context sheet showing, the photo brings up its card.
   body.setAttribute('data-mobile-sheet', 'context');
   request();
@@ -1254,6 +1285,24 @@ test('a photo that loads late does not replace a newer flight card', (t) => {
   assert.equal(store.card?.key, flightKey, "the flight's card stays");
 });
 
+test('explicitly opening Street Level shows its settled photo only on the visible Context surface', (t) => {
+  const { store, announce, opened, setContextOpen } = bridge(t);
+  store.select({ layerId: 'flights', id: 'abc123' }, { reveal: false });
+  const priorOpens = opened();
+  announce('A', true);
+  assert.equal(store.card?.key, 'flights:abc123');
+  assert.equal(opened(), priorOpens);
+
+  setContextOpen(true);
+  announce('A', true);
+  assert.equal(store.card?.key, streetLevelCardKey('mapillary:A'));
+  assert.equal(
+    opened(),
+    priorOpens,
+    'the photo event never opens Context by itself',
+  );
+});
+
 test('a walk through the photo moves its card along, leaving a collapsed Context collapsed', (t) => {
   const { store, request, announce, opened, setContextOpen } = bridge(t);
   setContextOpen(true);
@@ -1268,7 +1317,7 @@ test('a walk through the photo moves its card along, leaving a collapsed Context
   assert.equal(opened(), 0, 'stepping never reopens Context');
 });
 
-test('the Street Level panel reports a photo request first, then the photo once it has loaded', async (t) => {
+test('the Street Level viewer reports the request and settled photo without revealing Context', async (t) => {
   let release;
   let started;
   const waiting = new Promise((resolve) => {
@@ -1287,22 +1336,21 @@ test('the Street Level panel reports a photo request first, then the photo once 
     },
   });
   const host = document.body.appendChild(document.createElement('div'));
-  const app = createApp(StreetLevelPanel);
+  const app = createApp(StreetLevelViewer);
   const pinia = createPinia();
   app.use(pinia);
   app.mount(host);
   const events = [];
   const controls = new StreetLevelControls({
-    root: document.getElementById('street-level-panel'),
+    root: document.getElementById('sl-viewer-root'),
     layer,
     store: useStreetLevelStore(pinia),
     actions: {
       isEnabled: () => true,
       setEnabled() {},
       setParams() {},
-      setPanelCollapsed() {},
       showToast() {},
-      subscribeEnableRequests: () => () => {},
+      revealPanel: () => events.push('reveal'),
       photoRequested: () => events.push('request'),
       showPhoto: (photo) => events.push(`photo ${photo.id}`),
     },
@@ -1392,22 +1440,20 @@ test('a lookup given up while its photo loads publishes no photo and opens no ca
     async () => 'A',
   );
   const host = document.body.appendChild(document.createElement('div'));
-  const app = createApp(StreetLevelPanel);
+  const app = createApp(StreetLevelViewer);
   const pinia = createPinia();
   app.use(pinia);
   app.mount(host);
   const photos = [];
   const controls = new StreetLevelControls({
-    root: document.getElementById('street-level-panel'),
+    root: document.getElementById('sl-viewer-root'),
     layer,
     store: useStreetLevelStore(pinia),
     actions: {
       isEnabled: () => true,
       setEnabled() {},
       setParams() {},
-      setPanelCollapsed() {},
       showToast() {},
-      subscribeEnableRequests: () => () => {},
       photoRequested() {},
       showPhoto: (photo) => photos.push(photo.id),
     },
@@ -1483,13 +1529,13 @@ test('a lookup given up after its photo first posed keeps that photo out of Near
 /** The photos the real Street Level panel announces for `layer`. */
 function watchPhotos(t, layer, docked = null) {
   const host = document.body.appendChild(document.createElement('div'));
-  const app = createApp(StreetLevelPanel);
+  const app = createApp(StreetLevelViewer);
   const pinia = createPinia();
   app.use(pinia);
   app.mount(host);
   const photos = [];
   const controls = new StreetLevelControls({
-    root: document.getElementById('street-level-panel'),
+    root: document.getElementById('sl-viewer-root'),
     layer,
     store: useStreetLevelStore(pinia),
     actions: {
@@ -2114,4 +2160,595 @@ test('a docked photo follows the viewer, and another card stays', (t) => {
     [],
     'restoring the docked photo leaves Nearby open',
   );
+});
+
+for (const scenario of [
+  'closed Context',
+  'another phone sheet',
+  'passive rejection with visible Context',
+  'failed replacement that leaves the prior photo on screen',
+  'visible Context',
+  'a newer card',
+  'row OPEN on desktop',
+  'row OPEN with Context already visible',
+  'row OPEN on a phone',
+  'row OPEN after switching phone sheets',
+  'row OPEN with a newer card',
+  'row OPEN with a provider error',
+  'row OPEN with an explicit panel command before settlement',
+  'row OPEN with a later desktop close',
+  'row OPEN after returning to Layers',
+]) {
+  test(`an explicit Street Level request respects ${scenario}`, async (t) => {
+    const body = document.body;
+    body.replaceChildren();
+    const rowOpen = scenario.startsWith('row OPEN');
+    const switchedSheet = scenario === 'row OPEN after switching phone sheets';
+    const desktopClose = scenario === 'row OPEN with a later desktop close';
+    const visibleStart = scenario === 'row OPEN with Context already visible';
+    const returnsToLayers = scenario === 'row OPEN after returning to Layers';
+    const mobile =
+      scenario === 'another phone sheet' ||
+      scenario === 'row OPEN on a phone' ||
+      switchedSheet ||
+      returnsToLayers;
+    const preservesNewer = scenario.endsWith('a newer card');
+    const explicitWhilePending =
+      scenario === 'row OPEN with an explicit panel command before settlement';
+    const passiveRejection =
+      scenario === 'passive rejection with visible Context';
+    const retainedPhoto =
+      scenario === 'failed replacement that leaves the prior photo on screen';
+    const providerError =
+      scenario === 'row OPEN with a provider error' ||
+      explicitWhilePending ||
+      passiveRejection;
+    const posed = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    t.after(() => finish.resolve());
+    const pinia = applicationPinia();
+    const display = useDisplayStore(pinia);
+    const previousPhone = display.phoneShell;
+    const cards = useEntityCardStore(pinia);
+    cards.clear();
+    const viewer = fakeCesiumViewer({ view: rowOpen });
+    const layer = await layerWithPoses(
+      t,
+      (imageId) => {
+        if (retainedPhoto && imageId === 'R')
+          throw new Error('Provider unavailable');
+        if (preservesNewer)
+          assert.equal(
+            cards.select(
+              {
+                layerId: 'place',
+                id: 'newer',
+                label: 'Newer place',
+                lat: 49,
+                lon: 3,
+              },
+              { reveal: false },
+            ),
+            true,
+          );
+      },
+      async () => 'A',
+      ['mapillary'],
+      {
+        viewer,
+        groundClick: rowOpen,
+        afterPose:
+          rowOpen || passiveRejection
+            ? async () => {
+                posed.resolve();
+                await finish.promise;
+                if (providerError) throw new Error('Provider unavailable');
+              }
+            : undefined,
+      },
+    );
+    const input = fakeInput(viewer);
+    const dataManager = {
+      isEnabled: () => true,
+      getLayerParams: () => ({ mapillary: true }),
+      setLayerParams: () => true,
+      getAll: () => [],
+      layers: new Map([['street-level', { module: layer }]]),
+    };
+    const chrome = usePanelChromeStore(pinia);
+    const owner = chrome.connect({});
+    const setCollapsed = (collapsed) =>
+      chrome.publish(owner, 'global-context-panel', { collapsed });
+    const initiallyCollapsed =
+      !mobile &&
+      scenario !== 'visible Context' &&
+      !passiveRejection &&
+      !retainedPhoto &&
+      !desktopClose &&
+      !visibleStart;
+    setCollapsed(initiallyCollapsed);
+    const phone = mobile
+      ? initMobileShell({
+          matchMedia: () => ({ matches: true }),
+          publish: (view) => display.publishPhoneShell(view),
+          setPanelCollapsed: (id, collapsed) =>
+            chrome.publish(owner, id, { collapsed }),
+          requestFrame: null,
+        })
+      : null;
+    const setSheet = (sheet) => phone?.setSheet(sheet);
+    setSheet('layers');
+    const rail = body.appendChild(document.createElement('div'));
+    rail.className = 'ui-rail--right';
+    const button = rail.appendChild(document.createElement('button'));
+    button.className = 'ui-rail__item';
+    button.dataset.railItem = 'global-context-panel';
+    button.setAttribute('aria-pressed', String(!initiallyCollapsed));
+    button.addEventListener('click', () => {
+      const collapsed = !chrome.panels['global-context-panel'].collapsed;
+      setCollapsed(collapsed);
+      button.setAttribute('aria-pressed', String(!collapsed));
+    });
+    const host = body.appendChild(document.createElement('div'));
+    const app = createApp(StreetLevelViewer);
+    app.use(pinia);
+    app.mount(host);
+    let revealsRequested = 0;
+    const disconnect = installEntityContext({
+      viewer,
+      getDataManager: () => dataManager,
+      pinia,
+      revealContext: () => {
+        revealsRequested++;
+        if (mobile) setSheet('context');
+      },
+    });
+    const streetLevels = useStreetLevelStore(pinia);
+    const previousView = streetLevels.view;
+    const pinned = usePinnedStore(pinia);
+    const previousTab = pinned.tab;
+    const previousPins = pinned.pins;
+    const shell = {
+      services: { streetLevelLayer: layer },
+      _dataManager: dataManager,
+      _streetLevelViewer: document.getElementById('sl-viewer-root'),
+    };
+    StyleManager.prototype._initStreetLevelPanel.call(shell);
+    const events = [];
+    const photoShown = ({ detail }) =>
+      events.push({
+        id: detail.id,
+        explicit: detail.explicit === true,
+        contextShown:
+          chrome.panels['global-context-panel']?.collapsed === false &&
+          (!mobile || body.getAttribute('data-mobile-sheet') === 'context'),
+      });
+    document.addEventListener(STREET_LEVEL_PHOTO_EVENT, photoShown);
+    t.after(() => {
+      document.removeEventListener(STREET_LEVEL_PHOTO_EVENT, photoShown);
+      shell._streetLevelControls.destroy();
+      shell._streetLevelPhotoUnsubscribe?.();
+      disconnect();
+      input.destroy();
+      app.unmount();
+      phone?.destroy();
+      chrome.detach(owner);
+      streetLevels.view = previousView;
+      pinned.pins = previousPins;
+      pinned.show(previousTab);
+      display.publishPhoneShell(previousPhone);
+      body.replaceChildren();
+      body.classList.remove('mobile-shell');
+      body.removeAttribute('data-mobile-sheet');
+    });
+
+    if (retainedPhoto) {
+      assert.equal(
+        await layer.openImage('mapillary', 'A', { frame: false }),
+        true,
+      );
+      assert.equal(layer.settledPhotoId(), 'mapillary:A');
+      assert.equal(cards.card?.key, 'street-level:mapillary:A');
+      const announced = events.length;
+      assert.equal(
+        await layer.openImage('mapillary', 'R', { frame: false }),
+        false,
+      );
+      await settle();
+      assert.equal(layer.getUIState().street.imageId, 'A');
+      assert.equal(streetLevels.view.viewer.photo?.id, 'mapillary:A');
+      assert.equal(cards.card?.key, 'street-level:mapillary:A');
+      assert.equal(
+        events.length,
+        announced,
+        'a failed replacement emits no event',
+      );
+      const run = createGevActionRunner({
+        viewer,
+        dataManager,
+        styleManager: {
+          setPanelCollapsed: (id, collapsed) => {
+            if (id === 'global-context-panel') setCollapsed(collapsed);
+          },
+          revealPanel: () => {},
+        },
+      });
+      const result = await run('set_panel_open', {
+        panelId: 'street-level-panel',
+        open: true,
+      });
+      assert.equal(result.action, 'set_panel_open', JSON.stringify(result));
+      assert.match(result.say, /latest request failed/);
+      assert.doesNotMatch(result.say, /Provider unavailable/);
+      return;
+    }
+    if (passiveRejection) {
+      const opening = layer.openImage('mapillary', 'A', { frame: false });
+      await posed.promise;
+      assert.deepEqual(events, [], 'no event while the provider is unresolved');
+      finish.resolve();
+      assert.equal(await opening, false);
+      await settle();
+      const result = {
+        events,
+        card: cards.card?.key,
+        settled: layer.settledPhotoId(),
+        error: layer.getUIState().street.error,
+      };
+      assert.deepEqual(result, {
+        events: [],
+        card: undefined,
+        settled: null,
+        error: 'Provider unavailable',
+      });
+      return;
+    }
+    if (rowOpen) {
+      const open = layer
+        .getRowControls()
+        .chips.find(({ id }) => id === 'sl-open-nearest');
+      assert.equal(open?.disabled, false);
+      const opening = open.onClick();
+      await posed.promise;
+      const previousKey = preservesNewer ? 'place:newer' : null;
+      assert.equal(cards.card?.key ?? null, previousKey);
+      assert.equal(
+        chrome.panels['global-context-panel'].collapsed,
+        initiallyCollapsed && !preservesNewer,
+        'only the newer place pick can open Context during the held photo',
+      );
+      if (mobile)
+        assert.equal(body.getAttribute('data-mobile-sheet'), 'layers');
+      assert.deepEqual(events, [], 'a pose is withheld until its open settles');
+      if (explicitWhilePending) {
+        const panelsOpened = [];
+        const run = createGevActionRunner({
+          viewer,
+          dataManager,
+          styleManager: {
+            // Only Context's own panel moves Context; Data Layers is noted.
+            setPanelCollapsed: (id, collapsed) => {
+              if (id === 'global-context-panel') setCollapsed(collapsed);
+              else panelsOpened.push(`${id}:${collapsed ? 'closed' : 'open'}`);
+            },
+            revealPanel: () => {},
+          },
+        });
+        const result = await run('set_panel_open', {
+          panelId: 'street-level-panel',
+          open: true,
+        });
+        const before = {
+          result,
+          adapterLoading: layer.getUIState().street.loading,
+          card: cards.card?.key ?? null,
+          events: [...events],
+        };
+        finish.resolve();
+        await opening;
+        await settle();
+        const after = {
+          card: cards.card?.key ?? null,
+          providerError: layer.getUIState().street.error,
+          events: [...events],
+        };
+        assert.equal(before.adapterLoading, true);
+        assert.equal(
+          before.result.action,
+          'show_data_layers_menu',
+          'a photo still opening falls back to its Data Layers row',
+        );
+        assert.deepEqual(
+          before.events,
+          [],
+          'the explicit route must not announce an unsettled pose',
+        );
+        assert.equal(
+          after.card,
+          null,
+          'provider rejection leaves no failed photo selected',
+        );
+        assert.deepEqual(panelsOpened, ['data-panel:open']);
+        // Asked again once the rejection has landed: still not that photo.
+        const afterRejection = await run('set_panel_open', {
+          panelId: 'street-level-panel',
+          open: true,
+        });
+        assert.equal(afterRejection.action, 'show_data_layers_menu');
+        assert.match(afterRejection.reason, /did not open/);
+        assert.deepEqual(events, [], 'the rejected photo is never announced');
+        assert.equal(cards.card, null);
+        return;
+      }
+      if (switchedSheet || returnsToLayers) setSheet('search');
+      if (returnsToLayers) {
+        await settle();
+        setSheet('layers');
+      }
+      if (desktopClose) {
+        button.click();
+        assert.equal(chrome.panels['global-context-panel'].collapsed, true);
+        assert.equal(button.getAttribute('aria-pressed'), 'false');
+      }
+      finish.resolve();
+      await opening;
+      await settle();
+      const reveals =
+        !providerError &&
+        !preservesNewer &&
+        !switchedSheet &&
+        !desktopClose &&
+        !returnsToLayers;
+      assert.equal(
+        cards.card?.key ?? null,
+        reveals ? streetLevelCardKey('mapillary:A') : previousKey,
+      );
+      assert.equal(
+        chrome.panels['global-context-panel'].collapsed,
+        !mobile && !reveals && !preservesNewer,
+      );
+      if (mobile)
+        assert.equal(
+          body.getAttribute('data-mobile-sheet'),
+          switchedSheet ? 'search' : returnsToLayers ? 'layers' : 'context',
+        );
+      if (reveals) assert.equal(pinned.tab, 'inspect');
+      assert.equal(revealsRequested, reveals && !visibleStart ? 1 : 0);
+      assert.deepEqual(
+        events,
+        providerError
+          ? []
+          : [
+              {
+                id: 'mapillary:A',
+                explicit: false,
+                contextShown: reveals || preservesNewer,
+              },
+            ],
+      );
+      return;
+    }
+
+    const show = () =>
+      showStreetLevel(
+        { provider: 'mapillary', latitude: 48, longitude: 2, fly: false },
+        {
+          viewer,
+          dataManager,
+          styleManager: {
+            setPanelCollapsed: (_id, collapsed) => setCollapsed(collapsed),
+            revealPanel: () => {
+              if (mobile) setSheet('context');
+            },
+          },
+        },
+      );
+    const startingGeneration = cards.selectionGeneration();
+    assert.equal((await show()).ok, true);
+    assert.equal(streetLevels.view.viewer.photo.id, 'mapillary:A');
+    assert.equal(chrome.panels['global-context-panel'].collapsed, false);
+    if (mobile) assert.equal(body.getAttribute('data-mobile-sheet'), 'context');
+    assert.equal(
+      cards.card?.key,
+      preservesNewer ? 'place:newer' : streetLevelCardKey('mapillary:A'),
+    );
+    assert.equal(cards.selectionGeneration(), startingGeneration + 1);
+    const wasVisible = scenario === 'visible Context';
+    assert.deepEqual(events, [
+      {
+        id: 'mapillary:A',
+        explicit: false,
+        contextShown: wasVisible || preservesNewer,
+      },
+      ...(!wasVisible && !preservesNewer
+        ? [{ id: 'mapillary:A', explicit: true, contextShown: true }]
+        : []),
+    ]);
+    if (wasVisible) {
+      pinned.pin({
+        key: cards.card.key,
+        kind: 'street',
+        title: cards.card.title,
+      });
+      pinned.show('pinned');
+      assert.equal(pinned.tab, 'pinned');
+      assert.equal((await show()).ok, true);
+      assert.equal(pinned.tab, 'inspect');
+      assert.equal(
+        events.length,
+        2,
+        'an explicit reopen announces its accepted photo once',
+      );
+      assert.equal(
+        cards.selectionGeneration(),
+        startingGeneration + 1,
+        'the same photo keeps its selection',
+      );
+    }
+  });
+}
+
+test('the omnibar and voice open Context for the retired panel', async () => {
+  for (const text of ['open the street level panel', 'open street view panel'])
+    assert.deepEqual(
+      [...parseOmnibar(text, () => []).steps].map((step) => [
+        step.kind,
+        step.item,
+      ]),
+      // The runner routes it: the open photo's card, or its Data Layers row.
+      [['panel', 'street-level']],
+      text,
+    );
+  const calls = [];
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      canvas: { addEventListener() {}, removeEventListener() {} },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: {
+        moveEnd: { addEventListener() {} },
+        positionWC: Cesium.Cartesian3.fromDegrees(2, 48, 1000),
+      },
+    },
+    styleManager: { setPanelCollapsed: (...args) => calls.push(args) },
+    dataManager: {
+      layers: new Map(),
+      isEnabled: () => false,
+      getAll: () => [],
+    },
+  });
+  // With no photo open, the retired panel's name opens Street Level's row in
+  // Data Layers (gevActions.test.mjs covers an open photo's card).
+  for (const panelId of ['street-level-panel', 'street level', 'street view']) {
+    const result = await runner('set_panel_open', { panelId, open: true });
+    assert.equal(result.action, 'show_data_layers_menu', panelId);
+  }
+  assert.deepEqual(calls.at(-1)?.[0], 'data-panel');
+});
+
+test('on a phone neither cameras, street-level photos nor Space Missions have a tab: Context holds them', () => {
+  assert.deepEqual(
+    MOBILE_TABS.map((tab) => tab.sheet),
+    ['layers', 'context', 'search', 'more'],
+  );
+  assert.ok(
+    !Object.values(MOBILE_SHEET_PANELS).flat().includes('street-level-panel'),
+  );
+  assert.equal(sheetForPanelId('global-context-panel'), 'context');
+});
+
+test('the layer offers as settled only the photo its viewer accepted, steps included', async (t) => {
+  let started;
+  const held = new Promise((resolve) => {
+    started = resolve;
+  });
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  let lookups = 0;
+  const walker = {};
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id === 'R') throw new Error('Provider unavailable');
+    },
+    async () => {
+      if (++lookups === 1) return 'A';
+      started();
+      await gate;
+      return null;
+    },
+    ['mapillary'],
+    { walker },
+  );
+  assert.equal(layer.settledPhotoId(), null);
+  assert.equal(
+    await layer.openNearest({ lat: 48, lon: 2 }, { frame: false }),
+    true,
+  );
+  assert.equal(layer.settledPhotoId(), 'mapillary:A');
+  assert.equal(layer.photoOpening(), false);
+  // A lookup elsewhere runs; the viewer steps on to B meanwhile.
+  const lookup = layer.openNearest({ lat: 10, lon: 10 }, { frame: false });
+  await held;
+  assert.equal(layer.getUIState().street.loading, true);
+  walker.step('B');
+  release();
+  assert.equal(await lookup, false);
+  assert.equal(layer.settledPhotoId(), 'mapillary:B', 'the step is accepted');
+  assert.equal(layer.photoOpening(), false);
+  // A photo its provider rejects is never settled; B, still on screen in
+  // the same viewer, stays the settled photo.
+  const rejected = layer.openImage('mapillary', 'R', { frame: false });
+  assert.equal(layer.photoOpening(), true);
+  assert.equal(
+    layer.settledPhotoId(),
+    'mapillary:B',
+    'only the still visible photo is accepted',
+  );
+  assert.equal(await rejected, false);
+  assert.equal(layer.settledPhotoId(), 'mapillary:B');
+  assert.equal(layer.photoOpening(), false);
+  // A step the viewer then takes shows a photo again, without the old error.
+  walker.step('C');
+  assert.equal(layer.settledPhotoId(), 'mapillary:C');
+  assert.equal(layer.getUIState().street.error, null);
+  // Closed, nothing is.
+  assert.equal(await layer.openImage('mapillary', 'A', { frame: false }), true);
+  layer.closeViewer();
+  assert.equal(layer.settledPhotoId(), null);
+});
+
+test('closing a photo while it opens leaves no open in flight, so later steps are accepted', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  const walker = {};
+  const layer = await layerWithPoses(
+    t,
+    async (id) => {
+      if (id === 'B') await gate;
+    },
+    undefined,
+    ['mapillary'],
+    { walker },
+  );
+  assert.equal(await layer.openImage('mapillary', 'A', { frame: false }), true);
+  const opening = layer.openImage('mapillary', 'B', { frame: false });
+  assert.equal(layer.photoOpening(), true);
+  layer.closeViewer();
+  assert.equal(layer.photoOpening(), false);
+  release();
+  assert.equal(await opening, false);
+  assert.equal(await layer.openImage('mapillary', 'A', { frame: false }), true);
+  walker.step('C');
+  assert.equal(layer.settledPhotoId(), 'mapillary:C');
+});
+
+test('overlapping opens that both reject keep the previously shown photo accepted', async (t) => {
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  t.after(() => release.resolve());
+  const layer = await layerWithPoses(t, async (id) => {
+    if (id === 'R1') {
+      started.resolve();
+      await release.promise;
+    }
+    if (id === 'R1' || id === 'R2') throw new Error('Provider unavailable');
+  });
+  const open = (id) => layer.openImage('mapillary', id, { frame: false });
+  assert.equal(await open('A'), true);
+  assert.equal(layer.settledPhotoId(), 'mapillary:A');
+
+  const first = open('R1');
+  await started.promise;
+  assert.equal(await open('R2'), false);
+  release.resolve();
+  assert.equal(await first, false);
+  assert.equal(layer.getUIState().street.imageId, 'A');
+  assert.equal(layer.settledPhotoId(), 'mapillary:A');
 });

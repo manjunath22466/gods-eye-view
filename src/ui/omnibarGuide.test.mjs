@@ -1,9 +1,15 @@
-// The guided walk's callout, rendered by startGuide() over happy-dom.
+// src/ui/omnibarGuide.test.mjs — the guided walk's callout, rendered by
+// startGuide() over happy-dom, and a layer's settings walk, which points at
+// the Visual panel for labels and 3D models (Context no longer holds them).
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp, h, onMounted } from 'vue';
-import { layerSettingsGuide, startGuide } from './omnibarGuide.js';
+import {
+  FEATURE_GUIDES,
+  layerSettingsGuide,
+  startGuide,
+} from './omnibarGuide.js';
 import { CAMERA_SETTINGS_EVENT } from './contextEvents.js';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -194,8 +200,49 @@ test('Esc is left to an open dialog that owns it; the next Esc ends the walk', a
   assert.equal($('.gev-guide'), null);
 });
 
-test("the cameras' walk ends on Context's Camera settings tab, while a camera card is open", () => {
+function visualPanel() {
   document.body.replaceChildren();
+  const group = (id) => {
+    const wrap = document.body.appendChild(document.createElement('div'));
+    wrap.className = 'pp-toggle-group';
+    const button = wrap.appendChild(document.createElement('button'));
+    button.id = id;
+    return wrap;
+  };
+  return {
+    labels: group('detection-toggle'),
+    models: group('models3d-toggle'),
+  };
+}
+
+const targetsOf = (steps) => steps.flatMap((step) => step.targets?.() || []);
+const textsOf = (steps) => steps.map((step) => step.text?.() || '').join(' ');
+
+test('an aircraft layer walks to the Visual panel for its labels and 3D models', () => {
+  const { labels, models } = visualPanel();
+  const steps = layerSettingsGuide({ id: 'flights', shown: 'Live Flights' });
+  const targets = targetsOf(steps);
+  assert.ok(targets.includes(models), 'the 3D model settings');
+  assert.ok(steps.some((step) => /Open Visual/.test(step.text?.() || '')));
+  assert.doesNotMatch(textsOf(steps), /Properties/);
+  assert.equal(
+    targets.includes(labels),
+    false,
+    'flights draw no overlay labels',
+  );
+});
+
+test('a label layer walks to the Visual panel for its label settings', () => {
+  const { labels, models } = visualPanel();
+  const steps = layerSettingsGuide({ id: 'satellites', shown: 'Satellites' });
+  const targets = targetsOf(steps);
+  assert.ok(targets.includes(labels));
+  assert.equal(targets.includes(models), false);
+  assert.doesNotMatch(textsOf(steps), /Properties/);
+});
+
+test("the cameras' walk ends on Context's Camera settings tab, while a camera card is open", () => {
+  visualPanel();
   const shown = [];
   const onShow = () => shown.push('camera-settings');
   document.addEventListener(CAMERA_SETTINGS_EVENT, onShow);
@@ -218,4 +265,15 @@ test("the cameras' walk ends on Context's Camera settings tab, while a camera ca
     ),
     false,
   );
+});
+
+// The "properties" topic (labels, density, 3D models) runs, and walks to
+// where those settings are: the Visual panel's label settings.
+test('the properties topic walks to the Visual panel’s label settings without throwing', () => {
+  const { labels } = visualPanel();
+  const steps = FEATURE_GUIDES.properties();
+  assert.ok(steps.length > 0);
+  assert.ok(targetsOf(steps).includes(labels), 'the label settings');
+  assert.match(textsOf(steps), /Density/);
+  assert.doesNotMatch(textsOf(steps), /Properties holds/);
 });

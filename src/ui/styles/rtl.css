@@ -59,13 +59,9 @@ html:lang(he) {
    own font stack. */
 html:is(:lang(ar), :lang(he))
   :is(
-    #military-awareness-panel,
-    .military-awareness-controls button,
-    .military-awareness-standby button,
     .military-awareness-compass-label,
     .military-awareness-compass-heading,
-    .military-awareness-direction-label,
-    .tr3b-toggle
+    .military-awareness-direction-label
   ) {
   font-family: var(--font-mono);
 }
@@ -158,8 +154,8 @@ html[dir='rtl']
 html[dir='rtl']
   :is(
     .cockpit-news-list li *,
-    #radio-station-name,
-    #radio-station-tags,
+    .radio-stations__now-head strong,
+    .radio-stations__name,
     .cockpit-radio-station
   ) {
   unicode-bidi: plaintext;

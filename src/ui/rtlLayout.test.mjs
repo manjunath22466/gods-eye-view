@@ -113,7 +113,6 @@ test('select chevrons and legend ranges follow the field and the ramp in right-t
   );
   // Selects that set their own padding keep the chevron's room at the end.
   for (const [name, selector, inline] of [
-    ['radio.css', '#radio-filter', '8px 24px'],
     ['radio.css', '.sdr-gain-row select', '7px 22px'],
     ['voice-card.css', '#gev-voice-timeout-select', '0.45rem 22px'],
   ]) {

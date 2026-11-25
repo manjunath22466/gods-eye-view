@@ -26,6 +26,7 @@ import { useDockedStore } from './stores/docked.js';
 import { isGlobeView, useEntityCardStore } from './stores/entityCard.js';
 import { useOmnibarStore } from './stores/omnibar.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
+import { usePinnedStore } from './stores/pinned.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
 import { MOBILE_SHEET_ATTR, MOBILE_SHELL_CLASS } from './mobileSheets.js';
 import { useVoiceStore } from './stores/voice.js';
@@ -71,6 +72,7 @@ const FOLLOWABLE = new Set(['flights', 'military', 'satellites']);
  *   news; the unselected view's weather uses it only without spotWeather.
  * @param {(lat: number, lon: number, options?: {signal?: AbortSignal}) => Promise<object>} [options.spotWeather]
  *   The weather-only service for the unselected view.
+ * @param {() => number} [options.manualCameraInputCount] The globe input revision.
  * @param {object} [options.inspector] The Inspector count owner and optional weather clock.
  * @param {() => void} [options.revealContext] Reveal Context on the mobile shell.
  * @param {() => void} [options.supersedeDeferredNavigation] Retire older navigation before a card's explicit flight.
@@ -84,6 +86,7 @@ export function installEntityContext({
   pickWorld,
   regionalBrief,
   spotWeather,
+  manualCameraInputCount,
   inspector,
   revealContext,
   supersedeDeferredNavigation,
@@ -132,7 +135,8 @@ export function installEntityContext({
     const button = doc?.querySelector(
       '.ui-rail--right .ui-rail__item[data-rail-item="global-context-panel"]',
     );
-    if (button && button.getAttribute('aria-pressed') !== 'true')
+    // The store updates before the rail's aria-pressed value renders.
+    if (!isOpen() && button && button.getAttribute('aria-pressed') !== 'true')
       button.click();
     if (reveal) revealContext?.();
   }
@@ -488,6 +492,7 @@ export function installEntityContext({
         heightM: pose.height,
         groundM,
         eye: { lat: pose.lat, lon: pose.lon },
+        manualInputCount: manualCameraInputCount?.() ?? 0,
         // Keep the camera's orientation so the view can be pinned.
         pose: {
           lon: pose.lon,
@@ -776,6 +781,31 @@ export function installEntityContext({
       lat: detail.lat,
       lon: detail.lon,
     };
+    if (
+      detail.revealFromOpen === true &&
+      docked.view?.kind !== 'street' &&
+      !doc?.body?.classList.contains('ui-embed')
+    ) {
+      if (requestGeneration !== store.selectionGeneration()) return;
+      const reveal = !contextShown();
+      if (store.card?.key === key) {
+        if (reveal) openPanel();
+      } else if (!store.select(identity, { reveal })) return;
+      usePinnedStore(pinia).show('inspect');
+      photoCardGeneration = store.selectionGeneration();
+      return;
+    }
+    if (detail.explicit === true) {
+      if (contextShown()) {
+        usePinnedStore(pinia).show('inspect');
+        if (
+          store.card?.key !== key &&
+          store.select(identity, { reveal: false })
+        )
+          photoCardGeneration = store.selectionGeneration();
+      }
+      return;
+    }
     if (docked.view?.kind === 'street') {
       // A rollback can reannounce the same docked photo. Keep the card the
       // person was using when the replacement did not open.

@@ -193,7 +193,7 @@ const distance = (n) =>
 
 <template>
   <section class="spot-conditions" :aria-label="title">
-    <NearbyLists :lists="lists" :title="title" :list-links="false" @focus-lost="focusCardTitle()" />
+    <NearbyLists :lists="lists" :title="title" @focus-lost="focusCardTitle()" />
 
     <div v-if="shownHazards.length" class="spot-conditions__block spot-conditions__hazards">
       <h4>

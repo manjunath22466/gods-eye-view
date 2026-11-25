@@ -1,11 +1,7 @@
 /**
- * Recent Imagery readout for the right rail (`#recent-imagery-panel`). It
- * also reports through `onPresence` while the layer is on, so Context shows
- * the layer's list tab only then. The body is a stack of blocks: box
- * actions, a notice line, the days as a Context list card (a page at a time,
- * the draw-an-area action when there is no box), the hint line, the
- * selection bar (mode, the two slot rows), opacity, SWAP and export, then a
- * collapsed DETAILS card for every note and
+ * Recent Imagery's list in Context. It reports layer presence and renders
+ * the box actions, notice, paged day list, selection bar, opacity, SWAP,
+ * export, and the collapsed DETAILS card for every note and
  * hedge. The adapter computes the view from the layer's snapshot and renders
  * the RecentImageryReadout component; box actions, export and DETAILS are
  * rail-card blocks and cards. Source toggles live on the data-panel row.
@@ -16,7 +12,6 @@ import {
   msg,
   onLocaleChange,
   t,
-  tn,
   translateKnown,
 } from '../i18n/index.js';
 import { createImagerySplit, globeSplitTarget } from './imagerySplit.js';
@@ -33,7 +28,6 @@ import { displayDay, displayMetres } from '../layers/recentImagery/display.js';
 import { formatQuantity } from './unitLabels.js';
 import { canvasOf, findFrame, findGlobe } from '../render/rendererOf.js';
 
-const PANEL_ID = 'recent-imagery-panel';
 const OVERVIEW_MIN_BOX_KM = 25;
 const ESRI_NOTE = msg('Imagery on Esri · Google 3D returns when cleared');
 
@@ -117,9 +111,6 @@ const KEY_STEPS = {
   End: (index, total) => total - 1,
 };
 
-// Remounting must not reopen a panel the user already collapsed.
-const appearedDocuments = new WeakSet();
-
 const sensorLine = (product) =>
   PRODUCTS[product]
     ? `${t(PRODUCTS[product].name)} · ${displayMetres(PRODUCTS[product].resolutionM)}`
@@ -173,13 +164,7 @@ function dayCount(snapshot) {
     : null;
 }
 
-function countText(snapshot) {
-  if (!snapshot.box) return t('NO BOX');
-  if (snapshot.searching) return t('SEARCHING');
-  return tn(snapshot.candidates.length, '{count} DAY', '{count} DAYS');
-}
-
-/** The one-line hint under the list: the next thing to do, per state. */
+/** The one-line hint under the strip: the next thing to do, per state. */
 function hintText(snapshot) {
   if (snapshot.zoomToFit) return t('Zoom in or draw a smaller box');
   if (!snapshot.box) return t('Select a box or use the view');
@@ -233,16 +218,11 @@ export function createRecentImageryPanel({
 } = {}) {
   const document = container?.ownerDocument;
   if (!document?.createElement || !layer) return null;
-  const panel = document.getElementById?.(PANEL_ID) || null;
-  const count = document.getElementById?.(`${PANEL_ID}-count`) || null;
 
   const listeners = [];
   const listen = (target, type, handler, options) => {
     target.addEventListener(type, handler, options);
     listeners.push([target, type, handler, options]);
-  };
-  const set = (node, key, value) => {
-    if (node[key] !== value) node[key] = value;
   };
 
   // ---- state ------------------------------------------------------------
@@ -764,26 +744,9 @@ export function createRecentImageryPanel({
     split?.setValue(snapshot.split);
   }
 
-  // ---- panel ------------------------------------------------------------
+  // ---- presence ---------------------------------------------------------
+  // With no box there is nothing to count, and the tab says why.
   function renderPanel() {
-    const hidden = !snapshot.enabled;
-    if (panel) set(panel, 'hidden', hidden);
-    if (count) set(count, 'textContent', hidden ? '' : countText(snapshot));
-    if (hidden || !panel || appearedDocuments.has(document)) return;
-    appearedDocuments.add(document);
-    // First appearance opens the panel unless a stored or shared collapse
-    // choice exists (marked by the panel chrome when it restored the state).
-    const preference = panel.dataset?.collapsedPreference;
-    if (
-      panel.classList.contains('collapsed') &&
-      (preference === undefined || preference === 'default')
-    )
-      panel.querySelector?.(`[data-collapse-target="${PANEL_ID}"]`)?.click();
-  }
-
-  // Context's list tab: with no box there is nothing to count, and the tab
-  // says why.
-  function renderPresence() {
     onPresence(
       !snapshot.enabled
         ? null
@@ -799,7 +762,6 @@ export function createRecentImageryPanel({
     stripKeys = snapshot.candidates.map((candidate) => candidate.key).join('|');
     preserveScroll(() => {
       renderPanel();
-      renderPresence();
       paint();
       renderSplit();
       reportVisibleRange();
@@ -1003,8 +965,6 @@ export function createRecentImageryPanel({
         image.src = '';
       imaged.clear();
       renderVue(null, container);
-      if (count) count.textContent = '';
-      if (panel) panel.hidden = true;
       onPresence(null);
     },
   };

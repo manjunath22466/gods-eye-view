@@ -12,7 +12,6 @@ import { useEntityCardStore } from './stores/entityCard.js';
 import { usePanelChromeStore } from './stores/panelChrome.js';
 import { usePinnedStore } from './stores/pinned.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
-import { setEnabledLayers } from './contextLayerTabs.js';
 import {
   contextListsActive,
   listsOn,
@@ -21,6 +20,7 @@ import {
   showContextList,
   shownList,
 } from './contextLists.js';
+import { createGevActionRunner } from '../voice/gevActions.js';
 
 const flight = (id) => ({
   id,
@@ -153,8 +153,8 @@ test('with Weather on too, Space Missions is a Lists sub-tab; turned off, Lists 
     'News · 30',
   ]);
   // Weather, turned on last, shows.
-  assert.equal(shown('#context-live-weather'), true);
-  assert.equal(shown('#context-live-missions'), false);
+  assert.equal(shown('#context-list-weather'), true);
+  assert.equal(shown('#context-list-space-missions'), false);
 
   $('#context-list-tab-space-missions').click();
   await nextTick();
@@ -162,8 +162,8 @@ test('with Weather on too, Space Missions is a Lists sub-tab; turned off, Lists 
     $('#context-list-tab-space-missions').getAttribute('aria-selected'),
     'true',
   );
-  assert.equal(shown('#context-live-missions'), true);
-  assert.equal(shown('#context-live-weather'), false);
+  assert.equal(shown('#context-list-space-missions'), true);
+  assert.equal(shown('#context-list-weather'), false);
 
   // Missions going off while it shows: Lists moves to the next list, and
   // focus on its sub-tab moves to that list's sub-tab.
@@ -191,7 +191,7 @@ test('with one other list left, focus in the Missions list moves to the Lists ta
   await nextTick();
   $('#context-list-tab-space-missions').click();
   await nextTick();
-  const inside = $('#context-live-missions').appendChild(
+  const inside = $('#context-list-space-missions').appendChild(
     document.createElement('button'),
   );
   inside.focus();
@@ -200,7 +200,7 @@ test('with one other list left, focus in the Missions list moves to the Lists ta
   await nextTick();
   assert.equal(Boolean($('.context-list-tabs')), false);
   assert.equal($('#context-tab-lists').textContent.trim(), 'Weather · 3');
-  assert.equal(shown('#context-live-weather'), true);
+  assert.equal(shown('#context-list-weather'), true);
   assert.equal(document.activeElement?.id, 'context-tab-lists');
 });
 
@@ -217,7 +217,7 @@ test('turning News off with Weather left moves focus from its sub-tab to the Lis
   await nextTick();
   assert.equal($('#context-list-tab-news'), null);
   assert.equal($('#context-tab-lists').textContent.trim(), 'Weather · 3');
-  assert.equal(shown('#context-live-weather'), true);
+  assert.equal(shown('#context-list-weather'), true);
   assert.equal(document.activeElement?.id, 'context-tab-lists');
 });
 
@@ -245,7 +245,7 @@ test('turning News off with focus in its list moves focus to the Lists tab', asy
     document.createElement('button'),
   );
   assert.ok(
-    inside.closest('#context-live-news'),
+    inside.closest('#context-list-news'),
     'the readout shows in Context',
   );
   inside.focus();
@@ -385,6 +385,65 @@ test('arrow keys walk the main tabs in order: Inspect, Lists, Pinned; and Lists 
   assert.deepEqual(selected(), ['context-tab-pinned']);
 });
 
+test('voice set_context_mode space-missions selects Missions inside Lists', async (t) => {
+  const { $, missions, turnOn } = fixture(t);
+  setContextListPresence('weather', { count: 3 });
+  showContextList('weather');
+  await nextTick();
+  assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
+  let on = false;
+  const canvas = { addEventListener() {}, removeEventListener() {} };
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      canvas,
+      scene: { canvas },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager: {
+      getContextModeState: () => ({ mode: null, active: false }),
+      getCockpitState: () => ({ active: false }),
+      setPanelCollapsed() {},
+      async setContextMode(mode) {
+        return { ok: true, mode };
+      },
+    },
+    dataManager: {
+      layers: new Map([
+        [
+          'rocket-launches',
+          { module: { id: 'rocket-launches', name: 'Space Missions' } },
+        ],
+      ]),
+      getAll: () => [
+        { id: 'rocket-launches', name: 'Space Missions', enabled: on },
+      ],
+      isEnabled: (id) => id === 'rocket-launches' && on,
+      async setEnabled(id, enabled) {
+        on = enabled;
+        turnOn(id, 'voice');
+        missions.setEnabled(enabled);
+        missions.publish({ roster: roster(5), mission: null });
+        return true;
+      },
+    },
+  });
+  const result = await runner('set_context_mode', { mode: 'space-missions' });
+  await nextTick();
+  await nextTick();
+  assert.equal(result.ok, true);
+  assert.equal(result.listShown, true);
+  assert.equal(
+    $('#context-list-tab-space-missions').getAttribute('aria-selected'),
+    'true',
+  );
+  assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
+  assert.equal(
+    $('#context-list-tab-space-missions').textContent.trim(),
+    'Space Missions · 5',
+  );
+});
+
 test('a pick, a pin and Pinned leave the list tab; its tab sits between Inspect and Pinned', async (t) => {
   const { $, tabs, cards, pinia, turnOn } = fixture(t);
   const pinned = usePinnedStore(pinia);
@@ -429,6 +488,32 @@ test('a pick, a pin and Pinned leave the list tab; its tab sits between Inspect 
   assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
 });
 
+test('the list bodies stay in the page while Context is closed, for their readouts', async (t) => {
+  const { $, open } = fixture(t);
+  open(false);
+  await nextTick();
+  for (const id of [
+    'space-mission-panel-host',
+    'weather-panel-body',
+    'news-panel-body',
+    'recent-imagery-panel-body',
+  ])
+    assert.ok($(`#${id}`), id);
+  assert.equal(
+    Boolean($('#context-body')),
+    false,
+    'closed, Context reads nothing',
+  );
+  // No right-rail panel of their own.
+  for (const id of [
+    'space-missions-panel',
+    'weather-panel',
+    'news-panel',
+    'recent-imagery-panel',
+  ])
+    assert.equal($(`#${id}`), null, id);
+});
+
 test('a list layer a link or a restore turns on adds its tab but does not take Context over', async (t) => {
   const { $, tabs, turnOn } = fixture(t);
   await nextTick();
@@ -465,18 +550,12 @@ test('every list tab names its count, or with nothing to count, why', async (t) 
   assert.equal($('#context-tab-lists').textContent.trim(), 'Imagery · 4');
 });
 
-test('Cameras turned on add their tab but leave Context on what is nearby', async (t) => {
+test('turning Cameras on leaves Inspect open without adding a Cameras tab', async (t) => {
   const { $, turnOn } = fixture(t);
   turnOn('cctv');
-  setContextListPresence('cctv', { count: 12 });
   await nextTick();
-  await nextTick();
-  assert.match($('#context-tab-lists').textContent, /Cameras · 12/);
-  assert.equal(
-    $('#context-tab-inspect').getAttribute('aria-selected'),
-    'true',
-    'Inspect stays',
-  );
+  assert.equal($('#context-tab-lists'), null);
+  assert.ok($('.view-context'));
 });
 
 test('with its last list gone, the list tab does not come back for a quiet or restored list', async (t) => {
@@ -492,24 +571,11 @@ test('with its last list gone, the list tab does not come back for a quiet or re
   pinned.show('pinned');
   await nextTick();
   assert.equal($('#context-tab-pinned').getAttribute('aria-selected'), 'true');
-  setEnabledLayers(['flights']);
-  t.after(() => setEnabledLayers([]));
-  await nextTick();
-  $('#context-tab-btn-props').click();
-  await nextTick();
-  assert.equal(
-    $('#context-tab-btn-props').getAttribute('aria-selected'),
-    'true',
-  );
   turnOn('wind');
   setContextListPresence('weather', { count: 3 });
   await nextTick();
   await nextTick();
   assert.equal(contextListsActive.value, true);
-  assert.equal(
-    $('#context-tab-btn-view').getAttribute('aria-selected'),
-    'true',
-  );
   // Weather goes off: no list is on.
   setContextListPresence('weather', null);
   await nextTick();
@@ -517,13 +583,11 @@ test('with its last list gone, the list tab does not come back for a quiet or re
   assert.equal($('#context-tab-inspect').getAttribute('aria-selected'), 'true');
   // Cameras turned on later stay quiet.
   turnOn('cctv');
-  setContextListPresence('cctv', { count: 12 });
   await nextTick();
   await nextTick();
   assert.equal(contextListsActive.value, false);
   assert.equal($('#context-tab-inspect').getAttribute('aria-selected'), 'true');
   // As does a list a share link restores.
-  setContextListPresence('cctv', null);
   turnOn('rocket-launches', 'share-link');
   setContextListPresence('space-missions', { count: 4 });
   await nextTick();

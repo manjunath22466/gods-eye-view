@@ -211,8 +211,8 @@ export function createViewerHost({ state, parts }) {
     if (!state.street.host) {
       // A nearest-image lookup may have set it; nothing is loading now.
       state.street.loading = false;
-      // English data: the Street Level panel translates it (translateKnown).
-      state.street.error = msg('Open the Street Level panel to view imagery');
+      // English data: Street Level's UI translates it (translateKnown).
+      state.street.error = msg('Open Context to view street-level imagery');
       notify();
       return false;
     }

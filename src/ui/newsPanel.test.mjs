@@ -76,6 +76,7 @@ function view(extra = {}) {
       color: level.color,
     })),
     items: [feedCardView(big, NOW), feedCardView(report('lone'), NOW)],
+    mapCount: 5,
     inView: { active: false, loading: false, error: null, items: [] },
     selected: null,
     hasMore: true,
@@ -87,36 +88,34 @@ function view(extra = {}) {
 }
 
 function fixture() {
+  // News's list in Context: a body the readout renders into, and the list's
+  // presence (whether its tab shows, and its count) reported as it goes.
   document.body.innerHTML = `
-    <div id="news-panel" class="collapsed" hidden>
-      <span id="news-panel-count">0</span>
-      <button data-collapse-target="news-panel"></button>
+    <div id="context-list-news">
       <div id="news-panel-body"></div>
     </div>`;
-  const panel = document.getElementById('news-panel');
-  let opened = 0;
-  panel
-    .querySelector('[data-collapse-target]')
-    .addEventListener('click', () => {
-      opened++;
-      panel.classList.remove('collapsed');
-    });
+  const panel = document.getElementById('context-list-news');
+  const reports = [];
   const calls = [];
   const news = createNewsPanel({
     container: document.getElementById('news-panel-body'),
     setLayerParams: (id, params, options) => calls.push([id, params, options]),
+    onPresence: (state) => reports.push(state),
   });
-  return { news, panel, calls, opened: () => opened };
+  return { news, panel, calls, presence: () => reports.at(-1) };
 }
 
-test('the panel shows the last 24 h as event cards and opens once', () => {
-  const { news, panel, opened } = fixture();
+const countOf = (presence) => String(presence()?.count);
+
+test('the list shows the last 24 h as event cards, with its tab only while News is on', () => {
+  const { news, panel, presence } = fixture();
   news.update(null);
-  assert.equal(panel.hidden, true);
+  assert.equal(presence(), null);
   news.update(view());
-  assert.equal(panel.hidden, false);
-  assert.equal(opened(), 1);
-  assert.equal(document.getElementById('news-panel-count').textContent, '2');
+  assert.notEqual(presence(), null);
+  // The tab counts the reports on the map, as Context's News tile does, not
+  // the feed's loaded cards.
+  assert.equal(countOf(presence), '5');
   assert.equal(
     panel.querySelector('.news-readout__chosen').textContent,
     'Last 24 h · Significant and above · All categories',
@@ -160,12 +159,8 @@ test('the panel shows the last 24 h as event cards and opens once', () => {
   assert.equal(first.querySelector('.news-card__credit').textContent, 'A');
   // A lone report has no picture.
   assert.equal(second.querySelector('.news-card__thumb') === null, true);
-  // A later update does not reopen a panel the reader collapsed.
-  panel.classList.add('collapsed');
-  news.update(view());
-  assert.equal(opened(), 1);
   news.destroy();
-  assert.equal(panel.hidden, true);
+  assert.equal(presence(), null, 'its tab goes with it');
 });
 
 test('a card click flies there; open, it links the source and closes', () => {
@@ -263,7 +258,7 @@ test('a feed refresh keeps focus on the selected report source when the detail m
 });
 
 test('filters, the Local section and empty or failed reads', () => {
-  const { news, panel, calls } = fixture();
+  const { news, panel, calls, presence } = fixture();
   news.update(view());
   const heading = () =>
     panel.querySelector('.context-list-card__head .view-context__block-name')
@@ -313,11 +308,18 @@ test('filters, the Local section and empty or failed reads', () => {
     panel.querySelector('select[aria-label="Severity"]') === null,
     true,
   );
-  assert.equal(document.getElementById('news-panel-count').textContent, '0');
   news.update(
     localView({ active: true, items: [feedCardView(report('near'), NOW)] }),
   );
-  assert.equal(document.getElementById('news-panel-count').textContent, '1');
+  assert.equal(countOf(presence), '5');
+  news.update({
+    ...localView({ active: true, items: [feedCardView(report('near'), NOW)] }),
+    mapCount: 1,
+  });
+  assert.equal(countOf(presence), '1');
+  // A view without the map's count shows no count rather than a wrong one.
+  news.update({ ...view(), mapCount: undefined });
+  assert.equal(presence()?.count, null);
   news.update(localView({ active: true }));
   assert.match(
     card().textContent,

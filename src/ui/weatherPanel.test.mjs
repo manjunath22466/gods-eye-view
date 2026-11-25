@@ -25,23 +25,8 @@ const radar = {
 };
 function fixture() {
   const f = railFixture();
-  const panel = f.document.createElement('div');
-  const count = f.document.createElement('span');
-  let collapsed = true;
-  let clicks = 0;
-  panel.hidden = true;
-  Object.defineProperty(panel, 'classList', {
-    value: { contains: () => collapsed },
-  });
-  const collapse = {
-    click() {
-      collapsed = !collapsed;
-      clicks++;
-    },
-  };
-  panel.querySelector = (selector) =>
-    selector === '#weather-panel-count' ? count : collapse;
-  f.container.closest = () => panel;
+  // Weather's list in Context reports whether its tab shows, and its count.
+  const reports = [];
   const listeners = new Set();
   const calls = [];
   let state = {
@@ -58,10 +43,9 @@ function fixture() {
   };
   return {
     ...f,
-    panel,
-    count,
-    collapse,
-    clicks: () => clicks,
+    onPresence: (presence) => reports.push(presence),
+    presence: () => reports.at(-1),
+    reports,
     calls,
     listeners,
     clock,
@@ -268,57 +252,22 @@ test('identical updates write nothing and status keeps its line through loading 
   assert.equal(f.container.children.length, 0);
   assert.equal(createWeatherPanel(), null);
 });
-test('count, hidden-empty and first-appearance expansion survive remount and owner collapse', () => {
+test('the list reports its tab only while a weather product shows, with their count', () => {
   const f = fixture();
   let view = createWeatherPanel(f);
   view.update([]);
-  assert.equal(f.panel.hidden, true);
-  assert.equal(f.clicks(), 0);
+  assert.equal(f.presence(), null);
   view.update([wind, radar, { id: 'missing' }]);
-  assert.equal(f.count.textContent, '2');
-  assert.equal(f.panel.hidden, false);
-  assert.equal(f.clicks(), 1);
-  f.collapse.click();
+  assert.deepEqual(f.presence(), { count: 2 });
   view.update([]);
+  assert.equal(f.presence(), null);
   view.update([wind]);
-  assert.equal(f.panel.classList.contains('collapsed'), true);
-  assert.equal(f.clicks(), 2);
-  assert.equal(f.count.textContent, '1');
+  assert.deepEqual(f.presence(), { count: 1 });
   view.destroy();
-  assert.equal(f.count.textContent, '0');
-  assert.equal(f.panel.hidden, true);
+  assert.equal(f.presence(), null, 'its tab goes with it');
   view = createWeatherPanel(f);
   view.update([radar]);
-  assert.equal(f.panel.hidden, false);
-  assert.equal(f.clicks(), 2);
-  view.destroy();
-  const expanded = fixture();
-  expanded.collapse.click();
-  const other = createWeatherPanel(expanded);
-  other.update([wind]);
-  assert.equal(expanded.clicks(), 1);
-  other.destroy();
-});
-
-test('a stored or shared collapse choice is not overridden on first appearance', () => {
-  for (const preference of ['stored', 'share']) {
-    const f = fixture();
-    f.panel.dataset.collapsedPreference = preference;
-    const view = createWeatherPanel(f);
-    view.update([radar]);
-    assert.equal(f.panel.hidden, false);
-    assert.equal(
-      f.clicks(),
-      0,
-      `${preference} preference keeps the panel collapsed`,
-    );
-    view.destroy();
-  }
-  const f = fixture();
-  f.panel.dataset.collapsedPreference = 'default';
-  const view = createWeatherPanel(f);
-  view.update([radar]);
-  assert.equal(f.clicks(), 1, 'a default state still expands once');
+  assert.deepEqual(f.presence(), { count: 1 });
   view.destroy();
 });
 

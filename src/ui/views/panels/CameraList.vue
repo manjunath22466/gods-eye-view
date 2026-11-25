@@ -1,26 +1,17 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
 import { formatNumber, t } from '../../../i18n/index.js';
 import { useEntityCardStore } from '../../stores/entityCard.js';
 import { usePanelChromeStore } from '../../stores/panelChrome.js';
 import { useCctvStore } from '../../stores/cctv.js';
 import { contextRadiusKm } from '../../contextRadius.js';
 import { contextNeedle, matchesContextSearch } from '../../contextSearch.js';
-import { leaveContextLists, setContextListPresence } from '../../contextLists.js';
+import EntityCard from './EntityCard.vue';
 import { distanceText } from '../../distanceText.js';
 import ContextListCard from '../../kit/ContextListCard.vue';
 
-// Context's Cameras list: every loaded camera within Context's radius of the
-// centre of the view, nearest first, in the order Nearby lists them and
-// Prev/Next on the Data Layers row steps through them (the layer's
-// camerasNear). It stays in the page while Cameras is on, so its tab shows
-// with its count; a row opens the camera's card on Inspect. The list card
-// pages it, and its order (after Context's search) is the one Prev/Next and
-// auto-hop walk.
-
-// Whether the Cameras list is on screen: only then do its search and order
-// steer Prev/Next and auto-hop.
-const props = defineProps({ shown: { type: Boolean, default: false } });
+// The inline list and Data Layers controls use the same distance-sorted walk.
+const props = defineProps({ shown: { type: Boolean, default: false }, selected: { type: String, default: null } });
 
 const store = useEntityCardStore();
 const chrome = usePanelChromeStore();
@@ -40,12 +31,26 @@ const center = computed(() => {
   return Number.isFinite(at?.lat) && Number.isFinite(at?.lon) ? { lat: at.lat, lon: at.lon } : null;
 });
 const contextOpen = computed(() => chrome.panels['global-context-panel']?.collapsed === false);
+const returnCenter = shallowRef(null);
+const manualInput = computed(() => store.view?.manualInputCount ?? 0);
+const listReset = shallowRef(0);
+const returnRevision = computed(() => `${manualInput.value}:${store.viewCommandRevision}:${contextRadiusKm.value}:${listReset.value}`);
+const discardCenter = () => (returnCenter.value = null);
+function resetReturn() {
+  discardCenter();
+  listReset.value++;
+}
+watch([() => props.shown, () => props.selected], ([shown, selected]) => {
+  if (!shown && !selected && returnCenter.value) resetReturn();
+});
 
-// Every camera within the radius, nearest first.
+// A row pick flies away. Keep its list origin for the trip back, while the
+// camera walk continues to read the real view.
 const cameras = computed(() => {
-  if (catalogKey.value === 'off' || !center.value) return [];
+  const at = returnCenter.value ?? center.value;
+  if (catalogKey.value === 'off' || !at) return [];
   try {
-    return cctv()?.camerasNear?.(center.value, { radiusKm: contextRadiusKm.value }) || [];
+    return cctv()?.camerasNear?.(at, { radiusKm: contextRadiusKm.value }) || [];
   } catch {
     return [];
   }
@@ -54,12 +59,6 @@ const cameras = computed(() => {
 const search = (camera) => !contextNeedle.value || matchesContextSearch(camera.name, camera.city, camera.provider);
 const order = shallowRef([]);
 
-// The tab, with the count Nearby's Cameras group shows, while Cameras is on.
-watch(
-  [catalogKey, cameras],
-  ([key, list]) => setContextListPresence('cctv', key === 'off' ? null : { count: center.value ? list.length : null }),
-  { immediate: true },
-);
 // Prev/Next walk this list while Context is open; with Context closed its
 // centre is not kept up to date, so they walk the cameras nearest the view.
 // The list's own order counts only while it shows. A new search, the list
@@ -83,7 +82,6 @@ watch(
   { immediate: true },
 );
 onBeforeUnmount(() => {
-  setContextListPresence('cctv', null);
   try {
     cctv()?.setNearbyArea?.(walkedFor != null ? { restart: true } : null);
   } catch {
@@ -98,32 +96,35 @@ const provider = (camera) => camera.provider || t('Other');
 const openId = computed(() => cctvView.view?.activeCameraId ?? null);
 const liveText = computed(() => (cctvView.live ? t('Live') : t('Paused')));
 
-// A row opened from the keyboard: the card takes the list's place, so focus
-// moves to its first action. A pointer open leaves focus be.
-async function openCamera(camera, event) {
-  leaveContextLists();
-  store.open({ layerId: 'cctv', id: String(camera.id), label: camera.name, lat: camera.lat, lon: camera.lon });
-  if (event?.detail !== 0) return;
-  // After the card has rendered.
-  await nextTick();
-  const card = globalThis.document?.getElementById('entity-card');
-  (card?.querySelector('.entity-card__actions button:not(:disabled)') ?? card?.querySelector('button:not(:disabled)'))?.focus({ preventScroll: true });
+function openCamera(camera) {
+  returnCenter.value ??= center.value;
+  if (!store.open({ layerId: 'cctv', id: String(camera.id), label: camera.name, lat: camera.lat, lon: camera.lon }))
+    resetReturn();
 }
 </script>
 
 <template>
   <ContextListCard
+    v-if="catalogKey !== 'off'"
     id="cctv"
+    header-close
+    allow-unlisted
+    :selected="selected"
+    :back-title="t('Close card')"
+    @back="store.clear({ dismiss: true })"
     :title="t('Cameras')"
     icon="videocam"
     :items="cameras"
     :item-key="(camera) => String(camera.id)"
     :filter="search"
     :query="contextNeedle"
+    :return-revision="returnRevision"
+    @release-order="discardCenter"
     :group-by="provider"
     @order="order = $event"
     @select="openCamera"
   >
+    <template #detail><EntityCard embedded /></template>
     <template #row="{ item: camera }">
       <i v-if="String(camera.id) === openId" class="view-context__dot" :class="cctvView.live ? 'view-context__dot--nominal' : 'view-context__dot--stale'" role="img" :aria-label="liveText" :title="liveText"></i>
       <span class="camera-list__text">

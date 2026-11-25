@@ -470,7 +470,7 @@ test('openNearest without the panel reports it instead of loading forever', asyn
   assert.equal(await layer.openNearest({ lat: 38.58, lon: -121.49 }), false);
   const { street } = layer.getUIState();
   assert.equal(street.loading, false);
-  assert.match(street.error, /Open the Street Level panel/);
+  assert.match(street.error, /Open Context to view street-level imagery/);
   assert.equal(provider.calls.mount, 0);
 });
 
@@ -517,7 +517,10 @@ test('a provider withdraws only the error it reported', async (t) => {
   actions.reportError('Sequence images unavailable');
   await layer.openImage('mapillary', 'img1');
   actions.reportError(null);
-  assert.match(layer.getUIState().street.error, /Open the Street Level panel/);
+  assert.match(
+    layer.getUIState().street.error,
+    /Open Context to view street-level imagery/,
+  );
 });
 test('an older nearest lookup that answers late cannot replace a newer one', async (t) => {
   const { lookups, nearestImage } = slowLookups();

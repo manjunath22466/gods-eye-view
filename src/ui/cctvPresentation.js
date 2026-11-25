@@ -1,4 +1,4 @@
-import { getLocale, keepCodesWithValues, msg, t, tn } from '../i18n/index.js';
+import { keepCodesWithValues, msg, t, tn } from '../i18n/index.js';
 import {
   cctvSourceLabelText,
   cctvSourceMessageText,
@@ -16,7 +16,7 @@ import {
   sheetForPanelId,
 } from './mobileSheets.js';
 
-const CAMERAS_SHEET = sheetForPanelId('cctv-panel');
+// The camera tools and the camera card both sit in Context.
 const CONTEXT_SHEET = sheetForPanelId('global-context-panel');
 
 export function _calBadgeLabel(badge) {
@@ -32,24 +32,10 @@ export function _calBadgeLabel(badge) {
   }
 }
 
-/** A picker option for a camera. */
-function pickerOption(camera, id = camera.id) {
-  return { value: id, label: `${camera.city} · ${camera.name}` };
-}
-
-/** The picker's closing line for the cameras the view leaves out. */
-function outsideNoteText(count) {
-  return tn(
-    count,
-    '{count} more camera outside this view · pan or zoom out',
-    '{count} more cameras outside this view · pan or zoom out',
-  );
-}
-
 /**
- * The panel's buttons, CAL chip and meta line for a camera state, as the CCTV
- * panel view renders them. Pure: the picker, frame, source badge, calibration
- * readout and summary stay with the controls.
+ * The camera tools' buttons, CAL chip and meta line for a camera state, as
+ * the card's Camera tools fold renders them. Pure: the frame, source badge,
+ * calibration readout and summary stay with the controls.
  * @param {object|null} state Camera layer UI state.
  * @param {boolean} enabled Whether the layer is on.
  */
@@ -58,7 +44,6 @@ export function presentCctvPanel(state, enabled) {
   const catalogCount = Number.isFinite(state?.count)
     ? state.count
     : cameras.length;
-  const activeId = state?.activeCameraId || '';
   const activeCamera = state?.activeCamera || null;
   // Tri-state (viewshed design §3b): off → on (wireframes) → viewshed
   // (color-coded volumes). The click handler cycles; this renders.
@@ -72,10 +57,12 @@ export function presentCctvPanel(state, enabled) {
   const badge = activeCamera?.calBadge || null;
   const dirty = !!activeCamera?.calDirty;
   return {
-    activeCameraId: activeId,
     enabled,
-    navDisabled: !enabled || catalogCount === 0,
-    focusDisabled: !enabled || catalogCount === 0 || !activeId,
+    // Which camera the tools and the live video belong to.
+    activeCameraId: state?.activeCameraId || '',
+    activeCameraLabel: [activeCamera?.city, activeCamera?.name]
+      .filter(Boolean)
+      .join(' · '),
     // Who publishes the active camera, and the owner a partner-supplied feed
     // names: the camera card shows both.
     source: activeCamera
@@ -183,13 +170,6 @@ export function _renderCctvState(state) {
     this._calibrationEdit?.(false);
   }
   this._cctvState = state || null;
-  // The light index, not `state.cameras`: reading that builds every camera's
-  // full state, which a large catalog cannot afford on each notification.
-  const cameras = state?.cameraIndex || state?.cameras || [];
-  // The picker lists what is in view; the catalog is every camera.
-  const catalogCount = Number.isFinite(state?.count)
-    ? state.count
-    : cameras.length;
   const enabled = !!state?.enabled && !!this.actions.isEnabled();
   const activeId = state?.activeCameraId || '';
   const activeCamera = state?.activeCamera || null;
@@ -208,34 +188,12 @@ export function _renderCctvState(state) {
   });
   if (this._cctvFrameWrap) this._cctvFrameWrap.hidden = Boolean(isQuebecCamera);
 
-  // Auto-expand the panel when the active camera CHANGES to a new non-null
-  // id while the layer is enabled. Covers click-on-globe, panel controls,
-  // and voice (selectCamera/cycleCamera/focusNearest all notify through
-  // this subscription). The last-seen guard keeps routine notifications
-  // from re-expanding a panel the user deliberately collapsed, and timed
-  // auto-hop transitions only expand on the first activation so the panel
-  // does not pop open on every hop.
-  const effectiveActiveId = enabled ? activeId || null : null;
-  const isFirstActivation = this._lastSeenCctvActiveId === null;
-  if (
-    effectiveActiveId &&
-    effectiveActiveId !== this._lastSeenCctvActiveId &&
-    (!state?.autoHop || isFirstActivation)
-  ) {
-    this.actions.setPanelCollapsed('cctv-panel', false, {
-      explicit: Boolean(state?.explicitSelection),
-    });
-  }
   // A camera someone picks (a click on the globe, next/previous, voice or
-  // Context's own lists) also opens its card in Context, even right after an
+  // Context's own lists) opens its card in Context, even right after an
   // empty-ground deselect left no camera active. The layer's own opening
-  // camera (`openingCamera`: the one nearest the view, moved again after
-  // each settled move until someone picks) and any camera on the render that
-  // turns the layer on open no card, so turning Cameras on and panning leave
-  // Context on what it shows. A timed Auto-hop step is quiet the same way
-  // (`openingCamera` while it activates), so it never replaces the open card
-  // or reopens Context; a manual or voice step with Auto-hop on opens its
-  // card.
+  // camera, the first enable render and an Auto-hop timer step stay quiet.
+  // A manual or voice step with Auto-hop on still opens its card.
+  const effectiveActiveId = enabled ? activeId || null : null;
   if (
     effectiveActiveId &&
     this._lastSeenCctvEnabled &&
@@ -249,101 +207,27 @@ export function _renderCctvState(state) {
     );
   }
   this._lastSeenCctvActiveId = effectiveActiveId;
-  // Switching the layer off closes the panel it opened: nothing is left to
-  // show. Only the on → off change collapses, so a panel the user opens
-  // while the layer is off stays open. Clear selected data layers and
-  // Context isolation keep the panel: the layer comes back with it. The
-  // panel chrome decides whether anything changes: a panel the desktop
-  // accordion only folded still has an open saved state to close.
-  if (
-    this._wasCctvEnabled &&
-    !enabled &&
-    !this.actions.preservePanelState?.()
-  ) {
-    this.actions.setPanelCollapsed('cctv-panel', true);
-  }
-  this._wasCctvEnabled = enabled;
   this._lastSeenCctvEnabled = enabled;
-
   this._updateCctvSyncChip(state?.loading, enabled);
-
-  if (this._cctvSelect) {
-    // A focused picker keeps the options it shows; blur re-renders it. One
-    // about to be disabled cannot hold focus, so it does not count.
-    const disabled = !enabled || cameras.length === 0;
-    const picking = document.activeElement === this._cctvSelect && !disabled;
-    // Cameras the view leaves out get one closing line, so a short list
-    // does not read as the whole catalog. A disabled layer has no view.
-    const outside = enabled ? Math.max(0, catalogCount - cameras.length) : 0;
-    let picker = this._picker;
-    // The index keeps its identity until the view or the active camera
-    // changes, so an unchanged list keeps its options; a new locale words
-    // the closing line again.
-    if (
-      !picking &&
-      (picker?.source !== cameras ||
-        picker.outside !== outside ||
-        picker.locale !== getLocale())
-    )
-      picker = {
-        source: cameras,
-        outside,
-        locale: getLocale(),
-        options: cameras.map((camera) => pickerOption(camera)),
-        note: outside ? outsideNoteText(outside) : '',
-      };
-    else if (
-      picking &&
-      activeId &&
-      activeCamera &&
-      !picker?.options.some((option) => option.value === activeId)
-    ) {
-      // A deferred rebuild can miss a camera activated meanwhile (auto-hop,
-      // voice); add it so the picker does not go blank. It is one fewer
-      // outside the view.
-      const options = [
-        pickerOption(activeCamera, activeId),
-        ...(picker?.options || []),
-      ];
-      const left = Math.max(0, catalogCount - options.length);
-      picker = {
-        ...picker,
-        options,
-        note: picker?.note && left ? outsideNoteText(left) : '',
-      };
-    }
-    this._picker = picker;
-    this.store.setPicker({
-      options: picker?.options || [],
-      note: picker?.note || '',
-      disabled,
-      // The active camera is always one of the listed records. With nothing
-      // active the closed picker shows the note when nothing is in view; a
-      // focused picker keeps its old options, so it only clears.
-      selection:
-        activeId && activeCamera
-          ? { value: activeId }
-          : !activeId
-            ? { index: !picking && cameras.length === 0 && outside ? 0 : -1 }
-            : null,
-    });
-  }
 
   this.store.publish(presentCctvPanel(state, enabled));
 
   const liveIntent =
     enabled && !!activeCamera?.isVideo && !activeCamera?.browserMediaUrl;
   this.store.setLive(liveIntent);
-  // A background tab, a collapsed panel or a closed phone sheet shows no
-  // picture; the observers and visibilitychange render again on showing.
+  // A background tab, collapsed camera tools or a closed phone sheet shows
+  // no picture; the observers and visibilitychange render again on showing.
   const body = globalThis.document?.body;
   const phone = body?.classList.contains(MOBILE_SHELL_CLASS);
   const sheet = body?.getAttribute(MOBILE_SHEET_ATTR);
   const tabShown = !!body && !document.hidden;
+  // The camera tools sit in Context's Camera settings tab: shown only while
+  // that tab is the one open and Context is not folded.
   const panelShown =
     tabShown &&
-    !this._cctvPanel?.classList.contains('collapsed') &&
-    (!phone || sheet === CAMERAS_SHEET);
+    Boolean(this._cctvPanel) &&
+    !this._cctvPanel.closest?.('[hidden], .collapsed') &&
+    (!phone || sheet === CONTEXT_SHEET);
   // Context's camera card shows the same still.
   const cardShown =
     tabShown &&
@@ -358,10 +242,9 @@ export function _renderCctvState(state) {
     // on Context's sheet, or in its bigger view over the map.
     const visible =
       liveIntent &&
-      (panelShown ||
-        (tabShown &&
-          Boolean(this._cctvVideo.closest?.('.cctv-preview')) &&
-          (!phone || sheet === CONTEXT_SHEET || popupShown)));
+      tabShown &&
+      Boolean(this._cctvVideo.closest?.('.cctv-preview')) &&
+      (!phone || sheet === CONTEXT_SHEET || popupShown);
     if (!visible || this._cctvVideoCameraId !== activeId) {
       this._cctvVideoSurface?.stop();
       this._cctvVideoSurface = null;

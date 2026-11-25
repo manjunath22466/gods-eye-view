@@ -101,7 +101,7 @@ function calNumberText(field, value) {
 }
 
 export function _activeCctvCameraId() {
-  return this._cctvState?.activeCameraId || this._cctvSelect?.value || '';
+  return this._cctvState?.activeCameraId || '';
 }
 
 export function _resetCctvCalibration() {

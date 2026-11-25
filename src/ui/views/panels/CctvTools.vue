@@ -10,10 +10,25 @@ import { useCctvStore } from '../../stores/cctv.js';
 
 // A camera's own tools, Context's Camera settings tab: View (projection,
 // coverage), Auto-hop (on/off and how long on each camera), Calibration and
-// the scene summary. The CCTV panel hosts them. These controls keep the
-// element ids CctvControls reads once at start-up, so they are always in the
-// page and Context moves them into the tab while it shows.
-const { view, summary } = storeToRefs(useCctvStore());
+// the scene summary. The standalone CCTV panel is retired. These controls
+// keep the element ids CctvControls reads once at start-up, so they are
+// always in the page and Context moves them into the tab while it shows. The frame and video
+// surface the controls draw into stay here, hidden; the card's top image
+// shows the frame, and a live video's canvas moves into it.
+const { view, frame, live, summary } = storeToRefs(useCctvStore());
+// The frame's request state, as data attributes that read "true" or are
+// empty; none until the controls first publish.
+const flag = (on) => (on ? 'true' : '');
+const frameData = computed(() =>
+  frame.value
+    ? {
+        'data-camera-id': frame.value.cameraId,
+        'data-current-src': frame.value.currentSrc,
+        'data-loading': flag(frame.value.loading),
+        'data-error': flag(frame.value.error),
+      }
+    : {},
+);
 const coverageState = computed(() => {
   const mode = view.value?.coverage?.mode;
   return mode === 'viewshed' ? t('Viewshed') : mode === 'on' ? t('On') : t('Off');
@@ -41,6 +56,11 @@ const CAL_ROWS = [
 
 <template>
   <div class="cctv-tools-root">
+    <!-- Stays in the hidden home: only the fold below moves to a card. -->
+    <div id="cctv-frame-wrap" class="cctv-frame-wrap" hidden>
+      <img id="cctv-frame" alt="" :class="{ active: frame?.hasFrame }" :src="frame?.src || undefined" :hidden="live" v-bind="frameData" />
+      <canvas id="cctv-video" class="cctv-frame" :hidden="!live" role="img" :aria-label="view?.activeCameraLabel || t('Camera view')"></canvas>
+    </div>
     <div id="cctv-tools" class="cctv-tools">
       <section class="cctv-tools__group" :aria-label="t('View')">
         <h5 class="cctv-tools__head">{{ t('View') }}</h5>

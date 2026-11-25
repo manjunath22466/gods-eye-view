@@ -14,11 +14,18 @@ const css = readFileSync(
   'utf8',
 );
 
-test('the Local RTL-SDR card lives inside the Radio panel with every control', () => {
+test('the Local RTL-SDR card lives in its own home, not Radio’s fold, with every control', () => {
   const radioStart = html.indexOf('id="radio-panel"');
+  const radioEnd = html.indexOf('</details>', radioStart);
+  const homeStart = html.indexOf('class="sdr-card-home"');
   const cardStart = html.indexOf('id="sdr-radio-card"');
-  const radioEnd = html.indexOf('</section>', radioStart);
-  assert.ok(radioStart >= 0 && cardStart > radioStart && cardStart < radioEnd);
+  assert.ok(radioStart >= 0 && radioEnd > radioStart, 'the fold');
+  assert.ok(
+    cardStart < radioStart || cardStart > radioEnd,
+    'the card is not in the fold',
+  );
+  assert.ok(homeStart >= 0 && cardStart > homeStart, 'it is in its home');
+  assert.equal(html.split('id="sdr-radio-card"').length, 2, 'once');
   for (const id of [
     'sdr-connection-state',
     'sdr-connect-btn',

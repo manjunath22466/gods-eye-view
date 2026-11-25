@@ -57,7 +57,8 @@ function onVisibilityChange() {
   if (visible()) ageResume.value++;
 }
 let timer = null;
-// Keep the presentation clock and share its eligible pulses with the bridge.
+// Inspect mounts this view while nothing is selected. Other tabs unmount it,
+// and a hidden page skips its ticks.
 onMounted(() => {
   doc?.addEventListener('visibilitychange', onVisibilityChange);
   timer = setInterval(() => {
@@ -206,7 +207,7 @@ const layerRows = computed(() =>
   }),
 );
 // The layers that get a tile or block of their own.
-const liveLayers = computed(() => layerRows.value.filter((layer) => !shownApart(layer.id, missions.enabled)));
+const liveLayers = computed(() => layerRows.value.filter((layer) => layer.id !== 'cctv' && !shownApart(layer.id, missions.enabled)));
 const layerById = computed(() => Object.fromEntries(liveLayers.value.map((layer) => [layer.id, layer])));
 // A feed in trouble keeps its line, Space Missions' index included.
 const problems = computed(() => layerRows.value.filter((layer) => layer.problem));
@@ -284,7 +285,7 @@ const lists = computed(() => {
     radiusKm: contextRadiusKm.value,
     limit: contextNeedle.value ? 12 : 3,
     query: contextNeedle.value,
-    excludeLayers: [...CONTEXT_EXEMPT, ...(missions.enabled ? [MISSIONS_LAYER] : []), ...nonItemIds.value],
+    excludeLayers: [...CONTEXT_EXEMPT, 'cctv', ...(missions.enabled ? [MISSIONS_LAYER] : []), ...nonItemIds.value],
   });
 });
 // A count tile per layer: what it has within the radius, or, at globe view,
@@ -328,8 +329,6 @@ const tiles = computed(() => {
   if (globeView.value)
     return [
       ...liveLayers.value.map((layer) => {
-        // CCTV reports a loaded camera count without providing analyst rows.
-        if (layer.id === 'cctv' && layer.total !== null) return { ...layer, count: layer.total };
         // Fields, overlays and incident scenes use their state here.
         if (INCIDENT_SCENES.has(layer.id) || layerKind(layer.id) !== 'items') return { ...layer, count: null, state: stateText(layer) };
         if (layer.total !== null) lastCounts.set(layer.id, layer.total);
@@ -597,7 +596,7 @@ function openSuggested() {
       <p class="view-context__region">{{ anyOn ? `${clock} · ${t('camera {height}', { height: cameraText })}` : t('No layers on') }}</p>
     </template>
     <template v-else>
-      <p class="view-context__eyebrow">{{ t('In view') }} · {{ t('Nothing selected') }}</p>
+      <p class="view-context__eyebrow">{{ t('In view') }}<template v-if="!store.card"> · {{ t('Nothing selected') }}</template></p>
       <h3 class="view-context__title">
         <span>{{ placeName }}</span>
         <UiButton v-if="thisViewPin" class="view-context__pin" :pressed="viewPinned" pressed-class="is-on" :label="viewPinned ? t('Unpin this view') : t('Pin this view')" @click="toggleViewPin">
@@ -678,6 +677,7 @@ function openSuggested() {
         </div>
       </div>
 
+      <slot name="cameras" />
       <h4 v-if="tiles.length || sideTiles.length" class="view-context__label">{{ globeView ? t('Layers on') : t('Within {radius}', { radius: radiusText }) }}</h4>
       <!-- Globe view: each layer once, its name, count and feed state, and
            what its count is made of. -->
@@ -736,7 +736,7 @@ function openSuggested() {
       <p v-if="globeView" class="view-context__hint">{{ t('Click anything on the globe to see its card.') }}</p>
       <template v-else>
         <NearbyLists :lists="lists" :title="t('Nearby · {radius}', { radius: radiusText })" @focus-lost="onNearbyFocusLost" />
-        <p v-if="contextNeedle && nothingNearby" class="view-context__empty">{{ t('Nothing nearby matches “{text}”.', { text: contextSearchText.trim() }) }}</p>
+        <p v-if="contextNeedle && nothingNearby && !layerRows.some(layer => layer.id === 'cctv')" class="view-context__empty">{{ t('Nothing nearby matches “{text}”.', { text: contextSearchText.trim() }) }}</p>
 
       </template>
       <!-- Suggested layers: open Data Layers with them picked out. -->

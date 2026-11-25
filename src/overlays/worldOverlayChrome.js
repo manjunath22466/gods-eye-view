@@ -22,7 +22,6 @@ export const WORLD_OVERLAY_OCCLUDER_SELECTORS = Object.freeze([
   '.hud-bottom-bar',
   '#space-mission-panel',
   '#space-mission-panel-host',
-  '#military-awareness-panel',
   '#bhote-koshi-event-panel',
   // Only the cockpit's solid windows obstruct readable cards.
   '#cockpit-context',

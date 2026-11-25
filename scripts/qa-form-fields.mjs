@@ -37,15 +37,14 @@ try {
   const inventory = await page.evaluate(() => {
     const selects = [
       'scene-select',
-      'cctv-camera-select',
+      'cctv-auto-hop-sec',
       'hud-layout-select',
-      'radio-filter',
       'sdr-gain-select',
     ].map((id) => document.getElementById(id));
     return {
       ids: selects.map((node) => node.id),
       shared:
-        selects.length === 5 &&
+        selects.length === 4 &&
         selects.every((node) => node.classList.contains('gev-field')),
       native: selects.every(
         (node) =>
@@ -57,7 +56,7 @@ try {
     };
   });
   check(
-    'all five panel dropdowns retain native select semantics and shared surface',
+    'all four panel dropdowns retain native select semantics and shared surface',
     inventory.shared && inventory.native,
     inventory,
   );
@@ -69,10 +68,6 @@ try {
       syncShare: false,
     });
     manager.setPanelCollapsed('scene-panel', false, {
-      persist: false,
-      syncShare: false,
-    });
-    manager.setPanelCollapsed('cctv-panel', false, {
       persist: false,
       syncShare: false,
     });
@@ -93,14 +88,9 @@ try {
       isEnabled: () => true,
       toggleEnabled: async () => true,
       setParams: (...args) => window.__qaFormCalls.push(args),
-      runExplicitFocus: (select, focus) => focus(select()),
       showToast: () => {},
     };
-    owner.cctv = {
-      setParams() {},
-      focusCamera: (id) => window.__qaFormCalls.push(['focus', id]),
-      selectCamera: (id) => id,
-    };
+    owner.cctv = { setParams() {} };
     owner._cctvState = {
       enabled: true,
       activeCameraId: 'a',
@@ -161,31 +151,25 @@ try {
     'native numeric validity preserves underflow, overflow, steps and empty drafts',
     validity,
   );
-  await page.select('#cctv-camera-select', 'b');
-  await page.waitForFunction(() => window.__qaFormCalls.length === 2);
-  const cameraSelection = await page.evaluate(() => window.__qaFormCalls);
-  check(
-    'camera dropdown retains selection, focus and user-origin dispatch',
-    cameraSelection[0][0] === 'focus' &&
-      cameraSelection[0][1] === 'b' &&
-      cameraSelection[1][0].selectedCameraId === 'b' &&
-      cameraSelection[1][1].origin === 'user',
-    cameraSelection,
-  );
   await page.evaluate(() => {
-    window.__qaFormCalls = [];
-    document.getElementById('cctv-camera-select').disabled = true;
+    document.getElementById('hud-layout-select').disabled = true;
   });
   await page.focus('#scene-select');
-  await page.focus('#cctv-camera-select');
+  await page.focus('#hud-layout-select');
   check(
     'disabled native selects cannot receive keyboard focus',
     await page.evaluate(
-      () => document.activeElement.id !== 'cctv-camera-select',
+      () => document.activeElement.id !== 'hud-layout-select',
     ),
   );
   await page.evaluate(() => {
-    document.getElementById('cctv-camera-select').disabled = false;
+    document.getElementById('hud-layout-select').disabled = false;
+  });
+  // The camera tools wait in a hidden home until a camera card's Camera
+  // settings tab shows them. With fixture ports there is no camera card, so
+  // the editor checks show the home itself.
+  await page.evaluate(() => {
+    document.querySelector('.cctv-tools-home').hidden = false;
   });
   const begin = async (field) => {
     await page.evaluate((field) => {
@@ -275,7 +259,7 @@ try {
   );
 
   await page.evaluate(() => {
-    for (const panel of ['pp-toggles', 'scene-panel', 'cctv-panel'])
+    for (const panel of ['pp-toggles', 'scene-panel'])
       window.__godsEyeView.styleManager.setPanelCollapsed(panel, false, {
         persist: false,
         syncShare: false,
@@ -288,7 +272,7 @@ try {
     for (const width of [1440, 620, 390]) {
       await page.setViewport({ width, height: 900 });
       const layout = await page.evaluate(() => {
-        const ids = ['scene-select', 'cctv-camera-select', 'hud-layout-select'];
+        const ids = ['scene-select', 'hud-layout-select'];
         return ids.map((id) => {
           const node = document.getElementById(id),
             rect = node.getBoundingClientRect(),
@@ -396,25 +380,23 @@ try {
     { timeout: 60000 },
   );
   await page.evaluate(() => {
-    for (const panel of ['pp-toggles', 'scene-panel', 'cctv-panel'])
+    for (const panel of ['pp-toggles', 'scene-panel'])
       window.__godsEyeView.styleManager.setPanelCollapsed(panel, false, {
         persist: false,
         syncShare: false,
       });
   });
   await page.evaluate(() => {
-    for (const panel of ['pp-toggles', 'scene-panel', 'cctv-panel'])
+    for (const panel of ['pp-toggles', 'scene-panel'])
       window.__godsEyeView.styleManager.setPanelCollapsed(panel, false, {
         persist: false,
         syncShare: false,
       });
   });
   const translated = await page.evaluate(() => {
-    const nodes = [
-      'scene-select',
-      'cctv-camera-select',
-      'hud-layout-select',
-    ].map((id) => document.getElementById(id));
+    const nodes = ['scene-select', 'hud-layout-select'].map((id) =>
+      document.getElementById(id),
+    );
     return (
       document.documentElement.lang === 'ru' &&
       nodes.every(

@@ -56,6 +56,11 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // area scopes and the osm-places layer; natural-region candidates and the
     // tightened area tool wording follow review.
     // control_cockpit states the own-layer entry rule (Contacts not required).
+    // Contacts leaves the set_context_mode enum and description: Context's
+    // Nearby view replaced it.
+    // Retired Radio/CCTV panel ids say they open Context; control_cctv's
+    // next/prev walk Context's Cameras list by view centre, and focus is
+    // the card's Fly to.
     // move_camera tilt takes an optional pitchDeg angle, described as
     // absolute with its -45 default, with steps sent as a direction.
     // show_street_level (map, source, photo) adds one tool.
@@ -64,7 +69,14 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // visual style; set_cyber_sonar is excluded above).
     // The Space Missions panel adds one panel target.
     // Fire Perimeters queries add lastGrowthTime.
-    '2be49b7634a7b74b756a68cf80835ee36411e087edb549eb39f1ce7310afe60f',
+    // Re-derived: the retired Weather, Recent Imagery and Space Missions
+    // panel ids stay in set_panel_open's enum as aliases, described as
+    // opening Context on their list.
+    // set_panel_open says space-missions turns the layer on.
+    // Nearby clears the selected card; ordinary Open Context preserves it.
+    // set_context_mode says Space Missions turns its layer on and shows its
+    // list, and off turns it off.
+    'b9a7316dc3c8a478fd42ed7bd4f25263be8f14712bc91a98cc2d3e3a7edf7242',
   );
 });
 
@@ -248,6 +260,22 @@ test('all legacy action arguments are byte-identical after removing the delibera
     'noir',
   ]);
   visualStyle.enum = [...visualStyle.enum, 'snow'];
+  // Contacts is retired from set_context_mode; restore it for the legacy pin.
+  const contextMode = legacy.find((tool) => tool.name === 'set_context_mode')
+    .parameters.properties.mode;
+  assert.deepEqual(contextMode.enum, [
+    'off',
+    'nearby',
+    'space-missions',
+    'missions',
+  ]);
+  contextMode.enum = [
+    'off',
+    'contacts',
+    'flights',
+    'space-missions',
+    'missions',
+  ];
   // Derived by applying the same removals to the 4b56d0e9 actionSchemas.
   assert.equal(
     createHash('sha256').update(JSON.stringify(legacy)).digest('hex'),

@@ -3,14 +3,18 @@ import { markRaw, shallowRef } from 'vue';
 
 /**
  * @typedef {object} StreetLevelHandlers
- * @property {(stop: number) => void} setSinceStop Record a SINCE stop.
- * @property {(stop: number) => string} describeSinceStop A stop's readout.
+ * @property {(mode: string) => void} [setRenderMode] Fit or fill the photo.
+ * @property {(id: string) => void} [openPhoto] Open a remembered photo again.
+ * @property {(id: string, options?: {pendingOnly?: boolean}) => void} [closePhoto] Close the photo whose card went.
+ * @property {() => void} [cancelDockedPhoto] Cancel and restore the dock's current photo.
+ * @property {() => void} [stopPlayback] Stop a playing sequence, out of sight.
  */
 
 /**
- * The Street Level panel as its view renders it. StreetLevelControls owns
- * the presentation (`presentStreetLevelPanel()`), the viewer and EXPAND: it
- * publishes here and attaches the actions the view forwards.
+ * Street Level as its photo viewer (StreetLevelViewer.vue, on the photo's
+ * card in Context) and the card render it. StreetLevelControls owns the
+ * presentation (`presentStreetLevelPanel()`), the viewer and EXPAND: it
+ * publishes here and attaches the actions the views forward.
  */
 export const useStreetLevelStore = defineStore('gev-street-level', () => {
   /** The presented panel; null until an owner renders, then its last render. */
@@ -67,11 +71,6 @@ export const useStreetLevelStore = defineStore('gev-street-level', () => {
     return owner?.handlers[name]?.(...args);
   }
 
-  /** The readout of a SINCE stop while its thumb is dragged. */
-  function describeSinceStop(stop) {
-    return owner?.handlers.describeSinceStop?.(stop) ?? '';
-  }
-
   return {
     view,
     expanded,
@@ -84,6 +83,5 @@ export const useStreetLevelStore = defineStore('gev-street-level', () => {
     setEmbedOverlay,
     detach,
     act,
-    describeSinceStop,
   };
 });

@@ -14,15 +14,8 @@ const SHARE_PANEL_STATE_SPECS = Object.freeze([
   { id: 'control-panel', pinnable: true },
   { id: 'location-bar', pinnable: true },
   { id: 'data-panel' },
-  { id: 'cctv-panel' },
-  { id: 'weather-panel' },
-  { id: 'news-panel' },
-  { id: 'recent-imagery-panel' },
-  { id: 'street-level-panel' },
-  { id: 'radio-panel' },
   { id: 'scene-panel' },
   { id: 'global-context-panel' },
-  { id: 'space-missions-panel' },
   { id: 'pp-toggles' },
   { id: 'param-slider-panel' },
 ]);
@@ -40,17 +33,10 @@ const PINNABLE_PANEL_IDS = new Set(
 /** Standard map-view panels cleared out of the way on a fresh Cockpit entry. */
 const COCKPIT_ENTRY_COLLAPSE_PANEL_IDS = Object.freeze([
   'data-panel',
-  'cctv-panel',
-  'weather-panel',
-  'news-panel',
-  'recent-imagery-panel',
-  'street-level-panel',
   'scene-panel',
   'utilities-panel',
   'pp-toggles',
   'global-context-panel',
-  'space-missions-panel',
-  'radio-panel',
 ]);
 
 /** Own panel disclosure, docking, persistence and Cockpit rail restoration. */
@@ -459,9 +445,9 @@ export class PanelChrome {
     const nextCollapsed = Boolean(collapsed);
     const wasAutoCollapsed = Boolean(this._shownPanel(panelEl).auto);
     // One panel is open per desktop side: opening a side panel, whether the
-    // user asked or a feature revealed it (Street Level's viewer, a selected
-    // radio station), owns the whole accordion, including peers that were
-    // only presentation-collapsed during a saved-state restore.
+    // user asked or a feature revealed it, owns the whole accordion,
+    // including peers that were only presentation-collapsed during a
+    // saved-state restore.
     const sideStack = [this._leftPanelStack, this._rightPanelStack].find(
       (stack) => stack && panelEl.parentElement === stack,
     );
@@ -489,12 +475,9 @@ export class PanelChrome {
     const leftOwnerPanel = this._leftPanelStack?.contains(panelEl)
       ? panelEl
       : null;
-    const rightOwnerPanel =
-      panelId === 'radio-panel'
-        ? document.getElementById('global-context-panel')
-        : this._rightPanelStack?.contains(panelEl)
-          ? panelEl
-          : null;
+    const rightOwnerPanel = this._rightPanelStack?.contains(panelEl)
+      ? panelEl
+      : null;
     const priorLeftOwner = this._panelLayout._leftStackPreferredPanelId;
     const priorRightOwner = this._panelLayout._rightStackPreferredPanelId;
     if (!restore && !nextCollapsed && leftOwnerPanel) {
@@ -516,22 +499,6 @@ export class PanelChrome {
       rightOwnerPanel?.id === this._panelLayout._rightStackPreferredPanelId
     ) {
       this._panelLayout._rightStackPreferredPanelId = null;
-    }
-    // Reveal Radio's owner before the no-op check: the nested section may
-    // already be expanded while its Context parent is closed.
-    const contextPanel = document.getElementById('global-context-panel');
-    if (
-      !nextCollapsed &&
-      panelId === 'radio-panel' &&
-      contextPanel &&
-      this._shownPanel(contextPanel).collapsed
-    ) {
-      this.setPanelCollapsed('global-context-panel', false, {
-        explicit,
-        restore,
-        persist,
-        syncShare,
-      });
     }
     if (
       this._shownPanel(panelEl).collapsed === nextCollapsed &&
@@ -596,9 +563,6 @@ export class PanelChrome {
     }
     if (this._rightPanelStack?.contains(panelEl)) {
       this._scheduleRightPanelLayout({ reconsiderAutoCollapse: true });
-    }
-    if (panelId === 'cctv-panel') {
-      this._syncCctvPanelViewport();
     }
     this._lifetime.frame(() => this._updateCommandDockTrayStack());
     this._scheduleLeftPanelLayout({

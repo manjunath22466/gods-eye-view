@@ -45,10 +45,10 @@ function presentAwarenessReason(summary = {}) {
 }
 
 /**
- * The Contacts panel as a view renders it. The layer presents a plain view
- * object (`standby`, `results` or `empty`) and publishes it to subscribers;
- * Core's AwarenessPanel component renders it and calls the layer's
- * navigation methods. Text arrives in the UI language.
+ * The Contacts panel's view. The layer presents a plain view object
+ * (`standby`, `results` or `empty`) and publishes it to subscribers. The
+ * application no longer subscribes: the Contacts panel is retired. Text
+ * arrives in the UI language.
  */
 export function createPanel({ state: layerState, parts }) {
   /** Publish a fresh view unless it is the one already shown. */

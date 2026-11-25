@@ -5,8 +5,8 @@
  * weather layer on and exercises it (history playback, a wind reading, a
  * storm selection), turns them all off, and asserts the scene is back to the
  * baseline (imagery layers on the globe and the tileset, primitives, ground
- * primitives, data sources, entities, camera/scene listeners, the weather
- * panel, the wind reading marker). Then it enables a set of non-weather
+ * primitives, data sources, entities, camera/scene listeners, the Context
+ * Weather list, the wind reading marker). Then it enables a set of non-weather
  * layers one at a time and samples the render rate, long tasks and console
  * errors for each, and repeats the same non-weather sequence in a control
  * page that never had weather on. Writes <out>/<label>/results.json.
@@ -137,8 +137,10 @@ const snapshot = (page) =>
         tick: v.clock.onTick.numberOfListeners,
       },
       dom: {
-        weatherPanelHidden:
-          document.getElementById('weather-panel')?.hidden ?? null,
+        // Weather's list is a Context list tab; its standalone panel is retired.
+        weatherListShown:
+          document.getElementById('context-list-weather')?.checkVisibility() ??
+          null,
         weatherCards: document.querySelectorAll('.weather-card').length,
         windReading: !!document.querySelector(
           '.gev-wind-reading:not([hidden])',

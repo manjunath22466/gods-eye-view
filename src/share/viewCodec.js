@@ -147,7 +147,12 @@ export const SHARE_VIEW_PANELS = freezeAll([
     collapsed: true,
   },
   { number: 2, id: 'data-panel', token: 'd', pinnable: false, collapsed: true },
+  // The CCTV panel is retired (its cameras' cards open in Context); its code
+  // stays reserved so old links decode, and its state is ignored on restore.
   { number: 3, id: 'cctv-panel', token: 'v', pinnable: false, collapsed: true },
+  // The Recent Imagery panel is retired too (its readout is a list tab in
+  // Context while the layer is on); its code stays reserved so old links
+  // decode, and its state is ignored on restore.
   {
     number: 4,
     id: 'recent-imagery-panel',
@@ -155,6 +160,9 @@ export const SHARE_VIEW_PANELS = freezeAll([
     pinnable: false,
     collapsed: false,
   },
+  // The Street Level panel is retired too (a photo's card opens in Context,
+  // its filters are on its Data Layers row); its code stays reserved so old
+  // links decode, and its state is ignored on restore.
   {
     number: 5,
     id: 'street-level-panel',
@@ -162,6 +170,9 @@ export const SHARE_VIEW_PANELS = freezeAll([
     pinnable: false,
     collapsed: true,
   },
+  // The Radio panel is retired as well (its station list and tuner are in
+  // Context); its code stays reserved so old links decode, and its state is
+  // ignored on restore.
   {
     number: 6,
     id: 'radio-panel',
@@ -191,6 +202,9 @@ export const SHARE_VIEW_PANELS = freezeAll([
     pinnable: false,
     collapsed: false,
   },
+  // The Space Missions panel is retired as well (its list is a tab in
+  // Context while the layer is on); its code stays reserved so old links
+  // decode, and its state is ignored on restore.
   {
     number: 11,
     id: 'space-missions-panel',

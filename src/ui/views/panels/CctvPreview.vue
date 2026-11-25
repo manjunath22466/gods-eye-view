@@ -76,9 +76,10 @@ const name = computed(() => params.value.get('label') || '');
 // The live video is named for its camera, as the still it replaces is.
 const liveName = computed(() => {
   const id = props.cameraId;
-  const option = cctv.picker?.options?.find((entry) => entry.value === id)?.label;
+  const active = view.value;
+  const cameraName = active?.activeCameraId === id ? active.activeCameraLabel : '';
   const card = cards.card?.layerId === 'cctv' && String(cards.card.identity?.id) === id ? cards.card.title : '';
-  return name.value || option || card || t('Camera view');
+  return name.value || cameraName || card || t('Camera view');
 });
 // The panel's meta line, e.g. "US-290 · HDG 248° · FOV 44° · RANGE 145m · … · TxDOT · …".
 const facts = computed(() => {

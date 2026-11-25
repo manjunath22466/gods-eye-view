@@ -48,24 +48,27 @@ Next iteration candidates:
 
 ---
 
-### CCTV panel can appear "missing"
+### A rail panel can appear "missing"
 Status: Open (workaround available)
 
 Context:
 - The rails lay their panels out themselves. No panel is dragged into place at
   startup and no stored position is read, so a panel that looks missing is
-  collapsed or its layer is off rather than parked off-screen. The CCTV panel
-  starts collapsed and stays that way until you open it or a camera activates.
+  collapsed or its layer is off rather than parked off-screen. The Context
+  panel, for example, starts collapsed and stays that way until you open it or
+  pick something. (Cameras and street-level photos have no panel of their own:
+  a picked camera's or photo's card opens in Context, and Street Level's
+  filters are on its row in Data Layers.)
 
 Workaround:
-- Check that the CCTV layer is enabled in the Layers panel, then open the panel
-  from its header control; it also opens on its own when a camera activates.
+- Check that the panel's layer is enabled in the Layers panel, then open the
+  panel from its rail icon.
 - To force it open on an ordinary load, store the expanded state and reload. In
   the browser console:
-  - `localStorage.setItem('godsEyeView.v6.panelCollapsed.cctv-panel', '0');`
+  - `localStorage.setItem('godsEyeView.v6.panelCollapsed.global-context-panel', '0');`
   - `location.reload();`
 - Removing that key instead returns the panel to its default, which is collapsed:
-  - `localStorage.removeItem('godsEyeView.v6.panelCollapsed.cctv-panel');`
+  - `localStorage.removeItem('godsEyeView.v6.panelCollapsed.global-context-panel');`
   - `location.reload();`
 - Neither console line changes anything when the page was opened from a share
   link: a shared view is laid out from the link, not from what this browser has

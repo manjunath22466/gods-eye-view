@@ -31,6 +31,8 @@ import UiButton from '../../kit/UiButton.vue';
 import UiCloseButton from '../../kit/UiCloseButton.vue';
 import UiEmpty from '../../kit/UiEmpty.vue';
 import UiIcon from '../../kit/UiIcon.vue';
+import { useCockpitStore } from '../../stores/cockpit.js';
+import { rideFaceFor } from '../../rideFace.js';
 
 // The Context panel's card for one thing on the map. Every card is the same
 // card, in one order: its top image, then its name with one small line on
@@ -38,6 +40,7 @@ import UiIcon from '../../kit/UiIcon.vue';
 // numbers, how it is changing, what is nearby, and the facts folded under
 // More details. It reads from the entity card store, which the globe click,
 // the omnibar and the nearby lists all fill.
+defineProps({ embedded: Boolean });
 const store = useEntityCardStore();
 const { card, lost, tick, fromPin, away, finding, located } = storeToRefs(store);
 // A place or an airport: its own card parts.
@@ -508,16 +511,10 @@ const kindLine = computed(() => {
 // to otherwise. The Ask icon opens the Chat with this item attached.
 const leadAction = computed(() => (store.canCockpit() ? 'cockpit' : store.canFollow() ? 'follow' : 'fly'));
 // The lead names the view it enters: an aircraft's cockpit, a satellite's
-// orbital view, a vessel's bridge, a train's or a bus's cab.
-const RIDE_FACES = {
-  flights: { icon: 'flight', label: msg('Enter Cockpit') },
-  military: { icon: 'flight', label: msg('Enter Cockpit') },
-  satellites: { icon: 'satellite_alt', label: msg('Orbital view') },
-  'ais-live-vessels': { icon: 'directions_boat', label: msg('Bridge view') },
-};
-const CAB_VIEW = { icon: 'train', label: msg('Cab view') };
-const rideFace = computed(() => RIDE_FACES[card.value?.layerId] || CAB_VIEW);
-
+// orbital view, a vessel's bridge, a subject provider's own face, or a
+// train's or a bus's cab (rideFace.js).
+const cockpitStore = useCockpitStore();
+const rideFace = computed(() => rideFaceFor(card.value, cockpitStore.presence));
 </script>
 
 
@@ -541,7 +538,7 @@ const rideFace = computed(() => RIDE_FACES[card.value?.layerId] || CAB_VIEW);
               <span v-if="sourceLine" class="entity-card__source-line" :class="`entity-card__source-line--${sourceLine.tone}`">{{ sourceLine.text }}</span>
             </div>
             <UiButton v-if="away && card.moving" class="entity-card__find" data-entity-find :label="t('Find it')" :title="t('Find it')" :disabled="finding === 'finding'" @click="store.locate()"><UiIcon name="my_location" :size="null" /></UiButton>
-            <UiCloseButton class="entity-card__close" glyph="icon" :label="t('Close card')" :title="t('Close card')" @click="store.clear({ dismiss: true })" />
+            <UiCloseButton v-if="!embedded" class="entity-card__close" glyph="icon" :label="t('Close card')" :title="t('Close card')" @click="store.clear({ dismiss: true })" />
           </header>
 
           <div v-if="card.warnings?.length" class="entity-card__warning" role="alert">

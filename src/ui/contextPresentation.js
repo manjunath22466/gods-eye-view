@@ -8,7 +8,7 @@ export function _syncContextModeButtons() {
   this.actions.scheduleLayout();
 }
 
-/** Publish the mode switch and the nearby sites search to the view. */
+/** Publish the Context mode state to the `publish` port. */
 export function _presentContext() {
   if (this.destroyed) return;
   const flightsActive = this._contextMode === 'flights';
@@ -17,6 +17,5 @@ export function _presentContext() {
     enabled: flightsActive,
     flightsActive,
     busy: Boolean(this._contextModeChanging),
-    installationsBusy: this._installationsSearchBusy,
   });
 }

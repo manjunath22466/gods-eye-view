@@ -137,9 +137,7 @@ body.mobile-shell #right-context-rail {
 }
 
 body.mobile-shell[data-mobile-sheet='layers'] #left-panel-stack,
-body.mobile-shell[data-mobile-sheet='cameras'] #right-context-rail,
 body.mobile-shell[data-mobile-sheet='context'] #right-context-rail,
-body.mobile-shell[data-mobile-sheet='missions'] #right-context-rail,
 /* Visual opens from the left rail on wider screens, so it lives in the left
    stack and the More sheet is that stack showing Visual alone. */
 body.mobile-shell[data-mobile-sheet='more'] #left-panel-stack {
@@ -168,12 +166,7 @@ body.mobile-shell[data-mobile-sheet='more'] #left-panel-stack {
 }
 
 body.mobile-shell #left-panel-stack > *,
-body.mobile-shell #right-context-rail > *,
-/* Rail rules show expanded Weather, News and Recent Imagery by id; on phones
-   they belong to the Context sheet only. */
-body.mobile-shell #right-context-rail > #weather-panel,
-body.mobile-shell #right-context-rail > #news-panel,
-body.mobile-shell #right-context-rail > #recent-imagery-panel {
+body.mobile-shell #right-context-rail > * {
   display: none;
 }
 
@@ -184,27 +177,9 @@ body.mobile-shell[data-mobile-sheet='layers']
   #left-panel-stack
   > #utilities-panel,
 body.mobile-shell[data-mobile-sheet='layers'] #left-panel-stack > #scene-panel,
-body.mobile-shell[data-mobile-sheet='cameras']
-  #right-context-rail
-  > #cctv-panel,
-body.mobile-shell[data-mobile-sheet='cameras']
-  #right-context-rail
-  > #street-level-panel,
 body.mobile-shell[data-mobile-sheet='context']
   #right-context-rail
   > #global-context-panel,
-body.mobile-shell[data-mobile-sheet='context']
-  #right-context-rail
-  > #weather-panel:not([hidden]),
-body.mobile-shell[data-mobile-sheet='context']
-  #right-context-rail
-  > #news-panel:not([hidden]),
-body.mobile-shell[data-mobile-sheet='context']
-  #right-context-rail
-  > #recent-imagery-panel:not([hidden]),
-body.mobile-shell[data-mobile-sheet='missions']
-  #right-context-rail
-  > #space-missions-panel:not([hidden]),
 body.mobile-shell[data-mobile-sheet='more'] #left-panel-stack > #pp-toggles {
   position: relative;
   inset: auto;
@@ -213,12 +188,6 @@ body.mobile-shell[data-mobile-sheet='more'] #left-panel-stack > #pp-toggles {
   max-width: none;
   margin: 0;
   transform: none;
-}
-
-/* The sheet scrolls: News keeps its height instead of shrinking under the
-   panel below it, as the rail makes it do on a desktop. */
-body.mobile-shell #right-context-rail > #news-panel:not(.collapsed) {
-  flex-shrink: 0;
 }
 
 /* ── Dock: voice floats above the tab bar; search and presets are sheets ─ */

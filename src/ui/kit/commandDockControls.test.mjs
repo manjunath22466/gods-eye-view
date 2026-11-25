@@ -3,9 +3,9 @@
 // shows while nothing is picked hand-writes a <button> or a Material Symbols
 // span. The dock's style buttons are pressed toggles with `active`, its
 // glyphs (◯ ▦ 🌙 🌡️ ✦ ◐, the search 🔎 and the collapse +) are text
-// characters, not Material symbols, and stay plain text. Context's tabs and
-// its Contacts mode button are `role="tab"` controls: they say they are
-// chosen with `aria-selected`, never `aria-pressed`.
+// characters, not Material symbols, and stay plain text. Context's tabs are
+// `role="tab"` controls: they say they are chosen with `aria-selected`, which
+// their stylesheet keys on, never `aria-pressed`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -40,12 +40,8 @@ const views = {
   // search toggle.
   'CommandDockView.vue': { markup: dock, buttons: 15, icons: 0, closes: 0 },
   // The collapsed title's Expand, Search and Expand in the header, the
-  // Inspector and Properties tabs, Contacts, the cockpit entry, SEARCH
-  // NEARBY SITES and the TR-3B chip, the Inspect, Camera settings, Lists
-  // and Pinned tabs and a list's own sub-tab. The glyphs: Search, Expand,
-  // the two layer tabs', a Properties section's, Contacts' and the cockpit
-  // entry's.
-  'ContextView.vue': { markup: context, buttons: 14, icons: 7, closes: 0 },
+  // Inspect, Camera settings, Lists and Pinned, plus a list sub-tab.
+  'ContextView.vue': { markup: context, buttons: 8, icons: 2, closes: 0 },
   // Pin this view, the Data Layers pointer and a row nearest the centre.
   // The glyphs: the pin, the layer tiles' four and the pointer's layers.
   // The rework moved the chips and the rows with a motion glyph to the
@@ -107,8 +103,8 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
     tags(markup, 'UiButton').filter((b) => /\s:pressed=/.test(b)).length;
   // The six styles, two pins, map sources, landmarks and cities.
   assert.equal(pressed(dock), 11);
-  // Search, Expand and TR-3B.
-  assert.equal(pressed(context), 3);
+  // Search and Expand; TR-3B moved to the card's hero.
+  assert.equal(pressed(context), 2);
   // Pin this view.
   assert.equal(pressed(inView), 1);
   assert.equal(pressed(suggested), 0);
@@ -116,10 +112,9 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
 });
 
 test("Context's tabs say they are chosen, not pressed", () => {
-  // Inspector, Properties, Contacts, then Inspect, Camera settings, Lists,
-  // Pinned and a list's own sub-tab.
+  // Inspect, Camera settings, Lists, Pinned and a list sub-tab.
   const tabs = tags(context, 'UiButton').filter((b) => /\srole="tab"/.test(b));
-  assert.equal(tabs.length, 8);
+  assert.equal(tabs.length, 5);
   for (const button of tabs) {
     assert.match(button, /\s:aria-selected=/);
     assert.doesNotMatch(button, /\s:pressed=/);

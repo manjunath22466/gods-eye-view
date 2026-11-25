@@ -1239,6 +1239,14 @@
   font-weight: inherit;
 }
 
+.context-list-card__head .context-list-card__close {
+  margin-inline-start: auto;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 1.1rem;
+}
+
 .context-list-card__state {
   margin: 0.45rem 0 0.1rem;
   color: rgba(199, 214, 222, 0.6);
@@ -4951,23 +4959,4 @@ button.airport-link:focus-visible {
   .marquee.is-moving .marquee__text {
     animation: none;
   }
-}
-
-#global-context-panel[data-context-tab='props']
-  :is(.global-context-modes, .context-mode-view, #radio-panel),
-#global-context-panel #context-mode-standby,
-#global-context-panel:has([data-entity-cockpit-entry]) #cockpit-entry {
-  display: none !important;
-}
-
-#right-context-rail > #cctv-panel:not(.collapsed),
-#right-context-rail.layout-focus > #cctv-panel:not(.collapsed) {
-  flex: 0 0 var(--right-stack-max-height, auto);
-  height: var(--right-stack-max-height, auto);
-  max-height: var(--right-stack-max-height, 100%);
-}
-
-#right-context-rail > #cctv-panel:not(.collapsed) > .cctv-panel-inner,
-#right-context-rail > #cctv-panel:not(.collapsed) > [class$='-inner'] {
-  height: 100%;
 }

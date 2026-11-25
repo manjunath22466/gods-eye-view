@@ -465,7 +465,7 @@ const layers = [
     aliases: [],
     toggle: false,
     context: false,
-    noQuery: 'use set_context_mode contacts',
+    noQuery: 'not a voice layer; Context lists nearby aircraft',
   },
 ];
 

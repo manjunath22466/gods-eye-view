@@ -3,7 +3,6 @@ import { onBeforeUpdate, onUpdated, ref } from 'vue';
 import { formatNumber, t } from '../../../i18n/index.js';
 import { useEntityCardStore } from '../../stores/entityCard.js';
 import { shownLayerName } from '../../layerNames.js';
-import { contextListPresence, showContextList } from '../../contextLists.js';
 import { distanceText as distance } from '../../distanceText.js';
 import AirportLink from './AirportLink.vue';
 import EntityMark from './EntityMark.vue';
@@ -23,11 +22,6 @@ defineProps({
   lists: { type: Array, required: true },
   /** Shown on the line above the lists. */
   title: { type: String, default: '' },
-  /**
-   * Whether Cameras' group ends with a link to Context's Cameras list: for
-   * lists around the centre of the view, as that list is.
-   */
-  listLinks: { type: Boolean, default: true },
 });
 
 const store = useEntityCardStore();
@@ -56,10 +50,6 @@ function viaWords(via) {
   const at = phrase.indexOf(CODE_MARK);
   return at < 0 ? { before: '', after: '' } : { before: phrase.slice(0, at), after: phrase.slice(at + CODE_MARK.length) };
 }
-
-// Cameras' group ends with a link to Context's Cameras list while it has
-// more than the group shows.
-const showsAll = (list) => list.layerId === 'cctv' && Boolean(contextListPresence.cctv) && list.count > list.items.length;
 
 // The lists refresh every few seconds. A focused row, or the airport named
 // beside it, that drops out of them hands focus on: to the same control where
@@ -150,9 +140,6 @@ onUpdated(() => {
             <span v-if="item.via" class="nearby-lists__via">{{ viaWords(item.via).before }}<AirportLink :code="item.via.code" :data-via-key="item.key" :data-row-layer="list.layerId" :data-row-index="index" />{{ viaWords(item.via).after }}</span>
           </li>
         </ul>
-        <UiButton v-if="listLinks && showsAll(list)" class="nearby-lists__all" @click="showContextList('cctv')">
-          {{ t('Show all {n}', { n: formatNumber(list.count) }) }} <span aria-hidden="true">›</span>
-        </UiButton>
       </div>
     </template>
   </section>

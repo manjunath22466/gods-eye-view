@@ -14,7 +14,6 @@ export const CONTEXT_LISTS = Object.freeze([
   Object.freeze({ id: 'weather', label: msg('Weather') }),
   Object.freeze({ id: 'news', label: msg('News') }),
   Object.freeze({ id: 'recent-imagery', label: msg('Imagery') }),
-  Object.freeze({ id: 'cctv', label: msg('Cameras') }),
 ]);
 const LIST_IDS = new Set(CONTEXT_LISTS.map((list) => list.id));
 
@@ -30,7 +29,6 @@ const LIST_LAYERS = Object.freeze({
   ],
   news: ['news'],
   'recent-imagery': ['recent-imagery'],
-  cctv: ['cctv'],
 });
 
 /**

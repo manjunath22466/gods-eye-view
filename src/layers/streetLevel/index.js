@@ -100,6 +100,10 @@ export function createStreetLevelLayer({
     isAvailable: (entry) => providerAvailable(entry),
   });
 
+  /** Who presents the layer row's filters (the UI), and the row's listener. */
+  let rowControlsPresenter = null;
+  let rowControlsListener = null;
+
   let notifyQueued = false;
   function notify() {
     if (notifyQueued) return;
@@ -114,7 +118,19 @@ export function createStreetLevelLayer({
           console.warn('[Data:StreetLevel] listener error:', error);
         }
       }
+      // The Data Layers row repaints its filters from the fresh state, but
+      // not for a photo's pose: dragging a panorama poses every frame.
+      const row = rowSignature(snapshot);
+      if (row === lastRowSignature) return;
+      lastRowSignature = row;
+      rowControlsListener?.();
     });
+  }
+  let lastRowSignature = '';
+  /** What the row shows: everything but the open photo's pose. */
+  function rowSignature(snapshot) {
+    const { street, ...rest } = snapshot;
+    return JSON.stringify([rest, street.open, street.loading, street.error]);
   }
   state.notify = notify;
 
@@ -775,6 +791,17 @@ export function createStreetLevelLayer({
     };
   }
 
+  function acceptedPhoto() {
+    const replacement = pendingDockReplacement();
+    const accepted = parts.viewerHost.acceptedPhoto();
+    // During a dock replacement only the untouched original is confirmed.
+    if (!replacement) return accepted;
+    return !replacement.touchedViewer &&
+      accepted?.id === replacement.acceptance?.id
+      ? accepted
+      : null;
+  }
+
   function getUIState() {
     const replacement = pendingDockReplacement();
     const { host, ...street } =
@@ -800,15 +827,7 @@ export function createStreetLevelLayer({
     if (dockFallback) ui.dockPhotoUnavailable = true;
     if (dockNotice) ui.dockPhotoNotice = dockNotice;
     ui.photoRequests = state.photoRequests;
-    const accepted = parts.viewerHost.acceptedPhoto();
-    // A staged replacement keeps the original dock card and link. Only an
-    // untouched viewer still showing that photo can confirm it during the gap.
-    ui.acceptedPhoto =
-      !replacement ||
-      (!replacement.touchedViewer &&
-        accepted?.id === replacement.acceptance?.id)
-        ? accepted
-        : null;
+    ui.acceptedPhoto = acceptedPhoto();
     return ui;
   }
 
@@ -1340,6 +1359,11 @@ export function createStreetLevelLayer({
       }
       return records;
     },
+    /** The photo the viewer currently confirms as shown. */
+    settledPhotoId: () => acceptedPhoto()?.id ?? null,
+    /** Whether a photo open or dock restore is still in progress. */
+    photoOpening: () =>
+      state.street.opening || Boolean(pendingDockReplacement()),
     /** A remembered photo by its id (`<providerId>:<imageId>`), or null. */
     photo(id) {
       return parts.photos.get(id);
@@ -1451,6 +1475,20 @@ export function createStreetLevelLayer({
     /** Stop a sequence playing in the open photo, leaving the photo open. */
     stopPlayback() {
       if (state.street.open) parts.viewerHost.stopPlayback();
+    },
+
+    // ── The Data Layers row: providers, panorama and SINCE filters ──────
+    /** The UI presents the row's controls from the layer's state. */
+    presentRowControls(presenter) {
+      rowControlsPresenter = typeof presenter === 'function' ? presenter : null;
+      lastRowSignature = '';
+      rowControlsListener?.();
+    },
+    getRowControls() {
+      return rowControlsPresenter?.() ?? null;
+    },
+    setRowControlsListener(listener) {
+      rowControlsListener = typeof listener === 'function' ? listener : null;
     },
   };
   return layer;

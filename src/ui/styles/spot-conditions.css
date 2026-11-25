@@ -5,6 +5,75 @@
   margin: 0.5rem 0 0.75rem;
 }
 
+.spot-conditions__weather {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.3rem 0.65rem;
+  padding: 0.6rem 0.7rem;
+  background: linear-gradient(
+    135deg,
+    rgba(54, 220, 255, 0.09),
+    rgba(255, 255, 255, 0.025)
+  );
+  border: 1px solid rgba(54, 220, 255, 0.16);
+  border-radius: 10px;
+}
+
+.spot-conditions__weather-icon {
+  color: #36dcff;
+  font-size: 2rem;
+}
+
+.spot-conditions__weather-now {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.spot-conditions__weather-now strong {
+  color: rgba(240, 247, 250, 0.98);
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.spot-conditions__weather-now span {
+  color: rgba(199, 214, 222, 0.72);
+  font-size: 0.68rem;
+}
+
+.spot-conditions__weather-facts {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin: 0.25rem 0 0;
+}
+
+.spot-conditions__weather-facts div {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.spot-conditions__weather-facts dt {
+  color: rgba(199, 214, 222, 0.5);
+  font-size: 0.52rem;
+  letter-spacing: 0.06rem;
+  text-transform: uppercase;
+}
+
+.spot-conditions__weather-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: rgba(236, 244, 248, 0.92);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .spot-conditions__block h4 {
   display: flex;
   align-items: center;
@@ -142,10 +211,15 @@
   font-size: 0.55rem;
 }
 
+.spot-conditions__loading,
 .spot-conditions__none {
   margin: 0;
   color: rgba(199, 214, 222, 0.55);
   font-size: 0.66rem;
+}
+
+.spot-conditions__weather-wait {
+  grid-column: 1 / -1;
 }
 
 .spot-conditions__row-meta {

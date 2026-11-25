@@ -154,6 +154,11 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
    * eye: {lat, lon}, groundM, pose}`. The pose also records camera orientation.
    */
   const view = shallowRef(null);
+  /** Explicit view changes that do not begin as a globe gesture. */
+  const viewCommandRevision = ref(0);
+  function noteViewCommand() {
+    viewCommandRevision.value++;
+  }
   /** Whether the last view came from a camera still moving (see setView). */
   const viewMoving = ref(false);
   const inspector = shallowRef({ shown: false, mountId: null });
@@ -1005,8 +1010,11 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     stopLocating();
   }
 
-  const flyTo = () =>
-    card.value && shell.value?.flyTo?.(card.value, { explicit: true });
+  function flyTo() {
+    if (!card.value || !shell.value?.flyTo) return;
+    noteViewCommand();
+    return shell.value.flyTo(card.value, { explicit: true });
+  }
   /** Fly back to a pinned view: the camera as it was (see setView's pose). */
   const flyToPose = (pose) => shell.value?.flyToPose?.(pose);
   const follow = () => {
@@ -1090,6 +1098,8 @@ export const useEntityCardStore = defineStore('gev-entity-card', () => {
     breakdown,
     view,
     viewMoving,
+    viewCommandRevision,
+    noteViewCommand,
     setView,
     inspector,
     inspectorRows,

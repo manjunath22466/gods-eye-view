@@ -13,8 +13,6 @@ import { followRootClass } from '../rail/rootClass.js';
 import SceneDialog from './panels/SceneDialog.vue';
 import SceneOptions from './SceneOptions.vue';
 import SceneShotList from './SceneShotList.vue';
-import CctvPanel from './panels/CctvPanel.vue';
-import StreetLevelPanel from './panels/StreetLevelPanel.vue';
 import StreetLevelPhotoViewer from './panels/StreetLevelPhotoViewer.vue';
 import DrawControls from './panels/DrawControls.vue';
 import GeoImport from './panels/GeoImport.vue';
@@ -104,11 +102,8 @@ onBeforeUnmount(() => stopOpenClass?.());
     <div class="utilities-tools"><DrawControls /><GeoImport /></div>
   </RailPanel>
 
-  <!-- CCTV Coverage Panel -->
-  <CctvPanel />
-
-  <!-- Street Level Panel (moved into #right-context-rail at runtime) -->
-  <StreetLevelPanel />
+  <!-- Street Level's photo viewer (KartaView, Panoramax), teleported into
+       the viewer host the layer mounts it in. -->
   <StreetLevelPhotoViewer />
 
   <!-- Scene Director Panel -->

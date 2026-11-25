@@ -10,11 +10,13 @@ import { usePinnedStore } from './stores/pinned.js';
 import { useSpaceMissionsStore } from './stores/spaceMissions.js';
 import MissionDetail from './views/panels/MissionDetail.vue';
 import MissionRoster from './views/panels/MissionRoster.vue';
-import SpaceMissionsPanel from './views/panels/SpaceMissionsPanel.vue';
+import ContextView from './views/ContextView.vue';
+import { usePanelChromeStore } from './stores/panelChrome.js';
+import { leaveContextLists, showContextList } from './contextLists.js';
 
 function fixture(t) {
   document.body.replaceChildren();
-  // The scroller that holds the Missions list.
+  // Context's scroller, which holds the Missions list.
   const scroller = document.body.appendChild(document.createElement('div'));
   scroller.setAttribute('data-rail-scroller', '');
   const host = scroller.appendChild(document.createElement('div'));
@@ -418,17 +420,27 @@ test('in the panel, a keyboard close focuses the closed mission, not the first r
   document.body.replaceChildren();
   const host = document.body.appendChild(document.createElement('div'));
   const pinia = createPinia();
-  const app = createApp({ render: () => h(SpaceMissionsPanel) }).use(pinia);
+  const app = createApp(ContextView).use(pinia);
   const store = useSpaceMissionsStore(pinia);
   const rows = roster([entry('a', 0), entry('starlink-12-3', 1)]);
+  const previews = [];
   store.setEnabled(true);
   // Deselecting publishes at once, as the launches layer does.
   store.connect({
     deselectMission: () => store.publish({ roster: rows, mission: null }),
+    rosterFocus: (index) => previews.push(index),
   });
   store.publish({ roster: rows, mission: mission() });
   app.mount(host);
-  t.after(() => app.unmount());
+  const chrome = usePanelChromeStore(pinia);
+  const owner = chrome.connect({});
+  chrome.publish(owner, 'global-context-panel', { collapsed: false });
+  showContextList('space-missions');
+  t.after(() => {
+    leaveContextLists();
+    chrome.detach(owner);
+    app.unmount();
+  });
   await nextTick();
   await nextTick();
   const close = document.querySelector('[data-mission-close]');
@@ -439,6 +451,7 @@ test('in the panel, a keyboard close focuses the closed mission, not the first r
     document.activeElement?.dataset?.missionRosterId,
     'starlink-12-3',
   );
+  assert.equal(previews.at(-1), 1, 'focus restores the closed mission preview');
 });
 
 test('each newly presented selection returns the list it shows in to the top', async (t) => {

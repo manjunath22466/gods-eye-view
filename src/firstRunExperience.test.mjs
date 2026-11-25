@@ -1111,10 +1111,20 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // adds the analyst area scopes and the osm-places layer.
   // control_cockpit states the own-layer entry rule (Contacts not required).
   // Fire Perimeters queries add lastGrowthTime.
-  assert.equal(block.length, 31387, 'serialized tool schema length drifted');
+  // Contacts leaves set_context_mode: its enum and description drop it.
+  // set_panel_open says retired Radio/CCTV ids open Context; control_cctv's
+  // next/prev walk Context's Cameras list by view centre, and focus is
+  // the card's Fly to.
+  // set_panel_open says the retired Weather, Recent Imagery and Space
+  // Missions ids open Context on their list.
+  // set_panel_open says space-missions turns the layer on (same length).
+  // Nearby clears the selected card; ordinary Open Context preserves it.
+  // set_context_mode says Space Missions turns its layer on and shows its
+  // list, and off turns it off.
+  assert.equal(block.length, 31625, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '909bc8924e5ad6adf599406d462d325a703d18993176d96498cbb057240a58b6',
+    'c180b05587603e22fe61ad0e3699acd5feef2f140968f814f6e0e07ba96166ce',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

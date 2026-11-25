@@ -1,12 +1,14 @@
 const LAYER_ID = 'rocket-launches';
-const PANEL_ID = 'space-missions-panel';
 
 /**
- * The Space Missions panel's wiring. Space Missions is an ordinary layer: the
+ * The Space Missions layer's wiring. Space Missions is an ordinary layer: the
  * layer owns its data and Satellites dependency, and this connects it to its
- * panel. The panel shows while the layer is on, and opens when the person
- * turns the layer on (by hand or by voice) or picks a mission on the globe. Opening it closes the
- * other right-side panels, Context among them (see setPanelCollapsed).
+ * list, a tab in Context while the layer is on. The list shows when a person
+ * turns the layer on (by hand or by voice) or picks a mission on the globe.
+ * This wiring switches no layer itself. The layer leaves the person's other
+ * layers as they are, apart from Satellites, which it switches on hidden (no
+ * dots or orbits) for its orbit data and restores when it turns off
+ * (`src/layers/launches/ingestion.js`).
  */
 export class SpaceMissionsControls {
   /**
@@ -14,10 +16,9 @@ export class SpaceMissionsControls {
    * @param {?object} options.layer The Space Missions layer.
    * @param {object} options.store The Space Missions store.
    * @param {object} options.actions
-   * @param {(panelId: string, collapsed: boolean, options?: object) => void} options.actions.setPanelCollapsed
+   * @param {() => void} options.actions.showMissions Opens Context on the
+   *   Missions list (and, on a phone, its sheet).
    * @param {() => boolean} options.actions.isCockpitActive
-   * @param {() => void} [options.actions.revealPanel] Opens the phone sheet that
-   *   holds the panel; does nothing on desktop.
    */
   constructor({ layer, store, actions }) {
     this._layer = layer || null;
@@ -63,12 +64,10 @@ export class SpaceMissionsControls {
       this._reveal();
   }
 
-  /** Open the panel, unless the Cockpit owns the screen. */
+  /** Open Context on the Missions list, unless the Cockpit owns the screen. */
   _reveal() {
     if (this.destroyed || this._actions.isCockpitActive?.()) return;
-    this._actions.setPanelCollapsed(PANEL_ID, false, { explicit: true });
-    // A phone shows the rail only as tab sheets: open the Missions sheet too.
-    this._actions.revealPanel?.();
+    this._actions.showMissions?.();
   }
 
   destroy() {
