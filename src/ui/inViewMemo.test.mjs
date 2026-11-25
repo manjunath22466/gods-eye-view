@@ -214,37 +214,25 @@ test('Nearby and globe search match the displayed layer name after switching lan
   const results = (query) => [
     store.nearbyLayers(0, 0, { query })[0]?.items[0]?.title,
     store.inView({ query })[0]?.items[0]?.title,
-    store.nearbyGroups(0, 0, { query }).other[0]?.title,
   ];
 
   setLocale('en');
-  assert.deepEqual(results('Centres de données'), [
-    undefined,
-    undefined,
-    undefined,
-  ]);
+  assert.deepEqual(results('Centres de données'), [undefined, undefined]);
   setLocale('fr');
   assert.deepEqual(results('Centres de données'), [
-    'Example Facility',
     'Example Facility',
     'Example Facility',
   ]);
   assert.deepEqual(results('Datacenters'), [
     'Example Facility',
     'Example Facility',
-    'Example Facility',
   ]);
   assert.deepEqual(results('Centres de données'), [
-    'Example Facility',
     'Example Facility',
     'Example Facility',
   ]);
   setLocale('en');
-  assert.deepEqual(results('Centres de données'), [
-    undefined,
-    undefined,
-    undefined,
-  ]);
+  assert.deepEqual(results('Centres de données'), [undefined, undefined]);
 });
 
 test('the same key gives the same answer without scanning again; fewer rows are a slice', () => {

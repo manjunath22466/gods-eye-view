@@ -11,6 +11,14 @@ export function weatherPoint(center) {
     : '';
 }
 
+export function weatherAtRequestedPoint(brief, point) {
+  const coords = brief?.coordinates;
+  return (
+    !coords ||
+    weatherPoint({ lat: coords.latitude, lon: coords.longitude }) === point
+  );
+}
+
 function freshnessOf(reading, brief) {
   const observed = Date.parse(reading.observedAt);
   if (Number.isFinite(observed)) return observed;
@@ -147,14 +155,8 @@ export function createViewWeather({
       : null;
     // A host may share weather across a cell. Its zone belongs only to the
     // observation point. A host without coordinates serves the requested point.
-    const observedPoint = brief?.coordinates
-      ? weatherPoint({
-          lat: brief.coordinates.latitude,
-          lon: brief.coordinates.longitude,
-        })
-      : request.point;
     const zone =
-      reading && observedPoint === request.point
+      reading && weatherAtRequestedPoint(brief, request.point)
         ? {
             point: request.point,
             timeZone: reading.timeZone,

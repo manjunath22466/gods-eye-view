@@ -1,3 +1,5 @@
+import { CCTV_SELECTED_EVENT } from '../ui/cctvEvents.js';
+import { PLACE_PICK_EVENT } from '../ui/contextEvents.js';
 import { isFollowing, stopFollowing } from '../data/followed.js';
 import { interruptGlobeRotation } from '../cameraVerbs.js';
 import { normalizeDisplayText } from '../data/displayText.js';
@@ -19,6 +21,7 @@ import { msg } from '../i18n/index.js';
 import { useProviderSettingsStore } from '../ui/stores/providerSettings.js';
 import { finderForLayerRows } from '../ui/layerFinderFilter.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
+import { useEntityCardStore } from '../ui/stores/entityCard.js';
 import {
   distance as chordM,
   fromRadians,
@@ -315,6 +318,7 @@ export function createGevActionRunner({
   readVoicePanelOperation = null,
   osmSearch = null,
   areaOptions = null,
+  contextCard = null,
 }) {
   // Voice enable times and analyst follow-up memory belong to this runner.
   // Speech builders turn results into say/display envelopes; callers extend
@@ -1344,6 +1348,7 @@ export function createGevActionRunner({
       // Chained fly-tos: a grab during an earlier one still flying counts.
       // The flight replaced is the last one that moved, past lookups that
       // found nothing.
+      const selection = contextCard?.generation?.();
       const prior = voiceFlightTarget(voiceFlight);
       const flight = trackVoiceFlight(
         prior && !prior.done ? prior.inputCount : undefined,
@@ -1434,6 +1439,47 @@ export function createGevActionRunner({
         else if (flight.movedNothing) replyRecord.foundNothing = true;
       };
       flown.then(noteReply, () => noteReply(null));
+      // A request that names a place ("go to Austin") is a place pick: its
+      // card opens in Context. A flight to coordinates or to an item, or one
+      // a later tool depends on (waitForArrival, a chained command such as
+      // "flights near Austin"), is not.
+      if (
+        (args.query || args.locationId) &&
+        !args.entity &&
+        args.waitForArrival !== true
+      ) {
+        const pickCurrent = () =>
+          current() &&
+          voiceFlight === flight &&
+          contextCard?.generation?.() === selection;
+        flown.then(
+          (result) => {
+            if (
+              !pickCurrent() ||
+              otherHandoffs() !== flight.handoffs ||
+              result?.ok !== true ||
+              !Number.isFinite(result.latitude) ||
+              !Number.isFinite(result.longitude) ||
+              typeof CustomEvent !== 'function'
+            )
+              return;
+            // The card's airport lookup may outlive this voice turn. Shared
+            // navigation invalidation remains with the place-pick owner.
+            globalThis.document?.dispatchEvent?.(
+              new CustomEvent(PLACE_PICK_EVENT, {
+                detail: {
+                  isCurrent: pickCurrent,
+                  name: result.label || String(args.query || ''),
+                  latitude: result.latitude,
+                  longitude: result.longitude,
+                  query: String(args.query || ''),
+                },
+              }),
+            );
+          },
+          () => {},
+        );
+      }
       return flown.then((result) =>
         stoppedMotion && result && typeof result === 'object'
           ? { ...result, stoppedMotion }
@@ -1764,7 +1810,7 @@ export function createGevActionRunner({
         );
         return { ...result, action: 'control_cctv' };
       }
-      return controlCctv(dataManager, args, styleManager);
+      return controlCctv(dataManager, args, styleManager, viewer);
     }
 
     if (name === 'control_radio') {
@@ -2172,8 +2218,34 @@ function controlScene(sceneDirector, args = {}) {
   throw new Error(`Unknown scene action: ${args.action || 'missing'}`);
 }
 
+/**
+ * Context's entity card store while it shows this camera's card, else null.
+ * @param {?string} cameraId
+ */
+function openCameraCard(cameraId) {
+  if (!cameraId) return null;
+  try {
+    // The page has one Context panel, and its card store lives in the
+    // page's Pinia (applicationPinia), the one the shell's entity bridge
+    // fills. Voice runs on that page, so this is the card the person sees;
+    // with no card for this camera, the layer's own focus answers instead.
+    const cards = useEntityCardStore(applicationPinia());
+    const card = cards.card;
+    return card?.layerId === 'cctv' && card?.key === `cctv:${cameraId}`
+      ? cards
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Voice CCTV control over the cctv layer module's public surface. */
-export async function controlCctv(dataManager, args = {}, styleManager = null) {
+export async function controlCctv(
+  dataManager,
+  args = {},
+  styleManager = null,
+  viewer = null,
+) {
   const action = String(args.action || '').toLowerCase();
   const cctv = dataManager.layers.get('cctv')?.module;
   if (!cctv) {
@@ -2214,6 +2286,18 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
     };
   };
 
+  // Changed IDs are announced by the layer. An explicit re-pick of the
+  // opening camera has no layer transition, but still opens its Context card.
+  function revealReselection(id, previous) {
+    if (id && id === previous) {
+      globalThis.document?.dispatchEvent?.(
+        new CustomEvent(CCTV_SELECTED_EVENT, {
+          detail: { cameraId: id, explicitReselection: true },
+        }),
+      );
+    }
+  }
+
   if (action === 'select') {
     const query = String(args.cameraQuery || '')
       .trim()
@@ -2237,7 +2321,9 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
       };
     }
     styleManager?.supersedeDeferredNavigation?.();
+    const previous = cctv.getUIState?.()?.activeCameraId;
     const selected = cctv.selectCamera(match.id);
+    if (selected) revealReselection(match.id, previous);
     const focusResult = selected
       ? cctv.focusCamera(match.id, 1.8)
       : CCTV_FOCUS_RESULT.NO_ACTIVE_CAMERA;
@@ -2262,7 +2348,9 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
   }
   if (action === 'nearest') {
     styleManager?.supersedeDeferredNavigation?.();
+    const previous = cctv.getUIState?.()?.activeCameraId;
     const nearestId = cctv.focusNearest({ focus: false });
+    revealReselection(nearestId, previous);
     const focusResult = nearestId
       ? cctv.focusCamera(nearestId, 1.8)
       : CCTV_FOCUS_RESULT.NO_ACTIVE_CAMERA;
@@ -2273,8 +2361,38 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
     };
   }
   if (action === 'focus') {
+    // Focus is the camera card's Fly to: while the open camera's card shows
+    // in Context, its own Fly to frames it; otherwise the camera's view.
     const activeId = cctv.getUIState?.()?.activeCameraId;
+    // Without a viewer, direct callers keep the layer's guarded focus route.
+    const card = viewer ? openCameraCard(activeId) : null;
+    if (card) {
+      // The card frames the camera differently, but has the same ownership
+      // limits as the CCTV layer's focusCamera route.
+      const held =
+        styleManager?.getCockpitState?.()?.active ||
+        globalThis.document?.body?.classList?.contains('cockpit-mode')
+          ? CCTV_FOCUS_RESULT.COCKPIT_ACTIVE
+          : isFollowing(viewer)
+            ? CCTV_FOCUS_RESULT.TRACKING_HOLDS_VIEW
+            : null;
+      if (held)
+        return {
+          action: 'control_cctv',
+          ...summarize(),
+          ...cctvVoiceFocusOutcome(held),
+        };
+    }
     if (activeId) styleManager?.supersedeDeferredNavigation?.();
+    if (card) {
+      const outcome = cctvVoiceFocusOutcome(card.flyTo());
+      return {
+        action: 'control_cctv',
+        ...summarize(),
+        ...outcome,
+        flewTo: outcome.ok,
+      };
+    }
     const focusResult = activeId
       ? cctv.focusCamera(activeId)
       : CCTV_FOCUS_RESULT.NO_ACTIVE_CAMERA;

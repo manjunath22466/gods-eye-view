@@ -14,6 +14,7 @@ import {
   layerBreakdown,
   layerMatches,
   layerRecords,
+  layerRecordsNear,
   nearbyByKind,
   nearbyForLayer,
   nearbyEntities,
@@ -156,6 +157,12 @@ test('a failed selected-row conversion uses ordinary records or propagates a sec
   };
   for (const read of reads) assert.throws(read, (error) => error === failure);
   assert.equal(fallbackAttempts, 4);
+
+  layer.module.getNearbyContextPoints = () => { throw new Error('snapshot unavailable'); };
+  const within = () => layerRecordsNear(data, layerId, center, 25, { throwOnReadError: true });
+  assert.throws(within, (error) => error === failure);
+  layer.module.getAnalystRecords = () => [ordinary];
+  assert.deepEqual(within(), [{ record: ordinary, km: 0 }]);
 });
 
 test('a click identity finds its record by key, past the first 2000 records', () => {
@@ -370,10 +377,11 @@ test('selected-card nearby rows open a cable at the point used for its distance'
     parts: [here],
   };
   const layers = manager({ [layerId]: { name: 'Cables', records: [cable] } });
+  const layer = layers.layers.get(layerId);
   const rows = [
     nearbyEntities(layers, { layerId, ...here }).same[0],
-    nearbyByKind(layers, here).other[0],
-    nearbyByKind(layers, here, { query: 'example' }).other[0],
+    nearbyForLayer(layers, layer, here).items[0],
+    nearbyForLayer(layers, layer, here, { query: 'example' }).items[0],
   ];
   assert.deepEqual(
     rows.map((row) => [
@@ -824,7 +832,7 @@ test('the view summary with no rows wanted still counts, and never throws', () =
   assert.deepEqual(group.items, []);
 });
 
-test('in-view satellites stand at their SGP4 catalogue positions (the layer records), not the renderer', () => {
+test('in-view satellites use their drawn positions when available and otherwise use layer records', () => {
   const satrec = twoline2satrec(
     '1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927',
     '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537',
@@ -837,8 +845,11 @@ test('in-view satellites stand at their SGP4 catalogue positions (the layer reco
     source: {},
   });
   let rendererAsked = 0;
+  let rendered = null;
+  const params = { showPoints: true };
   const records = createRecords({
     state: {
+      _params: params,
       _enabled: true,
       _catalog: new Map([
         [25544, { name: 'ISS (ZARYA)', group: 'stations', satrec }],
@@ -850,7 +861,7 @@ test('in-view satellites stand at their SGP4 catalogue positions (the layer reco
       rendering: {
         _pointPosition: () => {
           rendererAsked++;
-          return null;
+          return rendered;
         },
       },
     },
@@ -880,6 +891,33 @@ test('in-view satellites stand at their SGP4 catalogue positions (the layer reco
   assert.equal(item.identity.lon, sgp4.longitude);
   assert.ok(item.distanceKm < 0.01, 'centred on its propagated point');
   assert.equal(rendererAsked, 0, 'no renderer position is read');
+
+  rendered = fromDegrees(80, 0, 550_000);
+  layer.module.getViewRecords = records.getViewRecords;
+  const drawn = viewSummaryForLayer(
+    layers,
+    layer,
+    null,
+    { lat: 0, lon: 0 },
+    { hemisphere: true, heightM: 20_000_000 },
+  );
+  assert.equal(drawn.items[0].title, 'ISS (ZARYA)');
+  assert.ok(Math.abs(drawn.items[0].identity.lon - 80) < 1e-6);
+  assert.equal(rendererAsked, 1, 'the drawn point clears the limb');
+  params.showPoints = false;
+  const hidden = viewSummaryForLayer(
+    layers,
+    layer,
+    null,
+    { lat: sgp4.latitude, lon: sgp4.longitude },
+    { hemisphere: true },
+  );
+  assert.equal(hidden.items[0]?.identity.lon, sgp4.longitude);
+  assert.equal(
+    rendererAsked,
+    1,
+    'hidden standalone buffers can hold old coordinates',
+  );
 });
 
 test('flight insights work out phase, flight level, Mach, squawk meaning and signal age', () => {
@@ -1100,12 +1138,26 @@ test('a card shows the photo its layer looked up: the tracked airliner, the sele
     photographer: 'A. Spotter',
     licence: '',
   });
-  // What picks the globe's fleet model for it.
-  assert.deepEqual(tracked.aircraftModel, {
+  // What picks the globe's fleet model for it, and for a vessel.
+  assert.deepEqual(tracked.modelSubject, {
+    fleet: 'aircraft',
     typeCode: 'B739',
     category: 'A3',
     callsign: 'DAL1',
   });
+  assert.deepEqual(
+    describeEntity(planes, { layerId: 'ais-live-vessels', id: 'EVER GIVEN' })
+      .modelSubject,
+    {
+      fleet: 'vessel',
+      type: null,
+      mmsi: '353136000',
+      virtual: false,
+      length: null,
+      beam: null,
+      name: null,
+    },
+  );
   // Photos are looked up for the tracked plane only.
   assert.equal(
     describeEntity(planes, { layerId: 'flights', id: 'aa0002' }).photo,

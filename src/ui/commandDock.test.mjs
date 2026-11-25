@@ -20,6 +20,9 @@ import { MOBILE_TABS, initMobileShell } from './mobileShell.js';
 import CommandDockView from './views/CommandDockView.vue';
 import SceneChromeView from './views/SceneChromeView.vue';
 import { VisualSettings } from './visualSettings.js';
+import { PLACE_PICK_EVENT } from './contextEvents.js';
+import { CITY_POIS } from '../cityPois.js';
+import { _setAirportsFetchForTest } from '../data/airports.js';
 
 function fixture(t) {
   document.body.replaceChildren();
@@ -2142,4 +2145,238 @@ test('bundled place names never default to an action', async (t) => {
     }
   assert.ok(sample.length > 1900, `${sample.length} names`);
   assert.deepEqual(wrong, []);
+});
+
+// A place picked in the field opens its card in Context: the field sends
+// PLACE_PICK_EVENT (placePick.js listens) once the place is reached.
+function placePicks(t) {
+  const picks = [];
+  const onPick = (event) => picks.push(event.detail);
+  document.addEventListener(PLACE_PICK_EVENT, onPick);
+  t.after(() => document.removeEventListener(PLACE_PICK_EVENT, onPick));
+  return picks;
+}
+const settleTurns = async (turns = 6) => {
+  for (let i = 0; i < turns; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTick();
+  }
+};
+
+test('a place searched in the field is a place pick once the search finds it', async (t) => {
+  const picks = placePicks(t);
+  const { type, key, controls } = omnibarFixture(t, () => {
+    controls.searchOrigin = 'omnibar';
+    return true;
+  });
+  await type('Paris, Texas');
+  await key('Enter');
+  await settleTurns();
+  assert.deepEqual(
+    picks.map(({ name, query }) => ({ name, query })),
+    [{ name: 'Paris, Texas', query: 'Paris, Texas' }],
+  );
+});
+
+test('a place search that finishes after a newer pick leaves that pick selected', async (t) => {
+  const picks = placePicks(t);
+  const lookup = Promise.withResolvers();
+  const search = t.mock.fn(() => {
+    controls.searchOrigin = 'omnibar';
+    return lookup.promise;
+  });
+  const { type, key, controls, pinia } = omnibarFixture(t, search);
+  const cards = useEntityCardStore(pinia);
+  t.after(() => cards.clear());
+  await type('Paris, Texas');
+  await key('Enter');
+  assert.equal(search.mock.callCount(), 1, 'the geocode has started');
+  assert.ok(
+    cards.select({
+      layerId: 'local-dams',
+      id: 'newer-dam',
+      label: 'Newer dam',
+      lat: 30.2,
+      lon: -97.7,
+    }),
+  );
+  lookup.resolve(true);
+  await settleTurns();
+  assert.deepEqual(picks, []);
+  assert.equal(cards.card.identity.id, 'newer-dam');
+});
+
+test('a fly-only plan invalidates a place pick still waiting to open its card', async (t) => {
+  const picks = placePicks(t);
+  const { type, key, controls, pinia } = omnibarFixture(t, () => {
+    controls.searchOrigin = 'omnibar';
+    return true;
+  });
+  await type('Paris, Texas');
+  await key('Enter');
+  await settleTurns();
+  assert.equal(picks.length, 1);
+  assert.equal(
+    picks[0].isCurrent?.() ?? true,
+    true,
+    'field reset keeps its pick current',
+  );
+
+  const fly = t.mock.fn(async () => ({ ok: true }));
+  useOmnibarStore(pinia).connectRunner(fly);
+  await type('go to Austin and show flights');
+  await key('Enter');
+  await settleTurns();
+  assert.deepEqual(fly.mock.calls[0]?.arguments, [
+    'fly_to_location',
+    { query: 'austin', waitForArrival: true },
+  ]);
+  assert.equal(picks.length, 1, 'the plan only flies');
+  assert.equal(picks[0].isCurrent?.() ?? true, false);
+});
+
+test('a landmark chip is a place pick', async (t) => {
+  const picks = placePicks(t);
+  const { type } = omnibarFixture(t);
+  const [cityId, city] = Object.entries(CITY_POIS)[0];
+  await type(city.name);
+  await settleTurns();
+  const chip = document.querySelector('.omnibar-strip__chip');
+  assert.ok(chip, `${city.name} offers its landmarks as chips`);
+  chip.click();
+  await settleTurns();
+  const [first] = city.pois;
+  assert.deepEqual(
+    picks.map(({ name, latitude, longitude }) => ({
+      name,
+      latitude,
+      longitude,
+    })),
+    [{ name: first.name, latitude: first.lat, longitude: first.lon }],
+    `the first landmark of ${cityId}`,
+  );
+});
+
+test('a recent-place chip cannot reopen its card after a newer pick', async (t) => {
+  const recent = {
+    name: 'Shibuya Crossing',
+    latitude: 35.6595,
+    longitude: 139.7005,
+  };
+  localStorage.setItem('gev:omnibar:recent-places', JSON.stringify([recent]));
+  t.after(() => localStorage.removeItem('gev:omnibar:recent-places'));
+  const picks = placePicks(t);
+  const { type, pinia } = omnibarFixture(t);
+  const cards = useEntityCardStore(pinia);
+  t.after(() => cards.clear());
+  const flight = Promise.withResolvers();
+  const fly = t.mock.fn(() => flight.promise);
+  useOmnibarStore(pinia).connectRunner(fly);
+  await type('Tokyo');
+  const chip = [...document.querySelectorAll('.omnibar-strip__chip')].find(
+    (node) => node.textContent.includes(recent.name),
+  );
+  assert.ok(chip);
+  chip.click();
+  assert.equal(fly.mock.callCount(), 1);
+  assert.ok(
+    cards.select({
+      layerId: 'local-dams',
+      id: 'newer-dam',
+      label: 'Newer dam',
+      lat: 30.2,
+      lon: -97.7,
+    }),
+  );
+  flight.resolve({ ok: true });
+  await settleTurns();
+  assert.deepEqual(picks, []);
+  assert.equal(cards.card.identity.id, 'newer-dam');
+});
+
+function coldAirportPack(t) {
+  const loaded = Promise.withResolvers();
+  _setAirportsFetchForTest(async () => {
+    await loaded.promise;
+    return new Response(
+      JSON.stringify({
+        meta: {},
+        rows: [
+          [
+            'KSFO',
+            'SFO',
+            'San Francisco International Airport',
+            37.619,
+            -122.375,
+            'large',
+            'San Francisco',
+            'US',
+            13,
+            4,
+          ],
+        ],
+      }),
+      { status: 200 },
+    );
+  });
+  t.after(() => {
+    loaded.resolve();
+    _setAirportsFetchForTest(null);
+  });
+  return loaded.resolve;
+}
+
+test('repeated Enter on the first airport code opens that airport once after the pack loads', async (t) => {
+  const release = coldAirportPack(t);
+  const picks = placePicks(t);
+  const searched = [];
+  const { type, key, pinia } = omnibarFixture(t, (query) =>
+    searched.push(query),
+  );
+  const flights = [];
+  useOmnibarStore(pinia).connectRunner(async (name, args) => {
+    flights.push([name, args]);
+    return { ok: true };
+  });
+  await type('SFO');
+  await key('Enter');
+  await key('Enter');
+  await settleTurns(2);
+  assert.deepEqual(searched, [], 'no geocoder search for the code meanwhile');
+  release();
+  await settleTurns();
+  assert.deepEqual(searched, []);
+  assert.deepEqual(flights, [
+    ['fly_to_location', { latitude: 37.619, longitude: -122.375 }],
+  ]);
+  assert.deepEqual(
+    picks.map((pick) => pick.airport),
+    ['SFO'],
+  );
+});
+
+test('a newer explicit pick wins while Enter is waiting for the airport pack', async (t) => {
+  const release = coldAirportPack(t);
+  const picks = placePicks(t);
+  const { type, key, pinia } = omnibarFixture(t);
+  const cards = useEntityCardStore(pinia);
+  const fly = t.mock.fn(async () => ({ ok: true }));
+  useOmnibarStore(pinia).connectRunner(fly);
+  t.after(() => cards.clear());
+  await type('SFO');
+  await key('Enter');
+  assert.ok(
+    cards.select({
+      layerId: 'local-dams',
+      id: 'newer-site',
+      label: 'Newer site',
+      lat: 30.2,
+      lon: -97.7,
+    }),
+  );
+  release();
+  await settleTurns();
+  assert.equal(fly.mock.callCount(), 0);
+  assert.deepEqual(picks, []);
+  assert.equal(cards.card.identity.id, 'newer-site');
 });

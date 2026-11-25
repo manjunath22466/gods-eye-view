@@ -398,7 +398,6 @@ test('camera icons are violet for video feeds, green for stills, amber when acti
     idleStill.camera.feedType = 'image';
     refreshCoverageStyles();
     assert.equal(image(idleStill), idleImage);
-
   } finally {
     _setCctvCoverageStateForTest({ enabled: false });
     unbind();
@@ -1448,12 +1447,15 @@ test('the opening camera follows a shared view that lands after CCTV turned on, 
     });
     assert.equal(reopenNearestCamera(), true);
     assert.equal(cctvLayer.getUIState().activeCameraId, 'gb-kings-cross');
+    // The re-pick is still the layer's own: Context opens no card for it.
+    assert.equal(cctvLayer.getUIState().openingCamera, true);
     assert.equal(reopenNearestCamera(), false, 'already the nearest');
 
     // Someone chooses a camera: settled moves leave it alone.
     setActiveCamera('au-sydney');
     assert.equal(reopenNearestCamera(), false);
     assert.equal(cctvLayer.getUIState().activeCameraId, 'au-sydney');
+    assert.equal(cctvLayer.getUIState().openingCamera, false, 'a pick');
 
     // A deselect is a choice too.
     _setCctvCoverageStateForTest({
@@ -1980,4 +1982,74 @@ test('the footprint lift is capped so a tower under the far edge cannot launch t
   );
   assert.equal(hill.liftCapped, false);
   assert.ok(Math.abs(hill.liftM - (flat.liftM + 30)) < 1e-6);
+});
+
+// With Auto-hop on, a person's step (Next or Previous, voice "next") is a
+// pick and opens the camera's card; only the timer's own hop is quiet. The
+// panel opens a card for a change whose state does not say openingCamera.
+test('with Auto-hop on, a manual or voice step is a pick and a timed hop is quiet', async () => {
+  const { controlCctv } = await import('../voice/gevActions.js');
+  const viewer = makeDeselectViewer();
+  const records = Array.from({ length: 4 }, (_, index) =>
+    makeDeselectRecord(`hop-${index}`, index),
+  );
+  for (const record of records)
+    Object.assign(record, {
+      groundResolved: {},
+      groundSamples: {},
+      groundPrior: 0,
+      frustumGeometry: null,
+      frustumPositions: null,
+      probeClampRangeM: null,
+    });
+  _setCctvOverlayHostForTest({
+    setEntries() {},
+    setVisible() {},
+    clearSource() {},
+  });
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  globalThis.document = { createElement: () => ({ getContext: () => null }) };
+  globalThis.Image = class {};
+  const seen = [];
+  let unsubscribe = () => {};
+  try {
+    _setCctvCoverageStateForTest({
+      viewer,
+      records,
+      activeCameraId: records[0].camera.id,
+      enabled: true,
+    });
+    cctvLayer.setParams({ autoHop: true, autoHopSec: 8 });
+    unsubscribe = cctvLayer.subscribe((state) =>
+      seen.push([state.activeCameraId, state.openingCamera]),
+    );
+    const changes = () => {
+      const out = [];
+      for (const [id, opening] of seen)
+        if (out.at(-1)?.[0] !== id) out.push([id, opening]);
+      return out.slice(1);
+    };
+    cctvLayer.cycleCamera(1);
+    await controlCctv(
+      {
+        layers: new Map([['cctv', { module: cctvLayer }]]),
+        isEnabled: (id) => id === 'cctv',
+      },
+      { action: 'next' },
+    );
+    maybeAutoHop(Date.now() + 60_000);
+    assert.deepEqual(changes(), [
+      ['hop-1', false],
+      ['hop-2', false],
+      ['hop-3', true],
+    ]);
+  } finally {
+    unsubscribe();
+    cctvLayer.setParams({ autoHop: false });
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    _setCctvOverlayHostForTest();
+    _setCctvCoverageStateForTest({ enabled: false });
+  }
 });

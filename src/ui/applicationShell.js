@@ -83,6 +83,7 @@ import { useEntityCardStore } from './stores/entityCard.js';
 import { useLayerCountsStore } from './stores/layerCounts.js';
 import { installEntityContext } from './entityContextBridge.js';
 import { createLayerCounts } from './layerCounts.js';
+import { installPlacePick } from './placePick.js';
 import { installRailEdgeScroll } from './railEdgeScroll.js';
 import { useCockpitStore } from './stores/cockpit.js';
 import { useGlobeActionsStore } from './stores/globeActions.js';
@@ -93,6 +94,7 @@ import {
   registerDynamicCredit,
   showOsmCredit,
   WIKIDATA_PLACES_CREDIT,
+  OURAIRPORTS_CREDIT,
 } from '../data/dataCredits.js';
 import { withPlacePacks } from './placePacksLoading.js';
 import { preloadOwnerFlags } from './ownerFlag.js';
@@ -142,6 +144,8 @@ export class StyleManager extends ShellFacade {
     } = {},
   ) {
     super();
+    const creditAirports = () =>
+      registerDynamicCredit(this.viewer, OURAIRPORTS_CREDIT);
     this._localePickerEnabled = localePicker;
     const {
       IntelHUD,
@@ -246,6 +250,9 @@ export class StyleManager extends ShellFacade {
           readShown: cards.readViewContextShown,
         }),
       },
+      revealContext: () => this.revealPanel('global-context-panel'),
+      supersedeDeferredNavigation: () => this.supersedeDeferredNavigation(),
+      creditAirports,
     });
     this.mapStackController = mapStackController;
     this.placeSearch = placeSearch;
@@ -438,6 +445,18 @@ export class StyleManager extends ShellFacade {
         _showToast: (...args) => this._showToast(...args),
       },
     });
+    // A place picked (a search row or chip, voice) opens its card.
+    this._removePlacePick = installPlacePick({
+      pinia: applicationPinia(),
+      subscribeCameraHandoff: (listener) =>
+        this.subscribeCameraHandoff(listener),
+      subscribe: (listener) =>
+        this._locationNavigation.subscribeLocationSearch(listener, {
+          emitCurrent: false,
+        }),
+      getDataManager: () => this._dataManager,
+      creditAirports,
+    });
     this._lastTrafficChipUpdateAt = 0;
 
     // Intel HUD
@@ -453,6 +472,7 @@ export class StyleManager extends ShellFacade {
     this._recording.hud = this.hud;
     this._cockpitCoordinator = new CockpitCoordinator({
       viewer,
+      cockpitStore: useCockpitStore(pinia),
       services: {
         flightsLayer: services.flightsLayer,
         militaryFlightsLayer: services.militaryFlightsLayer,
@@ -1962,6 +1982,7 @@ export class StyleManager extends ShellFacade {
     if (this._disposed) return;
     useOmnibarStore(applicationPinia()).connect(null);
     this._removeRailEdgeScroll?.();
+    this._removePlacePick?.();
     this._removeEntityContext?.();
     this._shareRestoration.destroy();
     this._feedback.clearLoadingStatus();

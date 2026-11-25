@@ -8,16 +8,19 @@ import { formatQuantity } from '../../ui/unitLabels.js';
 import {
   AIR_QUALITY_BANDS,
   airQualityBandById,
+  airQualityColor,
   AIR_QUALITY_OVERLAY_SOURCE_ID,
   AIR_QUALITY_OVERLAY_COHORT_LIMIT,
   AIR_QUALITY_OVERLAY_COLLISION_CAPACITY,
   AIR_QUALITY_PROVIDERS,
+  airQualityCovers,
   createAirQualityOverlayEntry,
   mapAnalystRecord,
   newestObservation,
   readingsAreStale,
   readingsInView,
   selectAirQualityOverlayCohort,
+  valueLabel,
 } from './model.js';
 export * from './model.js';
 export { createEcccAirQualitySource } from './source.js';
@@ -213,7 +216,7 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
      */
     getRowControls() {
       const provider = AIR_QUALITY_PROVIDERS.eccc;
-      const inView = readingsInView(_readings, viewRectangle(), READOUT_LIMIT);
+      const inView = layer.getHighestReadings(READOUT_LIMIT);
       const newest = _readings.reduce(
         (max, reading) => Math.max(max, reading.observedMs || 0),
         0,
@@ -251,11 +254,124 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
           items: inView.map((reading, index) => ({
             id: reading.id,
             ordinal: index + 1,
-            lead: `${reading.scale} ${reading.label}`,
-            text: `${reading.name} · ${t(reading.risk)}`,
+            lead: reading.lead,
+            text: `${reading.name} · ${reading.risk}`,
             accent: reading.color,
           })),
         },
+      };
+    },
+
+    /**
+     * The worst readings in the camera's view, worst first (the Weather
+     * card's list): `{id, name, lat, lon, lead: "AQHI 4", band, color, risk,
+     * record}`, `band` the legend band (`{id, label, color}`) or null and
+     * `record` the station's analyst record. Empty while off.
+     */
+    getHighestReadings(limit = READOUT_LIMIT) {
+      if (!_enabled) return [];
+      return readingsInView(_readings, viewRectangle(), limit).map(
+        (reading, index) => {
+          const band = airQualityBandById(reading.band);
+          return {
+            id: reading.id,
+            name: reading.name,
+            lat: reading.lat,
+            lon: reading.lon,
+            lead: `${reading.scale} ${reading.label}`,
+            band: band
+              ? { id: band.id, label: t(band.label), color: band.color }
+              : null,
+            color: reading.color,
+            risk: t(reading.risk),
+            record: mapAnalystRecord(reading, index),
+          };
+        },
+      );
+    },
+
+    /**
+     * Stations reporting per legend band, in legend order:
+     * `{id, label, color, count}`, `label` English (as the legend's). Empty
+     * while off or with nothing loaded.
+     */
+    getBandCounts() {
+      if (!_enabled || !_readings.length) return [];
+      return AIR_QUALITY_BANDS.map((band) => ({
+        id: band.id,
+        label: band.label,
+        color: band.color,
+        count: _readings.filter((reading) => reading.band === band.id).length,
+      }));
+    },
+
+    /**
+     * What Context shows of the layer: stations reporting by band, the
+     * worst readings in view (each with the station's analyst record, to
+     * open its card), and the network's coverage. Null while off.
+     */
+    getContextSummary(limit = READOUT_LIMIT) {
+      if (!_enabled) return null;
+      return {
+        caption: _count
+          ? tn(
+              _count,
+              '{count} station reporting',
+              '{count} stations reporting',
+            )
+          : '',
+        bands: layer.getBandCounts(),
+        itemsLabel: t('Highest air-quality readings in view'),
+        items: layer.getHighestReadings(limit).map((reading) => ({
+          key: reading.id,
+          lead: reading.lead,
+          level: reading.band?.id,
+          color: reading.color,
+          text: [reading.name, reading.band?.label].filter(Boolean).join(' · '),
+          title: `${reading.lead} · ${reading.name} · ${reading.risk}`,
+          lat: reading.lat,
+          lon: reading.lon,
+          record: reading.record,
+        })),
+        note: t(AIR_QUALITY_PROVIDERS.eccc.coverage),
+      };
+    },
+
+    /**
+     * A station's reading for its card: the value on its scale, its legend
+     * band and health message, and the scale's bands as segments (`share` of
+     * the scale) with the value's place on it (`at`, 0 to 1). Null for a
+     * record with no reading.
+     * @param {object} record An analyst record of this layer.
+     */
+    describeReading(record) {
+      const provider = AIR_QUALITY_PROVIDERS[record?.provider];
+      if (!provider || !Number.isFinite(record?.value)) return null;
+      const band = airQualityBandById(record.band);
+      // Each band's span on the published scale; the open top band is one step.
+      const top = provider.bands.at(-2)?.max ?? record.value;
+      let from = 0;
+      const segments = provider.bands.map((step) => {
+        const to = Number.isFinite(step.max) ? step.max : top + 1;
+        const legend = airQualityBandById(step.id);
+        const segment = {
+          id: step.id,
+          label: t(legend?.label ?? step.id),
+          color: airQualityColor(step.id),
+          share: (to - from) / (top + 1),
+        };
+        from = to;
+        return segment;
+      });
+      return {
+        scale: provider.scale,
+        value: valueLabel(provider.id, record.value),
+        band: band
+          ? { id: band.id, label: t(band.label), color: band.color }
+          : null,
+        risk: band ? t(band.risk) : '',
+        at: Math.min(1, Math.max(0, (record.value - 0.5) / (top + 1))),
+        segments,
       };
     },
 
@@ -280,13 +396,17 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
 
     /**
      * The nearest station's reading to a point, from the readings already
-     * loaded: `{value: "AQHI 3 · Low", detail: "Toronto · 4 km", at}`. Returns
-     * null while off, with no readings, or for invalid coordinates. Returns
-     * `{value: null, reason}` when no station is within AIR_QUALITY_VALUE_RADIUS_KM.
+     * loaded: `{value: "AQHI 3 · Low", detail: "Toronto · 4 km", at, level,
+     * color}`, the band and its colour when known. Returns
+     * null while off, for invalid coordinates, or while awaiting readings inside coverage. Returns
+     * `{value: null, reason}` when no station is within AIR_QUALITY_VALUE_RADIUS_KM,
+     * with `outsideCoverage: true` when the point is outside every provider's
+     * coverage area as well.
      */
     getValueAt(lat, lon) {
-      if (!_enabled || !_readings.length) return null;
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      if (!_enabled || !Number.isFinite(lat) || !Number.isFinite(lon))
+        return null;
+      if (!_readings.length && airQualityCovers(lat, lon)) return null;
       let nearest = null;
       let nearestKm = Infinity;
       for (const reading of _readings) {
@@ -304,12 +424,15 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
           reason: t('No station within {n} km', {
             n: formatNumber(AIR_QUALITY_VALUE_RADIUS_KM),
           }),
+          ...(airQualityCovers(lat, lon) ? {} : { outsideCoverage: true }),
         };
       const band = airQualityBandById(nearest.band);
       const shown = `${nearest.scale} ${nearest.label ?? nearest.value}`;
       return {
         value: band ? `${shown} · ${t(band.label)}` : shown,
         detail: `${nearest.name} · ${formatQuantity(Math.round(nearestKm), 'km')}`,
+        // The band and its map colour, so a reading can match the map.
+        ...(band ? { level: band.id, color: band.color } : {}),
         ...(Number.isFinite(nearest.observedMs)
           ? { at: nearest.observedMs }
           : {}),

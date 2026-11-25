@@ -1,14 +1,15 @@
-// src/ui/contextPanel.test.mjs — the Context panel: situational awareness
-// of the layers that are on, and the Contacts mode switch ContextControls
-// presents, over happy-dom.
+// src/ui/contextPanel.test.mjs — the Context panel: what is picked, led by
+// its hero, or situational awareness of the layers that are on, and the
+// Contacts mode switch ContextControls presents, over happy-dom.
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createPinia } from 'pinia';
+import { useCctvStore } from './stores/cctv.js';
+import { createPinia, setActivePinia } from 'pinia';
 import { createApp, nextTick } from 'vue';
 import ContextView from './views/ContextView.vue';
 import LayerPanelsView from './views/LayerPanelsView.vue';
+import EntityPreview from './views/panels/EntityPreview.vue';
 import { LayerPanel } from './layerPanel.js';
 import { createLayerFinder } from './layerFinderFilter.js';
 import { useLayerFinderStore } from './stores/layerFinder.js';
@@ -21,12 +22,16 @@ import { getConfiguredLayerCounts } from '../services/application.js';
 import { installEntityContext } from './entityContextBridge.js';
 import { bindRenderer } from '../render/rendererOf.js';
 import { fakeInput } from '../input/testDoubles.mjs';
+import { fakeCameraPort } from '../testSupport/fakeCameraPort.mjs';
 import { contextRadiusKm, setContextRadiusKm } from './contextRadius.js';
 import {
   closeContextSearch,
   contextSearchOpen,
   contextSearchText,
 } from './contextSearch.js';
+import { loadFleetModelSet, resetFleetModelSet } from '../data/fleetModels.js';
+import fs from 'node:fs';
+import { HERO_AUTOPLAY_MS } from './entityHeroViews.js';
 import { useContextStore } from './stores/context.js';
 import { useBhoteKoshiPanelStore } from './stores/bhoteKoshiPanel.js';
 import { useDisplayStore } from './stores/display.js';
@@ -36,6 +41,9 @@ import { ContextControls } from './contextControls.js';
 import { createControls as createWildlifeControls } from '../layers/wildlifeSightings/controls.js';
 import { normalizeInatObservations } from '../layers/wildlifeSightings/records.js';
 import { aircraftIcon } from '../data/aircraftIcons.js';
+import { GNSS_LEVEL_COLORS } from '../layers/gnss/records.js';
+import { airQualityColor } from '../layers/airQuality/model.js';
+import { createAirQualityLayer } from '../layers/airQuality/index.js';
 import { LayerLifecycle } from '../data/lifecycle.js';
 import { searchHls } from '../layers/recentImagery/catalog.js';
 import { createRecentImageryLayer } from '../layers/recentImagery/index.js';
@@ -50,7 +58,20 @@ import { firePerimeterSnapshot } from '../layers/perimeters/records.js';
 import { setLocale } from '../i18n/index.js';
 import { applicationI18n } from './i18n.js';
 
+import { CockpitCoordinator } from './cockpitCoordinator.js';
+
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('ViewContext leaves service reads and request lifetimes to the bridge', () => {
+  const source = fs.readFileSync(
+    new URL('./views/panels/ViewContext.vue', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(
+    source,
+    /\b(?:setTimeout|AbortController|readWeather|ensureLayerCounts|noteLiveCount)\b/,
+  );
+});
 
 // Austin, Texas: a zoomed-in view, well below globe scale.
 const HERE = { lat: 30.27, lon: -97.74 };
@@ -67,6 +88,34 @@ const flight = (id, lat, lon) => ({
  * Mount Context with a data manager whose layers are given as
  * `{id, name, enabled, records, stats}`. Returns what the tests read.
  */
+// The renderer's previews, as stubs: each draws nothing and never fails.
+const stubPreview = () => ({ setActive() {}, update() {}, destroy() {} });
+const STUB_PREVIEWS = {
+  model: stubPreview,
+  route: stubPreview,
+  cockpit: stubPreview,
+};
+
+/** The fleet's catalog and type map loaded as the layers load them, each model a stand-in byte. */
+async function withFleet(t) {
+  const file = (name) =>
+    fs.readFileSync(
+      new URL(`../../public/models/fleet/${name}`, import.meta.url),
+      'utf8',
+    );
+  const info = console.info;
+  console.info = () => {};
+  t.after(() => {
+    console.info = info;
+    resetFleetModelSet();
+  });
+  await loadFleetModelSet({
+    fetchImpl: async (url) =>
+      url.endsWith('.json')
+        ? new Response(file(url.slice(url.lastIndexOf('/') + 1)))
+        : new Response(new Uint8Array(1)),
+  });
+}
 
 function fixture(
   t,
@@ -161,8 +210,8 @@ function fixture(
         },
       },
     });
-    point = (center) => {
-      pose = { ...center, height: 40_000 };
+    point = (center, height = 40_000) => {
+      pose = { ...center, height };
       listeners.get('moveEnd')();
     };
     const counts = useLayerCountsStore(pinia);
@@ -441,7 +490,7 @@ test('nothing picked: one list per layer that is on, nearest first; its first ro
   assert.deepEqual(followed, [cards.card.key], 'one tap selects and follows');
 });
 
-test('selected flight route rounds a 999.6 metre leg to one kilometre', async (t) => {
+test('a selected flight displays halfway progress between its two airports', async (t) => {
   const { $, cards } = fixture(t, [
     flightsOn([flight('near01', HERE.lat, HERE.lon)]),
   ]);
@@ -461,9 +510,8 @@ test('selected flight route rounds a 999.6 metre leg to one kilometre', async (t
     },
   };
   await nextTick();
-  const legs = $('.entity-card__route-stats').children;
-  assert.match(legs[0].textContent, /1 km/);
-  assert.match(legs[1].textContent, /1 km/);
+  assert.match($('.route-profile__head').textContent, /50% flown/);
+  assert.match($('.route-profile__ends').textContent, /AAA.*BBB/);
 });
 
 test('Nearby traffic card footer localizes the flow source and preserves provider credits', async (t) => {
@@ -489,7 +537,7 @@ test('Nearby traffic card footer localizes the flow source and preserves provide
   $('.nearby-lists [data-row-layer="traffic"]').click();
   await nextTick();
   assert.match(
-    $('.entity-card__source:has(> span)').textContent,
+    $('.entity-card__source-line').textContent,
     /Simulado \(sin clave de TomTom\)/,
   );
   assert.equal(
@@ -598,8 +646,8 @@ test('filtered Nearby keeps Acartia attribution and viewing guidance visible on 
   assert.equal(cards.card.identity.id, sighting.stableId);
   assert.deepEqual(flown, [cards.card.key]);
   const card = $('.entity-card');
-  const footer = card.querySelector('p.entity-card__source:has(> span)');
-  assert.match(footer.textContent, /^Source Acartia(?: ·|$)/);
+  const sourceLine = card.querySelector('.entity-card__source-line');
+  assert.match(sourceLine.textContent, /^Acartia(?: ·|$)/);
   const credit = [...card.querySelectorAll('p')].find((paragraph) =>
     paragraph.textContent.includes(
       'Reported by Synthetic Whale Network (Partner)',
@@ -616,8 +664,13 @@ test('filtered Nearby keeps Acartia attribution and viewing guidance visible on 
       assert.notEqual(getComputedStyle(node).display, 'none', link.textContent);
     }
   }
-  const website = card.querySelector('a[href="https://example.com/"]');
-  assert.equal(getComputedStyle(website.parentElement).display, 'none');
+  const website = 'a[href="https://example.com/"]';
+  assert.equal(card.querySelector(website), null);
+  contextSearchText.value = '';
+  await nextTick();
+  assert.ok(card.querySelector(website));
+  contextSearchText.value = 'seal';
+  await nextTick();
   card.querySelector('button[aria-label="Close card"]').click();
   await nextTick();
   assert.equal(contextSearchText.value, 'seal');
@@ -656,6 +709,8 @@ test('filtered Nearby keeps the iNaturalist observation link visible on selectio
   row.click();
   await nextTick();
   const where = $('.entity-card__where').textContent;
+  assert.ok(!$('.entity-hero .close-up-map'));
+  assert.ok($('.entity-hero__placeholder'));
   assert.match(where, /Location obscured to a 0\.2° cell/);
   assert.doesNotMatch(where, /\.\d{3}°/);
   const source = $(`.entity-card__attribution-links a[href="${link}"]`);
@@ -684,19 +739,19 @@ test('selected cards qualify nearby distances when either end is an obscured sig
   ]);
   const distances = () => {
     const block = [
-      ...$('.spot-conditions').querySelectorAll('.spot-conditions__block'),
-    ].find((el) => el.querySelector('h4')?.textContent.includes('Also within'));
+      ...$('.spot-conditions').querySelectorAll('.nearby-lists [data-row-key]'),
+    ];
     return Object.fromEntries(
-      [...block.querySelectorAll('li')].map((row) => [
-        row.querySelector('.spot-conditions__row-title').textContent,
-        row.querySelector('.spot-conditions__row-meta').textContent,
+      block.map((row) => [
+        row.querySelector('.nearby-lists__name').textContent,
+        row.querySelector('.nearby-lists__meta').textContent,
       ]),
     );
   };
   cards.select({ layerId: 'local-dams', id: 'dam' });
   await nextTick();
   assert.match(distances().Owl, /approximate/);
-  assert.equal(distances().Datacenter, '0.0 km');
+  assert.equal(distances().Datacenter, '0 m');
   cards.select({ layerId: 'wildlife-sightings', id: 'inat:1' });
   await nextTick();
   assert.match(distances().Dam, /approximate/);
@@ -884,6 +939,186 @@ test('Nearby uses ordinary records and reserves zero for a completed radius read
     $('[data-row-layer="local-datacenters"]').textContent,
     /Recovered site/,
   );
+});
+
+test('a picked item leads with its hero, then its actions; its full details fold away', async (t) => {
+  const { $, cards } = fixture(t, [flightsOn([flight('test01', 30.3, -97.7)])]);
+  assert.equal(
+    cards.select({ layerId: 'flights', id: 'test01' }, { follow: false }),
+    true,
+  );
+  await nextTick();
+  const card = $('#entity-card');
+  const order = [
+    '.entity-hero',
+    '.entity-card__head',
+    '.entity-card__actions',
+  ].map((selector) => {
+    const node = card.querySelector(selector);
+    assert.ok(node, selector);
+    return node;
+  });
+  for (let index = 1; index < order.length; index++)
+    assert.ok(
+      order[index - 1].compareDocumentPosition(order[index]) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      'the hero, its name and its actions come first, in that order',
+    );
+  const more = card.querySelector('.entity-card__more');
+  assert.ok(more, 'the full details are there');
+  assert.equal(more.open, false, 'the full details start folded');
+  assert.ok(
+    order[2].compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING,
+    'the details come after the actions',
+  );
+  assert.equal(
+    Boolean($('.view-context')),
+    false,
+    'awareness gives way to the card',
+  );
+});
+
+// The corner icon itself needs the fleet model set to draw the 3D view; it
+// was checked in the browser. Here: it never sits in the button row, and it
+// stays off every view but the model, even on a followed aircraft.
+test('TR-3B is never a button, and stays off the views that are not the 3D model', async (t) => {
+  await withFleet(t);
+  const { $, cards, pinia } = fixture(
+    t,
+    [flightsOn([flight('test01', 30.3, -97.7)])],
+    { previews: STUB_PREVIEWS },
+  );
+  const cockpit = useCockpitStore(pinia);
+  cockpit.publishPresence({ entryAvailable: true, tr3b: { converted: false } });
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  cards.following = cards.card.key;
+  await nextTick();
+  assert.equal(
+    Boolean($('.entity-card__action--tr3b')),
+    false,
+    'no TR-3B button in the row',
+  );
+  const cockpitView = [
+    ...document.querySelectorAll(
+      '#entity-card .entity-card__preview-switch button',
+    ),
+  ].find((button) => button.title === 'Cockpit view');
+  assert.ok(cockpitView);
+  cockpitView.click();
+  await nextTick();
+  assert.equal(
+    Boolean($('.entity-hero__ufo')),
+    false,
+    'not on the cockpit view',
+  );
+});
+
+test('a model preview converts and restores the aircraft through its own Cockpit owner', async (t) => {
+  await withFleet(t);
+  const { $, cards, pinia } = fixture(
+    t,
+    [flightsOn([flight('test01', 30.3, -97.7)])],
+    { previews: STUB_PREVIEWS },
+  );
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  cards.following = cards.card.key;
+
+  const otherPinia = createPinia();
+  const otherCards = useEntityCardStore(otherPinia);
+  otherCards.connect({ previews: () => STUB_PREVIEWS });
+  otherCards.card = cards.card;
+  otherCards.following = cards.card.key;
+  const host = document.body.appendChild(document.createElement('div'));
+  const otherApp = createApp(EntityPreview, {
+    card: otherCards.card,
+    title: 'Other preview',
+  }).use(otherPinia);
+  otherApp.mount(host);
+  t.after(() => {
+    otherApp.unmount();
+    otherCards.connect(null);
+    host.remove();
+  });
+
+  const receiveToggle = (appPinia) => {
+    const cockpitStore = useCockpitStore(appPinia);
+    const viewer = { scene: {} };
+    const { port } = fakeCameraPort();
+    const unbind = bindRenderer(viewer, {
+      camera: port,
+      frame: { on: () => () => {} },
+    });
+    const coordinator = new CockpitCoordinator({
+      viewer,
+      cockpitStore,
+      services: {},
+      readDataManager: () => null,
+      readContext: () => null,
+    });
+    t.after(() => {
+      coordinator.stop();
+      unbind();
+    });
+    let converted = false;
+    const publish = () => cockpitStore.publishPresence({ tr3b: { converted } });
+    publish();
+    // Observe the controller before its own eligibility can mask a cross-app call.
+    return t.mock.method(coordinator.cockpitView, 'toggleTrackedTr3b', () => {
+      converted = !converted;
+      publish();
+    });
+  };
+  const origin = receiveToggle(pinia);
+  const other = receiveToggle(otherPinia);
+  await nextTick();
+  $('#entity-card button[title="3D model"]').click();
+  await nextTick();
+  const button = () => $('#entity-card .entity-hero__ufo');
+  assert.equal(button().title, 'Reclassify as TR-3B');
+  setActivePinia(otherPinia);
+  button().click();
+  await nextTick();
+  assert.equal(button().title, 'Restore real aircraft');
+  setActivePinia(otherPinia);
+  button().click();
+  await nextTick();
+  assert.equal(button().title, 'Reclassify as TR-3B');
+  assert.equal(origin.mock.callCount(), 2);
+  assert.equal(other.mock.callCount(), 0);
+});
+
+test('a local earthquake tile breaks down every counted event within its radius', async (t) => {
+  const records = [
+    { ...HERE, id: 'minor-a', magnitude: 3.1 },
+    { ...HERE, id: 'minor-b', magnitude: 3.3 },
+    { ...HERE, id: 'moderate', magnitude: 4.4 },
+    { ...HERE, id: 'strong', magnitude: 5.2 },
+    { ...HERE, lat: HERE.lat + 4, id: 'outside', magnitude: 6.1 },
+  ];
+  const read = t.mock.fn(() => records);
+  const { $, cards } = fixture(t, [
+    {
+      id: 'earthquakes',
+      name: 'Earthquakes',
+      enabled: true,
+      stats: { count: records.length },
+      module: { getAnalystRecords: read },
+    },
+  ]);
+  setContextRadiusKm(250);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+
+  const tile = $('.view-context__tile[data-layer="earthquakes"]');
+  assert.equal(tile.querySelector('strong').textContent, '4');
+  const bar = tile.querySelector('[role="img"].view-context__bar');
+  assert.ok(bar, 'the local count includes a breakdown bar');
+  const legend = bar.getAttribute('aria-label');
+  assert.match(legend, /Below M4 2/);
+  assert.match(legend, /M4 to 5 1/);
+  assert.match(legend, /M5 to 6 1/);
+  assert.doesNotMatch(legend, /M6 and above/);
+  assert.equal(read.mock.callCount(), 1);
 });
 
 test('globe view: a count per layer that is on, with its feed state, and no Layers on rows', async (t) => {
@@ -1075,8 +1310,13 @@ test('with nothing on, Context shows a few facts and points to Data Layers', asy
   ].find((tile) => /Daylight/.test(tile.textContent));
   assert.match(daylight.querySelector('strong').textContent, /^(\d+h )?\d+m$/);
   assert.match(daylight.getAttribute('title'), /minutes?$/);
-  // The view has no ground height to give, so no elevation tile.
-  assert.ok(!facts.some((fact) => /Elevation/.test(fact)));
+  assert.ok(facts.some((fact) => /Elevation.*149/.test(fact)));
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  assert.doesNotMatch(
+    $('.view-context__tiles--facts').textContent,
+    /Elevation/,
+  );
   assert.match(
     $('.view-context__pointer').textContent,
     /Turn on layers to see what is around/,
@@ -1100,10 +1340,9 @@ test('with nothing on, Context shows a few facts and points to Data Layers', asy
 function contextSearchStyles(t) {
   const style = document.createElement('style');
   // Happy DOM drops the multiline :is() rule. Chromium checks the original.
-  style.textContent = readFileSync(
-    new URL('./styles/context-dock.css', import.meta.url),
-    'utf8',
-  ).replace(/\s+/g, ' ');
+  style.textContent = fs
+    .readFileSync(new URL('./styles/context-dock.css', import.meta.url), 'utf8')
+    .replace(/\s+/g, ' ');
   document.head.append(style);
   t.after(() => style.remove());
 }
@@ -1241,6 +1480,26 @@ test('Context search leaves the Data Layers action available with all layers off
   );
 });
 
+test('a nearest vessel is flown to, since it cannot be followed', async (t) => {
+  const { $, cards, followed, flown } = fixture(t, [
+    {
+      id: 'ais-live-vessels',
+      name: 'Live Vessels',
+      enabled: true,
+      records: [
+        { id: 'boat01', mmsi: 'boat01', name: 'BOAT', lat: 30.28, lon: -97.74 },
+      ],
+    },
+  ]);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  $(NEAREST).click();
+  await nextTick();
+  assert.equal(cards.card?.identity.id, 'boat01');
+  assert.deepEqual(followed, []);
+  assert.deepEqual(flown, [cards.card.key]);
+});
+
 test('the nearby lists follow the Context search', async (t) => {
   contextSearchStyles(t);
   const { $, cards } = fixture(t, [
@@ -1266,6 +1525,110 @@ test('the nearby lists follow the Context search', async (t) => {
   assert.notEqual(getComputedStyle($('.nearby-lists')).display, 'none');
 });
 
+test('More details starts folded for every new pick', async (t) => {
+  const { $, cards } = fixture(t, [
+    flightsOn([flight('test01', 30.3, -97.7), flight('test02', 30.4, -97.7)]),
+  ]);
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  $('.entity-card__more').open = true;
+  cards.select({ layerId: 'flights', id: 'test02' }, { follow: false });
+  await nextTick();
+  assert.equal($('.entity-card__more').open, false);
+});
+
+test('a card’s source line words its age with the locale’s number format', async (t) => {
+  const observedMs = Date.now() - 1500 * 86_400_000;
+  const { $, cards } = fixture(t, [
+    {
+      id: 'earthquakes',
+      name: 'Earthquakes',
+      enabled: true,
+      records: [
+        { id: 'q1', title: 'M4 quake', lat: 30.3, lon: -97.7, observedMs },
+      ],
+    },
+  ]);
+  cards.select({ layerId: 'earthquakes', id: 'q1' }, { fly: false });
+  await nextTick();
+  assert.match(
+    $('.entity-card__head .entity-card__source-line')?.textContent || '',
+    /1,500 d ago/,
+  );
+});
+
+test('a card has one source line under its name, its key numbers, then Nearby before More details', async (t) => {
+  const { $, cards } = fixture(t, [
+    flightsOn(
+      [
+        {
+          ...flight('test01', 30.3, -97.7),
+          speedMps: 200,
+          heading: 71,
+          verticalRateMps: 0,
+        },
+        flight('next01', 30.31, -97.71),
+      ],
+      { source: 'OpenSky' },
+    ),
+  ]);
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  const line = $('.entity-card__head .entity-card__source-line');
+  assert.ok(line, 'one small source line in the header');
+  assert.match(line.textContent, /OpenSky/);
+  const tiles = [
+    ...document.querySelectorAll('#entity-card .entity-card__tile span'),
+  ].map((span) => span.textContent);
+  assert.deepEqual(
+    tiles,
+    ['Altitude', 'Speed', 'Heading'],
+    'altitude, speed and heading, live; the climb rate stays a fact',
+  );
+  const nearby = $('#entity-card .nearby-lists');
+  const more = $('#entity-card .entity-card__more');
+  assert.ok(nearby && more);
+  assert.match(
+    $('#entity-card .nearby-lists__title').textContent,
+    /^Nearby · 250 km$/,
+  );
+  assert.ok(
+    nearby.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING,
+    'Nearby, then More details',
+  );
+  assert.equal(
+    Boolean(
+      $(
+        '#entity-card .spot-conditions__weather, #entity-card .spot-conditions__radius',
+      ),
+    ),
+    false,
+    'no weather block or second radius on a card',
+  );
+  assert.match(more.textContent, /Data source.*OpenSky/s);
+});
+
+test("Nearby on a card lists the picked item's own layer first", async (t) => {
+  const { $, cards } = fixture(t, [
+    flightsOn([flight('plane01', 30.28, -97.75)]),
+    {
+      id: 'ais-live-vessels',
+      name: 'Live Vessels',
+      enabled: true,
+      records: [
+        { id: 'b1', mmsi: 'b1', name: 'PICKED', lat: 30.27, lon: -97.74 },
+        { id: 'b2', mmsi: 'b2', name: 'OTHER BOAT', lat: 30.4, lon: -97.9 },
+      ],
+    },
+  ]);
+  cards.select({ layerId: 'ais-live-vessels', id: 'b1' }, { fly: false });
+  await nextTick();
+  const order = [
+    ...document.querySelectorAll('#entity-card .nearby-lists__layer'),
+  ].map((list) => list.dataset.layer);
+  assert.deepEqual(order, ['ais-live-vessels', 'flights']);
+});
+
 test('nothing picked: the time reads local and UTC, and there is only counts and one Nearby section', async (t) => {
   const { $, cards } = fixture(t, [flightsOn([flight('far01', 35, -90)])]);
   cards.setView({ center: HERE, heightM: 40_000 });
@@ -1282,6 +1645,250 @@ test('nothing picked: the time reads local and UTC, and there is only counts and
     /Nothing from the layers/,
     'never "nothing nearby"',
   );
+});
+
+test('a vessel drawn with a model shows it on top, the map beside it; with no model, the map alone', async (t) => {
+  await withFleet(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const active = [];
+  const { $, cards } = fixture(
+    t,
+    [
+      {
+        id: 'ais-live-vessels',
+        name: 'Live Vessels',
+        enabled: true,
+        records: [
+          {
+            id: 'boat01',
+            mmsi: '366000001',
+            name: 'BOAT',
+            shipType: 'Cargo',
+            lat: 30.28,
+            lon: -97.74,
+          },
+        ],
+      },
+    ],
+    {
+      previews: {
+        ...STUB_PREVIEWS,
+        model: () => ({
+          setActive: (value) => active.push(value),
+          update() {},
+          destroy() {},
+        }),
+      },
+    },
+  );
+  cards.select({ layerId: 'ais-live-vessels', id: 'boat01' }, { fly: false });
+  await nextTick();
+  await turn();
+  await nextTick();
+  assert.equal($('.entity-hero').dataset.hero, 'model');
+  assert.ok($('.entity-hero .aircraft-hero'), 'the model draws while paused');
+  assert.equal(
+    Boolean($('.entity-hero .close-up-map')),
+    false,
+    'the map is made only once it is picked',
+  );
+  const switches = [
+    ...document.querySelectorAll(
+      '#entity-card .entity-card__preview-switch button',
+    ),
+  ];
+  assert.deepEqual(
+    switches.map((button) => button.title),
+    ['3D model', 'Map', 'Play preview'],
+  );
+  assert.equal(
+    switches[2].getAttribute('aria-label'),
+    'Play preview',
+    'the card starts paused',
+  );
+  assert.equal(active.at(-1), false, 'the model does not rotate');
+  t.mock.timers.tick(HERO_AUTOPLAY_MS * 2);
+  await nextTick();
+  assert.equal(
+    switches[0].getAttribute('aria-pressed'),
+    'true',
+    'the first view stays until Play',
+  );
+  switches[2].click();
+  await nextTick();
+  assert.equal(active.at(-1), true, 'Play starts model rotation');
+  switches[2].click();
+  await nextTick();
+  assert.equal(active.at(-1), false, 'Pause stops model rotation');
+  switches[2].click();
+  await nextTick();
+  t.mock.timers.tick(HERO_AUTOPLAY_MS - 1);
+  await nextTick();
+  assert.equal(
+    switches[0].getAttribute('aria-pressed'),
+    'true',
+    'Play starts a fresh view timer',
+  );
+  t.mock.timers.tick(1);
+  await nextTick();
+  assert.equal(
+    switches[1].getAttribute('aria-pressed'),
+    'true',
+    'the next view follows the timer',
+  );
+  assert.equal(active.at(-1), false, 'the hidden model stops');
+  switches[1].click();
+  await nextTick();
+  assert.equal(
+    switches[1].getAttribute('aria-pressed'),
+    'true',
+    'the map, picked',
+  );
+  cards.card = { ...cards.card, lat: null, lon: null };
+  await nextTick();
+  assert.equal(
+    $('button[aria-label="Map"]'),
+    null,
+    'without a position only the model remains',
+  );
+  const play = $('.entity-card__preview-play');
+  assert.ok(play, 'a lone model still offers Play');
+  play.click();
+  await nextTick();
+  assert.equal(
+    active.at(-1),
+    true,
+    'Play rotates the lone model without a view timer',
+  );
+  resetFleetModelSet();
+  cards.clear();
+  await nextTick();
+  cards.select({ layerId: 'ais-live-vessels', id: 'boat01' }, { fly: false });
+  await nextTick();
+  assert.equal(
+    $('.entity-hero').dataset.hero,
+    'map',
+    'no model set loaded: the close-up map',
+  );
+});
+
+test('the card uses a host ride label only for the matching provider item', async (t) => {
+  const { $, cards, pinia } = fixture(t, [
+    {
+      id: 'ground-transit',
+      name: 'Transit',
+      enabled: true,
+      records: [{ id: 'bus-1', name: 'Route 8', ...HERE }],
+    },
+  ]);
+  cards.canCockpit = () => true;
+  cards.select({ layerId: 'ground-transit', id: 'bus-1' }, { fly: false });
+  const cockpit = useCockpitStore(pinia);
+  const pose = {
+    entryLayerId: 'ground-transit',
+    entryId: 'bus-1',
+    entryFace: { icon: 'directions_bus', label: 'Busfahreransicht' },
+  };
+  cockpit.publishPresence(pose);
+  await nextTick();
+  const lead = $('[data-entity-cockpit-entry]');
+  assert.match(lead.textContent, /Busfahreransicht/);
+  for (const other of [
+    { entryId: 'bus-2' },
+    { entryLayerId: 'another-layer' },
+  ]) {
+    cockpit.publishPresence({ ...pose, ...other });
+    await nextTick();
+    assert.doesNotMatch(lead.textContent, /Busfahreransicht/);
+  }
+});
+
+test('an aircraft without a photo, route or model shows a close-up map, never its icon', async (t) => {
+  const { $, cards } = fixture(t, [flightsOn([flight('test01', 30.3, -97.7)])]);
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  await turn();
+  await nextTick();
+  assert.equal($('.entity-hero').dataset.hero, 'map');
+  assert.equal(Boolean($('.entity-hero__placeholder')), false);
+});
+
+test("a camera's row of figures fills a missing city, field of view or range from facing, refresh, then provider, and More details never repeats it", async (t) => {
+  const camera = { id: 'cam1', name: 'US-183', lat: 30.27, lon: -97.73 };
+  let details = {};
+  const { $, cards, pinia } = fixture(t, [
+    {
+      id: 'cctv',
+      name: 'Cameras',
+      enabled: true,
+      records: [camera],
+      module: {
+        findByQuery: (id) => (id === camera.id ? camera : null),
+        cameraDetails: () => ({
+          name: camera.name,
+          city: null,
+          provider: null,
+          feedType: null,
+          headingDeg: null,
+          fovDeg: null,
+          rangeM: null,
+          refreshMs: 6_000,
+          ...details,
+        }),
+      },
+    },
+  ]);
+  const show = async (next) => {
+    details = next;
+    cards.clear();
+    await nextTick();
+    cards.select({ layerId: 'cctv', id: 'cam1' }, { fly: false });
+    await nextTick();
+    await nextTick();
+    return {
+      tiles: [
+        ...document.querySelectorAll('#entity-card .entity-card__tile span'),
+      ].map((span) => span.textContent),
+      more: $('#entity-card .entity-card__more')?.textContent || '',
+    };
+  };
+  // No field of view or range: facing and refresh take their places.
+  let shown = await show({ city: 'Austin', provider: 'TxDOT', headingDeg: 90 });
+  const cameraStore = useCctvStore(pinia);
+  cameraStore.setFrame({
+    cameraId: 'cam1',
+    currentSrc: 'pending.jpg',
+    hasFrame: false,
+  });
+  await nextTick();
+  const line = $('.entity-card__source-line');
+  assert.equal(line.textContent, 'TxDOT');
+  const settled = {
+    cameraId: 'cam1',
+    src: 'first.jpg',
+    hasFrame: true,
+    settledAt: Date.now() - 120000,
+  };
+  cameraStore.setFrame(settled);
+  await nextTick();
+  const previous = line.textContent;
+  assert.match(previous, /2/);
+  cameraStore.setFrame({ ...settled, currentSrc: 'next.jpg', loading: true });
+  await nextTick();
+  assert.equal(line.textContent, previous);
+  assert.deepEqual(shown.tiles, ['City', 'Facing', 'Refresh']);
+  assert.match(shown.more, /Data source\s*TxDOT/);
+  assert.doesNotMatch(shown.more, /City|Facing|Refresh/);
+  // Only a city: refresh, then the provider, stand in; the provider leaves
+  // More details for the row.
+  shown = await show({ city: 'Austin', provider: 'TxDOT' });
+  assert.deepEqual(shown.tiles, ['City', 'Refresh', 'Provider']);
+  assert.doesNotMatch(shown.more, /Data source|TxDOT|City|Refresh/);
+  // One figure is no row: it goes under More details.
+  shown = await show({});
+  assert.deepEqual(shown.tiles, []);
+  assert.equal($('#entity-card .entity-card__tiles'), null);
+  assert.match(shown.more, /Refresh\s*6 s/);
 });
 
 test('with nothing on, display-only tiles show what free layers would show, worldwide and last known', async (t) => {
@@ -1442,6 +2049,10 @@ test(
     await nextTick();
     assert.equal(Boolean($('.nearby-lists')), false, 'the section is gone');
     assert.equal(document.activeElement, $('.view-context__radius input'));
+
+    cards.setView({ center: HERE, heightM: 6_000_000 });
+    await nextTick();
+    assert.ok(document.activeElement.matches('.view-context__blocks'));
   },
 );
 
@@ -1810,6 +2421,82 @@ test('the globe wildlife count tracks inspectable sightings independently of gri
   assert.equal(block().querySelectorAll('[data-row-key]').length, 1);
 });
 
+test('selecting a Nearby sighting keeps its record until the card closes', async (t) => {
+  const now = Date.now();
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now });
+  const owl = {
+    ...HERE,
+    stableId: 'inat:1',
+    commonName: 'Barred Owl',
+    obscured: true,
+    observedAt: now - 2 * 86_400_000 + 1_000,
+  };
+  const state = {
+    enabled: true,
+    rows: new Map([[owl.stableId, owl]]),
+    renderedRows: [],
+    lastUpdate: now,
+  };
+  const { methods } = createWildlifeControls({
+    state,
+    services: { now: Date.now },
+    parts: {},
+  });
+  const wildlife = {
+    id: 'wildlife-sightings',
+    name: 'Wildlife Sightings',
+    enabled: true,
+    stats: methods.getStats(),
+    module: methods,
+  };
+  const { $, cards, flown, replaceManager } = fixture(t, [wildlife]);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  const row = $(
+    '.nearby-lists__layer[data-layer="wildlife-sightings"] [data-row-key]',
+  );
+  row.click();
+  await nextTick();
+  assert.equal(cards.card.title, 'Barred Owl');
+  assert.deepEqual(flown, [cards.card.key]);
+
+  const newState = { ...state, rows: new Map(state.rows), contextRecord: null };
+  const replacement = createWildlifeControls({
+    state: newState,
+    services: { now: Date.now },
+    parts: {},
+  }).methods;
+  const newRow = { ...wildlife, module: replacement };
+  replaceManager({
+    layers: new Map([[wildlife.id, newRow]]),
+    getAll: () => [newRow],
+  });
+  cards.syncDataManager();
+  assert.equal(state.contextRecord, null);
+  t.mock.timers.tick(2_000);
+  await nextTick();
+  assert.equal(cards.lost, false);
+  assert.equal(replacement.getInspectableCount(), 1);
+  newState.rows.clear();
+  cards.refresh();
+  assert.equal(cards.lost, false);
+  assert.equal(replacement.getInspectableCount(), 1);
+  const identity = cards.card.identity;
+  assert.equal(cards.select(identity), true);
+  assert.equal(
+    replacement.getInspectableCount(),
+    1,
+    'reselecting preserves the record',
+  );
+  assert.equal(
+    state.selectedId,
+    undefined,
+    'row selection does not pick a marker',
+  );
+  cards.clear();
+  assert.equal(replacement.getInspectableCount(), 0);
+});
+
 test('the globe count stays through a refresh and clears for a new enable', async (t) => {
   const flights = flightsOn([], { count: 123 });
   const { $, cards, notifyLayers } = fixture(t, [flights]);
@@ -1954,7 +2641,12 @@ test('a field has a value tile, and Air Quality also offers searchable station r
       ],
       stats: { count: 2, lastUpdate: Date.now() },
       module: {
-        getValueAt: () => ({ value: null, reason: 'No station within 50 km' }),
+        // Outside its coverage, as the layer says at this centre.
+        getValueAt: () => ({
+          value: null,
+          reason: 'No station within 50 km',
+          outsideCoverage: true,
+        }),
       },
     },
   ]);
@@ -1998,6 +2690,617 @@ test('a field has a value tile, and Air Quality also offers searchable station r
   station.click();
   await nextTick();
   assert.equal(cards.card?.identity.id, 'north');
+});
+
+// A selected flight away from the centre of the view, with field layers.
+const AIRCRAFT = { lat: 30.4, lon: -97.5 };
+const fieldLayer = (id, name, getValueAt, extra = {}) => ({
+  id,
+  name,
+  enabled: true,
+  stats: { count: 0, lastUpdate: Date.now() },
+  ...extra,
+  module: { getAnalystRecords: undefined, getValueAt },
+});
+async function selectedFlightWith(t, fields) {
+  const context = fixture(t, [
+    flightsOn([
+      flight('near01', AIRCRAFT.lat, AIRCRAFT.lon),
+      // Farther from the view centre, near the aircraft: its Nearby row.
+      flight('near02', AIRCRAFT.lat + 0.05, AIRCRAFT.lon + 0.05),
+    ]),
+    ...fields,
+  ]);
+  context.cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  context.$(NEAREST).click();
+  await nextTick();
+  assert.equal(context.cards.card?.identity.id, 'near01');
+  return context;
+}
+const conditionRow = (layerId) =>
+  document.querySelector(`.spot-conditions__fields [data-layer="${layerId}"]`);
+
+test('a selected flight shows Conditions here: GNSS integrity read at the aircraft, not the view centre', async (t) => {
+  const asked = [];
+  const { $ } = await selectedFlightWith(t, [
+    fieldLayer('gnss-integrity', 'GNSS integrity', (lat, lon) => {
+      asked.push([lat, lon]);
+      return lat === AIRCRAFT.lat && lon === AIRCRAFT.lon
+        ? {
+            value: 'Low interference',
+            detail: 'Flight reports',
+            at: Date.now() - 20 * 60_000,
+          }
+        : { value: 'View centre reading' };
+    }),
+  ]);
+  const group = $('.spot-conditions__fields');
+  assert.ok(group, 'a Conditions here group on the card');
+  assert.match(group.querySelector('h4')?.textContent ?? '', /Conditions here/);
+  assert.ok(group.querySelector('ul > li'), 'its rows are a list');
+  const row = conditionRow('gnss-integrity');
+  assert.match(
+    row.querySelector('.spot-conditions__field-name').textContent,
+    /GNSS integrity/i,
+  );
+  assert.equal(
+    row.querySelector('.spot-conditions__field-value').textContent.trim(),
+    'Low interference',
+  );
+  assert.equal(
+    row.querySelector('.spot-conditions__field-detail').textContent,
+    'Flight reports',
+  );
+  assert.equal(
+    row.querySelector('.spot-conditions__field-age').textContent,
+    'Updated 20 min ago',
+  );
+  assert.ok(row.querySelector('.material-symbols-outlined'), 'its layer icon');
+  // No legend band in this reading: no colour, and not shown as empty.
+  assert.equal(row.dataset.level, undefined);
+  assert.equal(row.querySelector('.spot-conditions__field-swatch'), null);
+  assert.ok(!row.classList.contains('spot-conditions__field--empty'));
+  assert.doesNotMatch(row.textContent, /View centre reading/);
+  assert.deepEqual(asked.at(-1), [AIRCRAFT.lat, AIRCRAFT.lon]);
+  // It sits just above the Nearby lists.
+  const nearby = $('.spot-conditions .nearby-lists');
+  assert.ok(nearby);
+  assert.ok(
+    group.compareDocumentPosition(nearby) & Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+});
+
+test('a cached field retains its band and names the stale feed', async (t) => {
+  await selectedFlightWith(t, [
+    fieldLayer(
+      'air-quality',
+      'Air Quality',
+      () => ({
+        value: 'AQHI 7',
+        level: 'high',
+        color: '#ffaa55',
+      }),
+      { stats: { count: 2, stale: true } },
+    ),
+  ]);
+  const row = conditionRow('air-quality');
+  assert.equal(row.dataset.level, 'high');
+  assert.match(row.textContent, /Stale/);
+  assert.match(row.textContent, /AQHI 7/);
+});
+
+test('Conditions here says No reading here for an empty reading, and the feed state for a failed read', async (t) => {
+  await selectedFlightWith(t, [
+    fieldLayer('gnss-integrity', 'GNSS integrity', () => null),
+    fieldLayer('wind', 'Wind', () => ({ readFailed: true }), {
+      stats: { count: 0, lastUpdate: Date.now(), stale: true },
+    }),
+  ]);
+  const gnss = conditionRow('gnss-integrity');
+  assert.match(gnss.textContent, /No reading here/);
+  assert.doesNotMatch(gnss.textContent, /—/);
+  assert.ok(gnss.classList.contains('spot-conditions__field--empty'));
+  assert.equal(gnss.dataset.level, undefined);
+  assert.equal(gnss.querySelector('.spot-conditions__field-swatch'), null);
+  const wind = conditionRow('wind');
+  assert.match(wind.textContent, /Stale/);
+  assert.doesNotMatch(wind.textContent, /No reading here|—/);
+  assert.ok(wind.classList.contains('spot-conditions__field--failed'));
+  // The feed state's dot, as the Inspector shows it, beside its words.
+  const dot = wind.querySelector('.view-context__dot');
+  assert.ok(dot.classList.contains('view-context__dot--stale'));
+  assert.equal(dot.getAttribute('aria-hidden'), 'true');
+});
+
+test('Conditions here shows a GNSS reading in its legend band: colour and the band words', async (t) => {
+  const BANDS = [
+    ['high', 'Low-accuracy score > 10%'],
+    ['medium', 'Low-accuracy score 2–10%'],
+    ['low', 'Low-accuracy score < 2%'],
+  ];
+  let reading = null;
+  const { notifyLayers } = await selectedFlightWith(t, [
+    fieldLayer('gnss-integrity', 'GNSS integrity', () => reading),
+    fieldLayer('air-quality', 'Air Quality', () => ({
+      value: 'AQHI 7 · High',
+      detail: 'Hamilton · 3 km',
+      level: 'high',
+      color: airQualityColor('high'),
+    })),
+  ]);
+  for (const [level, words] of BANDS) {
+    reading = {
+      value: words,
+      detail: '3 of 9 aircraft reported low accuracy',
+      level,
+      color: GNSS_LEVEL_COLORS[level],
+    };
+    notifyLayers();
+    await nextTick();
+    const row = conditionRow('gnss-integrity');
+    assert.equal(row.dataset.level, level);
+    assert.equal(
+      row.style.getPropertyValue('--field-band'),
+      GNSS_LEVEL_COLORS[level],
+    );
+    // The colour is never alone: the band's words sit beside it.
+    const value = row.querySelector('.spot-conditions__field-value');
+    assert.equal(value.textContent.trim(), words);
+    const swatch = value.querySelector('.spot-conditions__field-swatch');
+    assert.equal(swatch.getAttribute('aria-hidden'), 'true');
+  }
+  const air = conditionRow('air-quality');
+  assert.equal(air.dataset.level, 'high');
+  assert.equal(
+    air.style.getPropertyValue('--field-band'),
+    airQualityColor('high'),
+  );
+  assert.match(air.textContent, /AQHI 7 · High/);
+  // A colour that is not a plain hex colour is not used.
+  reading = { value: 'Low-accuracy score < 2%', level: 'low', color: 'red;x' };
+  notifyLayers();
+  await nextTick();
+  const row = conditionRow('gnss-integrity');
+  assert.equal(row.dataset.level, undefined);
+  assert.equal(row.querySelector('.spot-conditions__field-swatch'), null);
+  assert.match(row.textContent, /Low-accuracy score < 2%/);
+});
+
+test('Conditions here leaves out a field layer that is off, and the whole group with none on', async (t) => {
+  const gnss = fieldLayer('gnss-integrity', 'GNSS integrity', () => ({
+    value: 'Low interference',
+  }));
+  const wind = fieldLayer('wind', 'Wind', () => ({ value: '20 km/h from W' }), {
+    enabled: false,
+  });
+  const { $, notifyLayers } = await selectedFlightWith(t, [gnss, wind]);
+  assert.ok(conditionRow('gnss-integrity'));
+  assert.equal(conditionRow('wind'), null, 'no row for a layer that is off');
+  gnss.enabled = false;
+  notifyLayers();
+  await nextTick();
+  assert.equal(
+    $('.spot-conditions__fields'),
+    null,
+    'no group without field layers on',
+  );
+  assert.ok($('.spot-conditions .nearby-lists'), 'Nearby stays');
+});
+
+test('Conditions here shows Air Quality only inside its coverage', async (t) => {
+  let air = {
+    value: 'AQHI 3 · Low',
+    detail: 'Toronto · 2 km',
+    level: 'low',
+    color: airQualityColor('low'),
+  };
+  const { $, notifyLayers } = await selectedFlightWith(t, [
+    fieldLayer('gnss-integrity', 'GNSS integrity', () => ({
+      value: 'Low interference',
+    })),
+    fieldLayer('air-quality', 'Air Quality', () => air),
+  ]);
+  assert.match(conditionRow('air-quality').textContent, /AQHI 3 · Low/);
+  // Inside coverage, no station near: the reason in place of a value.
+  air = { value: null, reason: 'No station within 50 km' };
+  notifyLayers();
+  await nextTick();
+  const empty = conditionRow('air-quality');
+  assert.match(
+    empty.querySelector('.spot-conditions__field-value').textContent,
+    /—/,
+  );
+  assert.match(empty.textContent, /No station within 50 km/);
+  // Outside coverage (Chicago): no row at all, the GNSS row stays.
+  air = {
+    value: null,
+    reason: 'No station within 50 km',
+    outsideCoverage: true,
+  };
+  notifyLayers();
+  await nextTick();
+  assert.equal(conditionRow('air-quality'), null);
+  assert.ok(conditionRow('gnss-integrity'));
+  assert.doesNotMatch(
+    $('.spot-conditions__fields').textContent,
+    /No reading here|No station/,
+  );
+});
+
+test('Conditions here has no group when every field reading is outside coverage', async (t) => {
+  const { $ } = await selectedFlightWith(t, [
+    fieldLayer('air-quality', 'Air Quality', () => ({
+      value: null,
+      reason: 'No station within 50 km',
+      outsideCoverage: true,
+    })),
+  ]);
+  assert.equal($('.spot-conditions__fields'), null);
+  assert.ok($('.spot-conditions .nearby-lists'), 'Nearby stays');
+});
+
+test("Conditions here leaves out the selected item's own layer", async (t) => {
+  const station = {
+    id: 'eccc:Chatham',
+    provider: 'eccc',
+    scale: 'AQHI',
+    value: 2,
+    band: 'low',
+    name: 'Chatham',
+    lat: HERE.lat,
+    lon: HERE.lon,
+  };
+  const { cards } = fixture(t, [
+    {
+      id: 'air-quality',
+      name: 'Air Quality',
+      enabled: true,
+      records: [station],
+      stats: { count: 1, lastUpdate: Date.now() },
+      module: {
+        getValueAt: () => ({ value: 'AQHI 2 · Low', detail: 'Chatham · 0 km' }),
+      },
+    },
+    fieldLayer('gnss-integrity', 'GNSS integrity', () => ({
+      value: 'Low interference',
+    })),
+  ]);
+  cards.select({
+    layerId: 'air-quality',
+    id: station.id,
+    label: 'Chatham',
+    lat: station.lat,
+    lon: station.lon,
+    record: station,
+  });
+  await nextTick();
+  assert.equal(conditionRow('air-quality'), null, 'not the card again');
+  assert.ok(conditionRow('gnss-integrity'), 'other layers stay');
+});
+
+// A Toronto view, zoomed in, with Air Quality and GNSS integrity on.
+const aqStation = (id, lat, lon, value, band) => ({
+  id: `eccc:${id}`,
+  provider: 'eccc',
+  scale: 'AQHI',
+  value,
+  band,
+  name: id,
+  lat,
+  lon,
+});
+const realAirQuality = () =>
+  createAirQualityLayer({
+    source: { getSnapshot: async () => [] },
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {} },
+  });
+
+test('Within: a layer with items and a reading here has one tile, the reading leading and its count under it', async (t) => {
+  const { $, cards } = fixture(t, [
+    {
+      id: 'air-quality',
+      name: 'Air Quality',
+      enabled: true,
+      records: [
+        aqStation('North', HERE.lat + 0.05, HERE.lon, 2, 'low'),
+        aqStation('South', HERE.lat - 0.05, HERE.lon, 3, 'low'),
+      ],
+      stats: { count: 2, lastUpdate: Date.now() },
+      module: {
+        getValueAt: () => ({
+          value: 'AQHI 2 · Low',
+          detail: 'North · 6 km',
+          level: 'low',
+          color: airQualityColor('low'),
+        }),
+      },
+    },
+  ]);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  const tiles = document.querySelectorAll(
+    '.view-context__tile[data-layer="air-quality"]',
+  );
+  assert.equal(tiles.length, 1, 'one tile, not a count and a reading');
+  const [tile] = tiles;
+  const pill = tile.querySelector('strong.field-pill');
+  assert.equal(pill.textContent.trim(), 'AQHI 2 · Low');
+  assert.equal(pill.dataset.level, 'low');
+  assert.equal(
+    pill.style.getPropertyValue('--field-band'),
+    airQualityColor('low'),
+  );
+  assert.equal(
+    tile.querySelector('.view-context__tile-count').textContent,
+    '2 stations',
+  );
+  assert.match(tile.textContent, /North · 6 km/);
+  assert.equal(tile.getAttribute('title'), 'North · 6 km');
+  assert.equal($('.view-context__tile--value strong:not(.field-pill)'), null);
+});
+
+test('Within: with no reading here, the count tile stays as it was', async (t) => {
+  const { $, cards } = fixture(t, [
+    {
+      id: 'air-quality',
+      name: 'Air Quality',
+      enabled: true,
+      records: [aqStation('North', HERE.lat + 0.05, HERE.lon, 2, 'low')],
+      stats: { count: 1, lastUpdate: Date.now() },
+      module: {
+        getValueAt: () => ({ value: null, reason: 'No station within 50 km' }),
+      },
+    },
+  ]);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  const count = $(
+    '.view-context__tile:not(.view-context__tile--value)[data-layer="air-quality"]',
+  );
+  assert.equal(count.querySelector('strong').textContent, '1');
+  assert.equal(count.querySelector('.view-context__tile-count'), null);
+  const value = $('.view-context__tile--value[data-layer="air-quality"]');
+  assert.match(value.querySelector('strong').textContent, /—/);
+  assert.match(value.textContent, /No station within 50 km/);
+});
+
+test('Within: a GNSS reading is its band pill, the score name under it', async (t) => {
+  const { $, cards } = fixture(t, [
+    fieldLayer('gnss-integrity', 'GNSS integrity', () => ({
+      value: 'Low-accuracy score < 2%',
+      short: '< 2%',
+      measure: 'Low-accuracy score',
+      detail: '1 of 9 aircraft reported low accuracy',
+      level: 'low',
+      color: GNSS_LEVEL_COLORS.low,
+    })),
+  ]);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  const tile = $('.view-context__tile--value[data-layer="gnss-integrity"]');
+  const strong = tile.querySelector('strong');
+  assert.ok(strong.classList.contains('field-pill'));
+  assert.equal(strong.textContent.trim(), '< 2%');
+  assert.doesNotMatch(strong.textContent, /Low-accuracy score/);
+  assert.equal(strong.dataset.level, 'low');
+  assert.ok(strong.querySelector('.spot-conditions__field-swatch'));
+  const smalls = [...tile.querySelectorAll('small')].map((n) => n.textContent);
+  assert.ok(smalls.includes('Low-accuracy score'));
+  assert.ok(smalls.includes('1 of 9 aircraft reported low accuracy'));
+});
+
+test('globe view: GNSS integrity counts its areas by band, says it is a sample, and its worst areas fly there', async (t) => {
+  const summary = {
+    headline: '214 areas',
+    bands: [
+      { id: 'low', label: '< 2%', color: GNSS_LEVEL_COLORS.low, count: 200 },
+      {
+        id: 'medium',
+        label: '2–10%',
+        color: GNSS_LEVEL_COLORS.medium,
+        count: 10,
+      },
+      { id: 'high', label: '> 10%', color: GNSS_LEVEL_COLORS.high, count: 4 },
+    ],
+    itemsLabel: 'Least accurate sampled areas',
+    items: [
+      {
+        key: 'gnss-integrity:cell-a',
+        lead: '> 10%',
+        level: 'high',
+        color: GNSS_LEVEL_COLORS.high,
+        text: '3 of 4 aircraft',
+        lat: 33.1,
+        lon: 35.2,
+      },
+    ],
+    note: 'Sampled around views you visited',
+  };
+  const { $, cards, flown } = fixture(t, [
+    {
+      ...fieldLayer('gnss-integrity', 'GNSS integrity', () => null),
+      module: {
+        getAnalystRecords: undefined,
+        getValueAt: () => null,
+        getContextSummary: () => summary,
+      },
+    },
+  ]);
+  cards.setView({ center: HERE, heightM: 20_000_000 });
+  await nextTick();
+  const block = $('.view-context__block[data-layer="gnss-integrity"]');
+  assert.equal(
+    block.querySelector('.view-context__block-head strong').textContent,
+    '214 areas',
+  );
+  assert.match(
+    block.querySelector('.view-context__summary-caption').textContent,
+    /Updated|Live|…/,
+  );
+  const parts = [...block.querySelectorAll('.view-context__bar span')];
+  assert.deepEqual(
+    parts.map((part) => part.style.getPropertyValue('--part-color')),
+    [GNSS_LEVEL_COLORS.low, GNSS_LEVEL_COLORS.medium, GNSS_LEVEL_COLORS.high],
+  );
+  assert.deepEqual(
+    parts.map((part) => Number(part.style.flexGrow).toFixed(3)),
+    [200 / 214, 10 / 214, 4 / 214].map((n) => n.toFixed(3)),
+  );
+  assert.match(
+    block.querySelector('.view-context__summary-note').textContent,
+    /Sampled around views you visited/,
+  );
+  const list = block.querySelector('.view-context__summary-rows ul');
+  assert.equal(list.getAttribute('aria-label'), 'Least accurate sampled areas');
+  const row = list.querySelector('button');
+  assert.equal(row.dataset.rowLayer, 'gnss-integrity');
+  assert.match(row.textContent, /> 10%/);
+  assert.match(row.textContent, /3 of 4 aircraft/);
+  assert.equal(row.querySelector('.field-pill').dataset.level, 'high');
+  row.click();
+  await nextTick();
+  assert.equal(cards.card?.layerId, 'place');
+  assert.equal(cards.card?.lat, 33.1);
+  assert.deepEqual(flown, [cards.card.key], 'flown to the area');
+});
+
+test('Air Quality in Context lists the worst readings in view by band, and a row opens and flies to the station', async (t) => {
+  const north = aqStation('North', HERE.lat + 0.05, HERE.lon, 4, 'moderate');
+  const summary = {
+    caption: '2 stations reporting',
+    bands: [
+      { id: 'low', label: 'Low', color: airQualityColor('low'), count: 1 },
+      {
+        id: 'moderate',
+        label: 'Moderate',
+        color: airQualityColor('moderate'),
+        count: 1,
+      },
+      { id: 'high', label: 'High', color: airQualityColor('high'), count: 0 },
+      {
+        id: 'very-high',
+        label: 'Very High',
+        color: airQualityColor('very-high'),
+        count: 0,
+      },
+    ],
+    itemsLabel: 'Highest air-quality readings in view',
+    items: [
+      {
+        key: north.id,
+        lead: 'AQHI 4',
+        level: 'moderate',
+        color: airQualityColor('moderate'),
+        text: 'North · Moderate',
+        lat: north.lat,
+        lon: north.lon,
+        record: north,
+      },
+    ],
+    note: 'Canada only · ECCC AQHI network',
+  };
+  const { $, cards, flown } = fixture(t, [
+    {
+      id: 'air-quality',
+      name: 'Air Quality',
+      enabled: true,
+      records: [north, aqStation('South', HERE.lat - 0.05, HERE.lon, 2, 'low')],
+      stats: { count: 2, lastUpdate: Date.now() },
+      module: {
+        getValueAt: () => ({ value: null, reason: 'No station within 50 km' }),
+        getContextSummary: () => summary,
+      },
+    },
+  ]);
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await nextTick();
+  const section = $('.view-context__summary[data-layer="air-quality"]');
+  assert.ok(section, 'its own list under the tiles');
+  assert.match(section.textContent, /2 stations reporting/);
+  assert.match(section.textContent, /Canada only · ECCC AQHI network/);
+  const parts = [...section.querySelectorAll('.view-context__bar span')];
+  assert.equal(parts.length, 2, 'bands with stations only');
+  assert.equal(
+    parts[1].style.getPropertyValue('--part-color'),
+    airQualityColor('moderate'),
+  );
+  const row = section.querySelector('.view-context__summary-rows button');
+  assert.equal(
+    section.querySelector('ul').getAttribute('aria-label'),
+    'Highest air-quality readings in view',
+  );
+  assert.match(row.querySelector('.field-pill').textContent, /AQHI 4/);
+  assert.match(row.textContent, /North · Moderate/);
+  row.click();
+  await nextTick();
+  assert.equal(cards.card?.layerId, 'air-quality');
+  assert.equal(cards.card?.identity.id, north.id);
+  assert.deepEqual(flown, [cards.card.key], 'flown to the station');
+  // At globe view the same list sits in the layer's block.
+  cards.clear();
+  cards.setView({ center: HERE, heightM: 20_000_000 });
+  await nextTick();
+  const block = $('.view-context__block[data-layer="air-quality"]');
+  assert.ok(block.querySelector('.view-context__summary-rows button'));
+  assert.match(block.textContent, /Canada only/);
+});
+
+test('an air-quality station card leads with its reading on the AQHI scale', async (t) => {
+  const layer = realAirQuality();
+  const station = aqStation('Chatham', HERE.lat, HERE.lon, 2, 'low');
+  const { $, cards } = fixture(t, [
+    {
+      id: 'air-quality',
+      name: 'Air Quality',
+      enabled: true,
+      records: [station],
+      stats: { count: 1, lastUpdate: Date.now() },
+      module: {
+        getValueAt: () => null,
+        describeReading: (record) => layer.describeReading(record),
+      },
+    },
+  ]);
+  cards.select({
+    layerId: 'air-quality',
+    id: station.id,
+    label: 'Chatham',
+    lat: station.lat,
+    lon: station.lon,
+    record: station,
+  });
+  await nextTick();
+  const hero = $('#entity-card .reading-hero');
+  assert.ok(hero, 'one hero reading');
+  assert.equal(hero.getAttribute('aria-label'), 'AQHI 2, Low health risk');
+  assert.equal(
+    hero.style.getPropertyValue('--field-band'),
+    airQualityColor('low'),
+  );
+  assert.match(
+    hero.querySelector('.reading-hero__value').textContent,
+    /AQHI\s*2/,
+  );
+  assert.equal(hero.querySelector('.field-pill').textContent.trim(), 'Low');
+  const segments = [...hero.querySelectorAll('.reading-hero__scale span')];
+  assert.deepEqual(
+    segments.map((segment) => segment.getAttribute('title')),
+    ['Low', 'Moderate', 'High', 'Very High'],
+  );
+  assert.ok(hero.querySelector('.reading-hero__marker'));
+  assert.equal(
+    hero.querySelector('.reading-hero__risk').textContent,
+    'Low health risk',
+  );
+  // The plain AQHI and Level figures are gone.
+  assert.equal($('#entity-card .entity-card__tiles'), null);
+});
+
+test('a selected card has no Conditions here group without field layers', async (t) => {
+  const { $ } = await selectedFlightWith(t, []);
+  assert.ok($('.spot-conditions'));
+  assert.equal($('.spot-conditions__fields'), null);
 });
 
 test('an enabled layer without companions still offers the general Data Layers action', async (t) => {
@@ -2162,6 +3465,13 @@ test('a completed weather read from a different point in the same cache cell sup
 });
 
 test('with a layer on, zoomed in, the weather block shows the reading the local time came from, with no read of its own', async (t) => {
+  const style = document.createElement('style');
+  style.textContent = fs.readFileSync(
+    new URL('./styles/spot-conditions.css', import.meta.url),
+    'utf8',
+  );
+  document.head.append(style);
+  t.after(() => style.remove());
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const reads = [];
   const brief = async (lat, lon) => {
@@ -2171,6 +3481,7 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
         observedAt: new Date().toISOString(),
         timeZone: 'America/Chicago',
         utcOffsetSeconds: -21600,
+        source: 'open-meteo',
         temperatureC: 18.4,
         apparentTemperatureC: 17.2,
         weatherCode: 3,
@@ -2190,11 +3501,11 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
   };
   // Denver: a spot no other test reads, so no kept reading answers for it.
   const DENVER = { lat: 39.74, lon: -104.99 };
-  const { $, point } = fixture(
-    t,
-    [flightsOn([flight('near01', DENVER.lat + 0.05, DENVER.lon)])],
-    { brief, fetchImpl },
-  );
+  const flights = flightsOn([flight('near01', DENVER.lat + 0.05, DENVER.lon)]);
+  const { $, point, notifyLayers } = fixture(t, [flights], {
+    brief,
+    fetchImpl,
+  });
   point(DENVER);
   await nextTick();
   assert.match(
@@ -2209,13 +3520,33 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
     /18 °C/,
   );
   assert.match(block.textContent, /feels 17°/);
+  const assertSourceChip = (reading) => {
+    const [chip] = document.querySelectorAll(
+      'a[href="https://open-meteo.com/"]',
+    );
+    assert.equal(
+      document.querySelectorAll('a[href="https://open-meteo.com/"]').length,
+      1,
+    );
+    assert.ok(
+      reading.contains(chip),
+      'the chip is next to the weather reading',
+    );
+    assert.equal(chip.textContent.trim(), 'Open-Meteo');
+    assert.equal(
+      chip.getAttribute('aria-label'),
+      'Weather data by Open-Meteo.com',
+    );
+    assert.equal(chip.getAttribute('translate'), 'no');
+  };
+  assertSourceChip(block.querySelector('.spot-conditions__weather-now'));
+  const factsGrid = block.querySelector('.spot-conditions__weather-facts');
+  assert.equal(getComputedStyle(factsGrid).display, 'grid');
   const facts = Object.fromEntries(
-    [...block.querySelectorAll('.spot-conditions__weather-facts div')].map(
-      (node) => [
-        node.querySelector('dt').textContent,
-        node.querySelector('dd').textContent,
-      ],
-    ),
+    [...factsGrid.querySelectorAll('div')].map((node) => [
+      node.querySelector('dt').textContent,
+      node.querySelector('dd').textContent,
+    ]),
   );
   assert.deepEqual(Object.keys(facts), ['Wind', 'Cloud', 'Visibility', 'Rain']);
   assert.match(facts.Wind, /15 km\/h/);
@@ -2238,6 +3569,15 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
     [],
     'no request of its own',
   );
+
+  flights.enabled = false;
+  notifyLayers();
+  await nextTick();
+  assert.match(
+    $('.view-context__tiles--facts .view-context__tile strong').textContent,
+    /18 °C/,
+  );
+  assertSourceChip($('.view-context__tiles--facts .view-context__tile'));
 });
 
 test('with a layer on, a spot whose weather cannot be read says so', async (t) => {
@@ -2343,6 +3683,67 @@ test('a custom Data Layers panel opens without applying a filter it cannot clear
   assert.equal(useLayerFinderStore(pinia).narrowed, false);
 });
 
+test('opening Suggested keeps its filter when the phone closes Context', async (t) => {
+  const { $, cards, close, pinia } = fixture(
+    t,
+    [{ id: 'satellites', name: 'Satellites', enabled: false }],
+    { useInspector: true },
+  );
+  cards.setView({ center: HERE, heightM: 20_000_000 });
+  await nextTick();
+  assert.equal($('.view-context__suggest-item')?.dataset.layer, 'satellites');
+
+  const chrome = usePanelChromeStore(pinia);
+  const act = chrome.act;
+  t.mock.method(chrome, 'act', (name, panelId) => {
+    if (name === 'reveal' && panelId === 'data-panel') close();
+    return act(name, panelId);
+  });
+  $('.view-context__suggest-open').click();
+
+  assert.equal(cards.inspector.shown, false);
+  assert.deepEqual(useLayerFinderStore(pinia).selection.picked, ['satellites']);
+});
+
+test('the globe breakdown follows a replacement manager with the same layer', async (t) => {
+  const original = flightsOn([
+    flight('near01', 30.28, -97.74),
+    flight('near02', 30.28, -97.75),
+  ]);
+  const { $, cards, replaceManager, point } = fixture(t, [original], {
+    useInspector: true,
+  });
+  let labels = ['Airliner', 'Helicopter'];
+  t.mock.method(cards, 'breakdown', () => ({
+    total: 2,
+    splits: [
+      { title: 'Type', parts: labels.map((label) => ({ label, count: 1 })) },
+    ],
+  }));
+
+  point(HERE, 20_000_000);
+  await turn();
+  const breakdown = () => $('.view-context__bar-key')?.textContent ?? '';
+  assert.match(breakdown(), /Airliner/);
+
+  const replacement = flightsOn([
+    flight('near03', 30.28, -97.74),
+    flight('near04', 30.28, -97.75),
+  ]);
+  labels = ['Cargo', 'Glider'];
+  replaceManager({
+    layers: new Map([
+      ['flights', { module: { getAnalystRecords: () => replacement.records } }],
+    ]),
+    getAll: () => [replacement],
+  });
+  cards.pulseInspector();
+  await turn();
+
+  assert.match(breakdown(), /Cargo/);
+  assert.doesNotMatch(breakdown(), /Airliner/);
+});
+
 test('the visible Inspector samples metadata once for rows, suggestions and counts', async (t) => {
   let asks = 0;
   const flights = flightsOn([flight('near01', 30.28, -97.74)]);
@@ -2354,14 +3755,14 @@ test('the visible Inspector samples metadata once for rows, suggestions and coun
         return new Response('', { status: 503 });
       },
     });
-  const publish = t.mock.method(cards, 'publishInspectorRows');
-  const published = () => publish.mock.callCount();
+  const readRows = t.mock.method(cards, 'allLayers');
+  const samples = () => readRows.mock.callCount();
   const setHeight = (heightM) => cards.setView({ center: HERE, heightM });
   setHeight(40_000);
   await turn();
   open();
   await nextTick();
-  assert.equal(published(), 1);
+  assert.equal(samples(), 1);
   assert.ok($('.view-context [data-layer="flights"]'));
   const counts = useLayerCountsStore(pinia);
   assert.deepEqual(counts.state.counts, {});
@@ -2369,13 +3770,13 @@ test('the visible Inspector samples metadata once for rows, suggestions and coun
   setHeight(50_000);
   await nextTick();
   assert.equal(
-    published(),
+    samples(),
     1,
     'local camera movement does not resample metadata',
   );
   cards.pulseInspector();
   await nextTick();
-  assert.equal(published(), 2);
+  assert.equal(samples(), 2);
   assert.deepEqual(counts.state.counts, {});
 
   close();
@@ -2383,16 +3784,16 @@ test('the visible Inspector samples metadata once for rows, suggestions and coun
   notifyLayers();
   cards.pulseInspector();
   await nextTick();
-  assert.equal(published(), 2, 'hidden refresh does not resample metadata');
+  assert.equal(samples(), 2, 'hidden refresh does not resample metadata');
   open();
   await nextTick();
-  assert.equal(published(), 3);
+  assert.equal(samples(), 3);
 
   const rows = [{ id: 'satellites', name: 'Satellites', enabled: false }];
   replaceManager({ layers: new Map(), getAll: () => rows });
   setHeight(20_000_000);
-  await nextTick();
-  assert.equal(published(), 4);
+  await turn();
+  assert.equal(samples(), 4);
   assert.equal($('.view-context__suggest-item')?.dataset.layer, 'satellites');
   assert.equal($('.view-context__suggest-item[data-layer="flights"]'), null);
   assert.equal(asks, 0, 'a category-only sample does not admit counts');
@@ -2749,7 +4150,7 @@ test('hiding or replacing the mounted Inspector cancels its weather and count re
       () => {
         contextSearchStyles(t);
         const style = document.createElement('style');
-        style.textContent = readFileSync(
+        style.textContent = fs.readFileSync(
           new URL('./styles/bhote-koshi.css', import.meta.url),
           'utf8',
         );
@@ -3270,3 +4671,82 @@ test('the local country heading follows the locale without moving the camera', a
   assert.match($('.view-context__title').textContent, /Near Badajoz, Spain/);
   assert.equal(cityReads, 1);
 });
+
+test('Fly to held by Tracking or Cockpit says so on the card for a few seconds', async (t) => {
+  const { $, cards } = fixture(t, [
+    {
+      id: 'earthquakes',
+      name: 'Earthquakes',
+      enabled: true,
+      records: [
+        { id: 'q1', usgsId: 'q1', magnitude: 4.2, lat: 30.2, lon: -97.6 },
+      ],
+    },
+  ]);
+  cards.select({ layerId: 'earthquakes', id: 'q1' }, { fly: false });
+  await nextTick();
+  const note = () => $('#entity-card .entity-card__fly-note');
+  const flyButton = () =>
+    [
+      ...document.querySelectorAll(
+        '#entity-card .entity-card__action-row button',
+      ),
+    ].find((button) => /Fly to/.test(button.textContent));
+  assert.equal(note().getAttribute('role'), 'status');
+  assert.equal(note().textContent, '');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let answer = 'tracking-holds-view';
+  cards.flyTo = () => answer;
+  flyButton().click();
+  await nextTick();
+  assert.equal(note().textContent, 'Tracking holds the view');
+  answer = 'cockpit-active';
+  flyButton().click();
+  await nextTick();
+  assert.equal(note().textContent, 'Cockpit is active');
+  t.mock.timers.tick(4000);
+  await nextTick();
+  assert.equal(note().textContent, '', 'it goes by itself');
+  flyButton().click();
+  await nextTick();
+  answer = true;
+  flyButton().click();
+  await nextTick();
+  assert.equal(note().textContent, '', 'a flight that goes clears it');
+});
+
+test(
+  'a focused Nearby row that drops out hands focus to the row in its place',
+  { timeout: 10_000 },
+  async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const flights = flightsOn([
+      flight('near01', 30.28, -97.74),
+      flight('near02', 30.29, -97.74),
+      flight('near03', 30.3, -97.74),
+    ]);
+    const { $, cards } = fixture(t, [flights]);
+    cards.setView({ center: HERE, heightM: 40_000 });
+    await nextTick();
+    const first = '.nearby-lists [data-row-key="flights:near01"]';
+    const row = $(first);
+    assert.ok(row, 'the nearest row shows');
+    row.focus();
+    assert.equal(document.activeElement?.dataset.rowKey, 'flights:near01');
+    flights.records = flights.records.slice(1);
+    flights.stats = {
+      ...flights.stats,
+      count: flights.records.length,
+      lastUpdate: flights.stats.lastUpdate + 1,
+    };
+    t.mock.timers.tick(4000);
+    await nextTick();
+    await nextTick();
+    assert.equal(Boolean($(first)), false, 'the row went');
+    assert.equal(
+      document.activeElement?.dataset.rowKey,
+      'flights:near02',
+      'focus moved to the row now first',
+    );
+  },
+);

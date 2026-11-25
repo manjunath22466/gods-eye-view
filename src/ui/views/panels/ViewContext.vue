@@ -9,18 +9,23 @@ import { INSPECTOR_PULSE_MS, isGlobeView, useEntityCardStore } from '../../store
 import { usePanelChromeStore } from '../../stores/panelChrome.js';
 import { PANEL_LABEL_KEYS, shownLayerName, sourceLabel } from '../../layerNames.js';
 import { translateFeedError, translateStatusMessage } from '../../statusText.js';
-import { entityKind } from '../../../data/entityContext.js';
+import { entityKind, recordRow } from '../../../data/entityContext.js';
+import { placeIdentity } from '../../placeCard.js';
 import { CONTEXT_RADIUS_STEPS, contextRadiusKm, setContextRadiusKm } from '../../contextRadius.js';
 import { compassName, weatherLook } from '../../spotConditions.js';
 import { clockLine, contextAgeText, dayLengthMinutes, daylightShare, utcClock } from '../../contextTime.js';
 import { distanceText } from '../../distanceText.js';
 import { suggestLayers } from '../../layerSuggestions.js';
+import { FIELD_ICONS, fieldReading } from '../../fieldReading.js';
 import { useLayerFinderStore } from '../../stores/layerFinder.js';
 import UiButton from '../../kit/UiButton.vue';
 import UiIcon from '../../kit/UiIcon.vue';
 import EntityMark from './EntityMark.vue';
 import UiSlider from '../../kit/UiSlider.js';
 import NearbyLists from './NearbyLists.vue';
+import ContextBreakdownBar from './ContextBreakdownBar.vue';
+import ContextSummary from './ContextSummary.vue';
+import FieldPill from './FieldPill.vue';
 import AltitudeGraph from './AltitudeGraph.vue';
 import SuggestedLayers from './SuggestedLayers.vue';
 import { CONTEXT_EXEMPT, MISSIONS_LAYER, inspectorFeedLabel, inspectorHasLayers, inspectorLayerRows, presentLayerRow, shownApart } from '../../layerRowState.js';
@@ -128,11 +133,7 @@ const missions = useSpaceMissionsStore();
 const TILE_ICONS = {
   cctv: 'videocam',
   traffic: 'traffic',
-  // Field layers have no item kind of their own.
-  wind: 'air',
-  'gnss-integrity': 'my_location',
-  'recent-imagery': 'satellite_alt',
-  'air-quality': 'eco',
+  ...FIELD_ICONS,
   'weather-radar': 'radar',
   'weather-lightning': 'thunderstorm',
   'weather-satellite': 'cloud',
@@ -182,22 +183,12 @@ const valueTiles = computed(() => {
   const center = view.value?.center;
   if (globeView.value || !center) return [];
   return liveLayers.value.flatMap((layer) => {
-    const found = store.valueAt(layer.id, center.lat, center.lon);
-    if (found === undefined) return [];
-    // Still loading: no reading yet, which is not "no value".
-    if (found === null && layer.tone === 'loading') return [{ ...layer, value: '…', detail: '' }];
-    if (found?.readFailed || (found === null && ['unavailable', 'degraded'].includes(layer.tone))) {
-      const tone = found?.readFailed ? 'unavailable' : layer.tone;
-      const toneText = inspectorFeedLabel(tone);
-      return [{ ...layer, tone, toneText, value: toneText, detail: '' }];
-    }
-    // A reason (a coverage limit, a map-only product) in place of a value;
-    // "No value" only for a real empty reading.
-    const observed = layer.id === 'air-quality' || layer.id === 'gnss-integrity';
-    const age = observed && Number.isFinite(found?.at)
-      ? t('Updated {age}', { age: contextAgeText(Math.max(0, Date.now() - found.at)) })
-      : '';
-    return [{ ...layer, value: found?.value || '—', detail: found?.reason || found?.detail || (found?.value ? '' : t('No value at the centre of the view')), age }];
+    const reading = fieldReading(store.valueAt(layer.id, center.lat, center.lon), layer, {
+      emptyDetail: t('No value at the centre of the view'),
+    });
+    if (!reading) return [];
+    const status = reading.failed ? { tone: reading.failedTone, toneText: reading.value } : {};
+    return [{ ...layer, ...reading, ...status }];
   });
 });
 // Keep the enabled and non-item layer sets stable through ordinary refreshes.
@@ -217,7 +208,55 @@ const overlayTiles = computed(() => {
     .filter((layer) => layerKind(layer.id) === 'overlay')
     .map((layer) => ({ ...layer, value: stateText(layer), detail: t('On the map') }));
 });
-const sideTiles = computed(() => [...valueTiles.value, ...overlayTiles.value]);
+// A layer with both items and a reading here (Air Quality) has one tile:
+// the reading leads, its count goes under it. With no reading, the count
+// tile and the reading's own tile, as for any layer.
+const hasReading = (reading) => Boolean(reading && !reading.empty && !reading.failed);
+const readingById = computed(() => Object.fromEntries(valueTiles.value.filter(hasReading).map((tile) => [tile.id, tile])));
+const localTiles = computed(() =>
+  globeView.value ? [] : tiles.value.map((tile) => (readingById.value[tile.id] ? { ...tile, reading: readingById.value[tile.id] } : tile)),
+);
+const merged = computed(() => new Set(localTiles.value.filter((tile) => tile.reading).map((tile) => tile.id)));
+const sideTiles = computed(() => [...valueTiles.value.filter((tile) => !merged.value.has(tile.id)), ...overlayTiles.value]);
+// What a merged tile's count is of.
+const COUNT_WORDS = {
+  'air-quality': (n) => tn(n, '{n} station', '{n} stations', { n: formatNumber(n) }),
+};
+const countLine = (tile) =>
+  Number.isFinite(tile.count) ? (COUNT_WORDS[tile.id]?.(tile.count) ?? formatNumber(tile.count)) : '';
+// What a layer says of itself in Context (getContextSummary): its items by
+// legend band, the ones worth a look, and its coverage.
+const summaries = computed(() => {
+  if (!store.inspector.shown) return {};
+  void tick.value;
+  void onIds.value;
+  return Object.fromEntries(
+    liveLayers.value.flatMap((layer) => {
+      let summary = null;
+      try {
+        summary = store.layerModule(layer.id)?.getContextSummary?.() ?? null;
+      } catch {
+        summary = null;
+      }
+      return summary && typeof summary === 'object' ? [[layer.id, summary]] : [];
+    }),
+  );
+});
+// Zoomed in, a layer's own list sits under the tiles.
+const localSummaries = computed(() =>
+  globeView.value || contextNeedle.value ? [] : liveLayers.value.filter((layer) => summaries.value[layer.id]?.items?.length),
+);
+// A summary row opens where it is: an item's own card, or the spot itself,
+// flying there as Nearby's rows do.
+function openSummaryItem(layerId, item, event) {
+  const keyboard = event.detail === 0 && event.currentTarget === globalThis.document?.activeElement;
+  const row = item.record ? recordRow(layerId, item.record) : null;
+  const opened = row
+    ? store.open(row.identity)
+    : Number.isFinite(item.lat) && Number.isFinite(item.lon) &&
+      store.select(placeIdentity({ lat: item.lat, lon: item.lon, from: 'spot' }), { fly: true, explicit: true });
+  if (opened && keyboard && store.card?.key) emit('keyboardSelection', store.card.key);
+}
 // Layers with records get counts even if they also have a point reading.
 // Without records, a layer is a field or an overlay.
 function layerKind(layerId) {
@@ -244,6 +283,7 @@ const lists = computed(() => {
   return store.nearbyLayers(center.lat, center.lon, {
     radiusKm: contextRadiusKm.value,
     limit: contextNeedle.value ? 12 : 3,
+    breakdown: true,
     query: contextNeedle.value,
     excludeLayers: [...CONTEXT_EXEMPT, ...(missions.enabled ? [MISSIONS_LAYER] : []), ...nonItemIds.value],
   });
@@ -289,7 +329,7 @@ const tiles = computed(() => {
   if (globeView.value)
     return [
       ...liveLayers.value.map((layer) => {
-        // CCTV reports a loaded camera count without providing analyst rows.
+        // The Globe CCTV tile shows the total number of cameras in the loaded catalog.
         if (layer.id === 'cctv' && layer.total !== null) return { ...layer, count: layer.total };
         // Fields, overlays and incident scenes use their state here.
         if (INCIDENT_SCENES.has(layer.id) || layerKind(layer.id) !== 'items') return { ...layer, count: null, state: stateText(layer) };
@@ -323,6 +363,7 @@ const tiles = computed(() => {
     readFailed: list.readFailed,
     // Still loading with nothing in: … rather than 0.
     count: list.count === 0 && layerById.value[list.layerId]?.total === null ? null : list.count,
+    bar: splitBar(list.breakdown, 1),
   })), ...quiet, ...(missionTile.value ? [missionTile.value] : [])];
 });
 const countStatus = (tile) => {
@@ -349,10 +390,10 @@ function kindBar(layerId, count) {
   bars.set(layerId, { at: Date.now(), bar, count });
   return bar;
 }
-function splitBar(found) {
+function splitBar(found, minimumParts = 2) {
   if (!found?.total) return null;
   const split = BAR_SPLITS.map((title) => found.splits.find((one) => one.title === title)).find(Boolean) || found.splits[0];
-  if (!split?.parts?.length || split.parts.length < 2) return null;
+  if (!split?.parts?.length || split.parts.length < minimumParts) return null;
   const total = split.parts.reduce((sum, part) => sum + part.count, 0);
   return {
     total,
@@ -363,14 +404,6 @@ function splitBar(found) {
       tone: index,
     })),
   };
-}
-const listFormatter = computed(() => new Intl.ListFormat(getLocale(), { type: 'unit' }));
-function listOf(parts) {
-  try {
-    return listFormatter.value.format(parts);
-  } catch {
-    return parts.join(', ');
-  }
 }
 // At globe view, under each layer's block: the three of its items nearest
 // the centre of the view on the visible hemisphere, to pick from when the
@@ -394,29 +427,56 @@ const globeTiles = computed(() => {
 const viewBox = ref(null);
 function selectRow(item, event) {
   const keyboard = event.detail === 0 && event.currentTarget === globalThis.document?.activeElement;
-  if (store.select(item.identity, { fly: true }) && keyboard)
+  if (store.open(item.identity) && keyboard)
     emit('keyboardSelection', item.key);
 }
-let heldRow = null;
+let heldFocus = null;
 onBeforeUpdate(() => {
-  const row = globalThis.document?.activeElement?.closest?.('[data-row-key]');
-  heldRow = row && viewBox.value?.contains(row) ? { key: row.dataset.rowKey, layer: row.dataset.rowLayer, index: Number(row.dataset.rowIndex) } : null;
+  const active = globalThis.document?.activeElement;
+  const row = active?.closest?.('[data-row-key]');
+  heldFocus = null;
+  if (!active || !viewBox.value?.contains(active)) return;
+  if (row) {
+    heldFocus = { key: row.dataset.rowKey, layer: row.dataset.rowLayer, index: Number(row.dataset.rowIndex) };
+  } else if (active.matches('.view-context__block, .view-context__blocks, .nearby-lists__title, .view-context__radius input')) {
+    heldFocus = { fallback: active };
+  }
 });
 onUpdated(() => {
-  const was = heldRow;
-  heldRow = null;
+  const was = heldFocus;
+  heldFocus = null;
   const box = viewBox.value;
   const active = globalThis.document?.activeElement;
   if (!was || !box || (active && active !== globalThis.document.body)) return;
+  if (was.fallback) {
+    (box.contains(was.fallback) ? was.fallback : rowFallback(box))?.focus?.();
+    return;
+  }
   const rows = [...box.querySelectorAll('[data-row-key]')];
   const sameRow = rows.find((row) => row.dataset.rowKey === was.key);
   const group = rows.filter((row) => row.dataset.rowLayer === was.layer);
   const block = [...box.querySelectorAll('.view-context__block')].find((node) => node.dataset.layer === was.layer);
-  const fallback = box.querySelector('.view-context__blocks, .nearby-lists__title') || box.querySelector('.view-context__radius input') || box;
-  (sameRow || group[Math.min(was.index, group.length - 1)] || block || fallback)?.focus?.();
+  (sameRow || group[Math.min(was.index, group.length - 1)] || block || rowFallback(box))?.focus?.();
 });
+// Where a row's focus lands when its list is gone.
+function rowFallback(box) {
+  return box.querySelector('.view-context__blocks, .nearby-lists__title') || box.querySelector('.view-context__radius input') || box;
+}
+// Nearby lost its last row, and the focus with it.
+function onNearbyFocusLost() {
+  const box = viewBox.value;
+  if (box) rowFallback(box)?.focus?.();
+}
 
 const nearbyLists = computed(() => lists.value.filter((list) => !list.readFailed));
+const listFormatter = computed(() => new Intl.ListFormat(getLocale(), { type: 'unit' }));
+function listOf(parts) {
+  try {
+    return listFormatter.value.format(parts);
+  } catch {
+    return parts.join(', ');
+  }
+}
 const searchStatus = computed(() => {
   if (!contextNeedle.value) return '';
   const globe = globeView.value;
@@ -467,6 +527,7 @@ const weatherNow = computed(() => {
     conditions: [t(look.value.label), Number.isFinite(now.apparentTemperatureC) ? t('feels {n}°', { n: formatNumber(roundOf(now.apparentTemperatureC)) }) : null].filter(Boolean).join(' · '),
     facts,
     stale: weatherAge.value,
+    weatherCredit: now.source === 'open-meteo',
   };
 });
 // Display-only counts from the server cache.
@@ -522,6 +583,8 @@ const emptyFacts = computed(() => {
     const minutes = dayLengthMinutes(center.lat, time, { lon: center.lon, zone: viewZone.value });
     facts.push({ label: t('Daylight'), value: dayLength(minutes, 'narrow'), title: dayLength(minutes, 'long') });
   }
+  if (Number.isFinite(view.value?.groundM))
+    facts.push({ label: t('Elevation'), value: t('{n} m', { n: formatNumber(Math.round(view.value.groundM)) }) });
   return facts;
 });
 function revealDataLayers() {
@@ -586,7 +649,7 @@ function openSuggested() {
           <span class="view-context__tile-name">{{ fact.label }}</span>
           <strong :class="{ 'view-context__tile-status': fact.failure }">{{ fact.value }}</strong>
           <small v-if="fact.age" class="view-context__tile-age">{{ fact.age }}</small>
-          <a v-if="fact.weatherCredit" class="view-context__weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener">{{ t('Weather data by Open-Meteo.com') }}</a>
+          <a v-if="fact.weatherCredit" class="ui-chip view-context__weather-source" href="https://open-meteo.com/" target="_blank" rel="noopener" :aria-label="t('Weather data by Open-Meteo.com')" translate="no">Open-Meteo</a>
         </div>
       </div>
       <AltitudeGraph v-if="Number.isFinite(view?.heightM)" class="view-context__camera" :altitude-m="view.heightM" :tick="cameraTick" :label="t('Camera height')" unit="metric" compact />
@@ -601,7 +664,7 @@ function openSuggested() {
           <div class="spot-conditions__weather-now">
             <strong>{{ weatherNow.temperature }}</strong>
             <span>{{ weatherNow.conditions }}<template v-if="weatherNow.stale"> · {{ weatherNow.stale }}</template></span>
-            <a v-if="weather?.source === 'open-meteo'" class="view-context__weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener">{{ t('Weather data by Open-Meteo.com') }}</a>
+            <a v-if="weatherNow.weatherCredit" class="ui-chip view-context__weather-source" href="https://open-meteo.com/" target="_blank" rel="noopener" :aria-label="t('Weather data by Open-Meteo.com')" translate="no">Open-Meteo</a>
           </div>
           <dl v-if="weatherNow.facts.length" class="spot-conditions__weather-facts">
             <div v-for="fact in weatherNow.facts" :key="fact.label">
@@ -633,16 +696,19 @@ function openSuggested() {
             <i class="view-context__dot" :class="`view-context__dot--${tile.tone}`" role="img" :aria-label="tile.toneText" :title="tile.toneText"></i>
             <EntityMark :layer="tile.id" :icon="tile.icon" />
             <span class="view-context__block-name">{{ tile.name }}</span>
-            <strong>{{ tile.state ?? countText(tile) }}</strong>
+            <strong>{{ summaries[tile.id]?.headline || (tile.state ?? countText(tile)) }}</strong>
           </div>
           <p v-if="tile.id === 'traffic' && Number.isFinite(tile.count) && !countStatus(tile)" class="view-context__count-unit">{{ t('Loaded traffic dots') }}</p>
-          <template v-if="tile.bar">
-            <div class="view-context__bar" role="img" :aria-label="listOf(tile.bar.parts.map((part) => `${t(part.label)} ${formatNumber(part.count)}`))">
-              <span v-for="part in tile.bar.parts" :key="part.label" :data-tone="part.tone" :style="{ flexGrow: part.share }"></span>
-            </div>
-            <p class="view-context__bar-key">
-              <span v-for="part in tile.bar.parts.slice(0, 3)" :key="part.label" :data-tone="part.tone">{{ t(part.label) }} {{ formatNumber(part.count) }}</span>
-            </p>
+          <ContextSummary
+            v-if="summaries[tile.id]"
+            :center="view?.center || null"
+            :layer-id="tile.id"
+            :summary="summaries[tile.id]"
+            :caption="summaries[tile.id].caption || (summaries[tile.id].headline ? tile.state || '' : '')"
+            @pick="(item, event) => openSummaryItem(tile.id, item, event)"
+          />
+          <template v-else-if="tile.bar">
+            <ContextBreakdownBar :parts="tile.bar.parts" />
             <p v-if="tile.id === 'satellites' && tile.bar.total !== tile.count" class="view-context__bar-key">
               {{ t('Of {n} read, {total} loaded', { n: formatNumber(tile.bar.total), total: formatNumber(tile.count) }) }}
             </p>
@@ -660,13 +726,21 @@ function openSuggested() {
         </div>
       </div>
       <div v-if="!globeView" class="view-context__tiles">
-        <div v-for="tile in tiles" :key="tile.id" class="view-context__tile" :data-layer="tile.id">
+        <div v-for="tile in localTiles" :key="tile.id" class="view-context__tile" :class="{ 'view-context__tile--value': tile.reading }" :data-layer="tile.id" :title="tile.reading?.detail || undefined">
           <span class="view-context__tile-name">
             <i class="view-context__dot" :class="`view-context__dot--${tile.tone}`" role="img" :aria-label="tile.toneText" :title="tile.toneText"></i>
             <UiIcon :name="tile.icon" :size="null" />
             <span>{{ tile.name }}</span>
           </span>
-          <strong :class="{ 'view-context__tile-status': countStatus(tile) }" :role="tile.readFailed ? 'status' : undefined">{{ countText(tile) }}</strong>
+          <template v-if="tile.reading">
+            <FieldPill :text="tile.reading.short || tile.reading.value" :level="tile.reading.level || ''" :color="tile.reading.color || ''" />
+            <small v-if="tile.reading.measure" class="view-context__tile-age">{{ tile.reading.measure }}</small>
+            <small v-if="tile.reading.detail" class="view-context__tile-age">{{ tile.reading.detail }}</small>
+            <small v-if="countLine(tile)" class="view-context__tile-age view-context__tile-count">{{ countLine(tile) }}</small>
+            <small v-if="tile.reading.age" class="view-context__tile-age">{{ tile.reading.age }}</small>
+          </template>
+          <strong v-else :role="tile.readFailed ? 'status' : undefined" :class="{ 'view-context__tile-status': countStatus(tile) }">{{ countText(tile) }}</strong>
+          <ContextBreakdownBar v-if="tile.bar && !tile.reading" :parts="tile.bar.parts" />
           <small v-if="tile.worldwide" class="view-context__tile-age">{{ t('Worldwide') }}</small>
           <small v-else-if="tile.id === 'traffic' && Number.isFinite(tile.count) && !countStatus(tile)" class="view-context__tile-age">{{ t('Road segments') }}</small>
         </div>
@@ -677,15 +751,26 @@ function openSuggested() {
             <UiIcon :name="tile.icon" :size="null" />
             <span>{{ tile.name }}</span>
           </span>
-          <strong>{{ tile.value }}</strong>
+          <FieldPill :text="tile.short || tile.value" :level="tile.level || ''" :color="tile.color || ''" />
+          <small v-if="tile.measure" class="view-context__tile-age">{{ tile.measure }}</small>
           <small v-if="tile.detail" class="view-context__tile-age">{{ tile.detail }}</small>
           <small v-if="tile.age" class="view-context__tile-age">{{ tile.age }}</small>
         </div>
       </div>
+      <!-- A layer's own list under the tiles: its worst readings, by band. -->
+      <template v-if="!globeView">
+        <div v-for="layer in localSummaries" :key="layer.id" class="view-context__block view-context__summary" :data-layer="layer.id">
+          <div class="view-context__block-head">
+            <EntityMark :layer="layer.id" :icon="layer.icon" />
+            <span class="view-context__block-name">{{ summaries[layer.id].itemsLabel || layer.name }}</span>
+          </div>
+          <ContextSummary :center="view?.center || null" :layer-id="layer.id" :summary="summaries[layer.id]" :caption="summaries[layer.id].caption || ''" @pick="(item, event) => openSummaryItem(layer.id, item, event)" />
+        </div>
+      </template>
       <p v-for="layer in problems" :key="layer.id" class="view-context__problem">{{ layer.name }} · {{ layer.problem }}</p>
 
       <p v-if="globeView" class="view-context__hint">{{ t('Click anything on the globe to see its card.') }}</p>
-      <NearbyLists v-else :lists="nearbyLists" :title="t('Nearby · {radius}', { radius: radiusText })" @select="selectRow" />
+      <NearbyLists v-else :lists="nearbyLists" :title="t('Nearby · {radius}', { radius: radiusText })" :select-item="selectRow" @focus-lost="onNearbyFocusLost" />
     </template>
     <SuggestedLayers v-if="hasDataLayers" :layers="suggestions" @open="openSuggested" />
     <UiButton v-if="hasDataLayers && (contextNeedle || !suggestions.length)" class="view-context__pointer" @click="openDataLayers">

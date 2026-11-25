@@ -18,6 +18,7 @@ import { h, render as renderVue } from 'vue';
 import { t } from '../i18n/index.js';
 import { EXCLUSIVE_SURFACE_CLASSES } from '../exclusiveSurfaces.js';
 import { LABEL_LAYERS } from './contextLayerTabs.js';
+import { ESCAPE_OWNING_DIALOGS } from './contextEvents.js';
 import OmnibarGuide from './views/panels/OmnibarGuide.vue';
 
 const LEFT_RAIL = '.ui-rail--left .ui-rail__item';
@@ -609,7 +610,8 @@ export function startGuide(steps, { title = '' } = {}) {
     if (target?.contains(event.target) && !current.done) advance();
   }
   // Only Escape is the walk's: it ends the walk and nothing else (the
-  // Omnibar or a panel behind it stays as it is). Every other key goes on to
+  // Omnibar or a panel behind it stays as it is), unless a dialog that owns
+  // its Esc is open. Every other key goes on to
   // the page untouched.
   function onKey(event) {
     if (screenIsOwned(doc)) {
@@ -617,6 +619,9 @@ export function startGuide(steps, { title = '' } = {}) {
       return;
     }
     if (event.key !== 'Escape' || event.isComposing) return;
+    // A dialog that keeps its own Esc (a camera's enlarged view) takes it:
+    // one Esc closes that, and the walk goes on.
+    if (doc.querySelector(ESCAPE_OWNING_DIALOGS)) return;
     event.preventDefault();
     event.stopPropagation();
     stop();

@@ -115,6 +115,84 @@ export const AIR_QUALITY_PROVIDERS = Object.freeze({
     label: msg('Air quality'),
     network: 'Environment and Climate Change Canada',
     coverage: msg('Canada only · ECCC AQHI network'),
+    /**
+     * Where the network reports: Canada, as one coarse `[lon, lat]` ring. It
+     * leans outward at the US border, so a near-border point is treated as
+     * covered; a station within reach decides before this does.
+     */
+    area: Object.freeze([
+      [-141, 84],
+      [-141, 60.3],
+      [-139.1, 60],
+      [-137.5, 59.2],
+      [-135.5, 59.8],
+      [-133.4, 58.4],
+      [-131.8, 56.6],
+      [-130, 55.9],
+      [-130.6, 54.7],
+      [-133.5, 54.6],
+      [-133.5, 53],
+      [-129, 50.5],
+      [-125.5, 48.3],
+      [-124, 48.2],
+      [-123.2, 48.2],
+      [-123, 48.5],
+      [-122, 48.8],
+      [-95.2, 48.8],
+      [-93, 48.4],
+      [-90, 47.9],
+      [-88.5, 48],
+      [-85, 46.8],
+      [-84, 46],
+      [-82.6, 43],
+      [-83.2, 42.2],
+      [-82.8, 41.6],
+      [-81, 42.2],
+      [-79.1, 42.75],
+      [-78, 43.5],
+      [-76.4, 43.9],
+      [-75.5, 44.5],
+      [-74.7, 44.9],
+      [-71.5, 44.9],
+      [-71, 45.2],
+      [-70.3, 45.8],
+      [-70, 46.6],
+      [-69.2, 47.4],
+      [-68.3, 47.3],
+      [-67.8, 47],
+      [-67.8, 45.6],
+      [-67.4, 45.2],
+      [-67, 44.8],
+      [-66.5, 43.2],
+      [-65.7, 43.2],
+      [-63, 44.2],
+      [-61, 43.6],
+      [-59.5, 43.7],
+      [-59.5, 45.8],
+      [-56, 46.5],
+      [-52.5, 46.5],
+      [-52.3, 47.6],
+      [-52.5, 50],
+      [-55, 51.8],
+      [-55.5, 53],
+      [-57.5, 55],
+      [-60.5, 57],
+      [-63.5, 59.5],
+      [-64.5, 60.5],
+      [-64, 62],
+      [-59, 66.5],
+      [-62, 69],
+      [-66, 72],
+      [-72, 75],
+      [-74.5, 76.3],
+      [-74, 78],
+      [-71.5, 79.5],
+      [-67, 80.5],
+      [-64, 81.3],
+      [-61.5, 82],
+      [-60, 83],
+      [-60, 84],
+    ]),
     /** ECCC's published band thresholds, evaluated in order. */
     bands: Object.freeze([
       Object.freeze({ id: 'low', max: 3 }),
@@ -124,6 +202,27 @@ export const AIR_QUALITY_PROVIDERS = Object.freeze({
     ]),
   }),
 });
+
+/**
+ * Whether a point lies in any registered provider's coverage area (an
+ * even-odd test on its `[lon, lat]` ring). Invalid coordinates are not.
+ */
+export function airQualityCovers(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  return Object.values(AIR_QUALITY_PROVIDERS).some(({ area }) => {
+    let inside = false;
+    for (let i = 0, j = area.length - 1; i < area.length; j = i++) {
+      const [xi, yi] = area[i];
+      const [xj, yj] = area[j];
+      if (
+        yi > lat !== yj > lat &&
+        lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi
+      )
+        inside = !inside;
+    }
+    return inside;
+  });
+}
 
 /** Band descriptor for an id, or null. */
 export function airQualityBandById(bandId) {

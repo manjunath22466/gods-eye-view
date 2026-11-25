@@ -296,6 +296,11 @@ export class CockpitViewController {
       entryAvailable: false,
       // Which subject the entry button would enter, and the active subject.
       entryKind: null,
+      // The layer of the item entry would ride (a card offers its own view
+      // only for its own layer); null for an aircraft, which its card asks
+      // for by tracking it.
+      entryLayerId: null,
+      entryId: null,
       // A provider's entry face, `{icon, label}`; null for the built-ins.
       entryFace: null,
       subjectKind: null,

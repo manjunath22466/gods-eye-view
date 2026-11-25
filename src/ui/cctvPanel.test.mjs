@@ -5,6 +5,7 @@ import test from 'node:test';
 import { createPinia } from 'pinia';
 import { createApp, nextTick } from 'vue';
 import { CctvControls } from './cctvControls.js';
+import { CCTV_SELECTED_EVENT } from './cctvEvents.js';
 import { presentCctvPanel } from './cctvPresentation.js';
 import { useCctvStore } from './stores/cctv.js';
 import CctvPanel from './views/panels/CctvPanel.vue';
@@ -590,6 +591,76 @@ test('a panel the accordion folded still has its saved state closed', (t) => {
   controls._cctvPanel.classList.add('collapsed');
   controls._renderCctvState({ ...activeState, enabled: false });
   assert.deepEqual(calls, [['cctv-panel', true]]);
+});
+
+test('a picked camera opens its card in Context', (t) => {
+  const { controls } = panel(t);
+  const picked = [];
+  const onPicked = (event) => picked.push(event.detail.cameraId);
+  document.addEventListener(CCTV_SELECTED_EVENT, onPicked);
+  t.after(() => document.removeEventListener(CCTV_SELECTED_EVENT, onPicked));
+  // The camera already active on the render that turns the layer on (the
+  // one it chose for itself, or one restored) opens nothing. The fixtures
+  // carry only the fields the layer's uiState() publishes.
+  controls._renderCctvState(activeState);
+  assert.deepEqual(picked, []);
+  controls._renderCctvState({ ...activeState, enabled: false });
+  controls._renderCctvState({ ...activeState, activeCameraId: 'restored' });
+  assert.deepEqual(
+    picked,
+    [],
+    'a camera restored from last time is not a pick',
+  );
+  // A camera someone picks is announced once.
+  controls._renderCctvState({ ...activeState, activeCameraId: 'other' });
+  controls._renderCctvState({ ...activeState, activeCameraId: 'other' });
+  assert.deepEqual(picked, ['other']);
+  // The layer's own opening camera, moved to the one nearest the view after
+  // a settled pan, is not a pick either (uiState's `openingCamera`).
+  controls._renderCctvState({
+    ...activeState,
+    activeCameraId: 'nearest-after-pan',
+    openingCamera: true,
+  });
+  assert.deepEqual(picked, ['other']);
+  // With Auto-hop on, timed hops open nothing: the layer marks its own
+  // timed step as openingCamera while it activates, so the open card stays
+  // and Context is not reopened on each step.
+  for (const id of ['third', 'fourth', 'fifth'])
+    controls._renderCctvState({
+      ...activeState,
+      activeCameraId: id,
+      autoHop: true,
+      openingCamera: true,
+    });
+  assert.deepEqual(picked, ['other']);
+  // A person's step (Next or Previous, voice) with Auto-hop on is a pick.
+  controls._renderCctvState({
+    ...activeState,
+    activeCameraId: 'manual-next',
+    autoHop: true,
+  });
+  assert.deepEqual(picked, ['other', 'manual-next']);
+});
+
+test('a camera picked after a deselect left none active opens its card', (t) => {
+  const { controls } = panel(t);
+  const picked = [];
+  const onPicked = (event) => picked.push(event.detail.cameraId);
+  document.addEventListener(CCTV_SELECTED_EVENT, onPicked);
+  t.after(() => document.removeEventListener(CCTV_SELECTED_EVENT, onPicked));
+  const at = (id) => ({
+    ...activeState,
+    activeCameraId: id,
+    activeCamera: id ? { ...camera, id } : null,
+  });
+  controls._renderCctvState(at('a'));
+  controls._renderCctvState(at('b'));
+  // An empty-ground click leaves no camera active.
+  controls._renderCctvState(at(null));
+  // Voice, next/previous or the Data Layers row then picks another.
+  controls._renderCctvState(at('c'));
+  assert.deepEqual(picked, ['b', 'c']);
 });
 
 test('the meta line of a disabled layer does not describe its last camera', () => {

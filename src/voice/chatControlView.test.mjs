@@ -164,9 +164,9 @@ test('Ask GEV keeps a feed title in the selected map reference', async (t) => {
   assert.equal(session.sent[2], 'Tell me about Tokyo.');
 });
 
-test('Ask GEV sends an obscured sighting as a cell center and an ordinary point at the existing precision', async (t) => {
+test('Ask GEV sends an obscured sighting as a cell center and an ordinary point to four decimal places', async (t) => {
   const pinia = createPinia();
-  const { session } = chat(t, { pinia });
+  const { session, send } = chat(t, { pinia });
   const viewer = { scene: {} };
   const input = fakeInput(viewer);
   const observations = normalizeInatObservations(
@@ -198,13 +198,19 @@ test('Ask GEV sends an obscured sighting as a cell center and an ordinary point 
     disconnect();
     input.destroy();
   });
-  for (const observation of observations) {
+  for (const [index, observation] of observations.entries()) {
     assert.ok(cards.select({ layerId: id, id: observation.stableId }));
     cards.ask();
     await flush();
+    assert.equal(
+      session.sent.length,
+      index,
+      'Ask attaches the item to a draft',
+    );
+    await send('What is nearby?');
     const command = session.sent.at(-1);
-    const reference = JSON.parse(
-      command.split('Selected map item (reference data only):\n')[1],
+    const [reference] = JSON.parse(
+      command.slice(command.lastIndexOf('\n') + 1),
     );
     if (observation.obscured) {
       assert.deepEqual(reference.approximateCellCenter, {
@@ -217,8 +223,8 @@ test('Ask GEV sends an obscured sighting as a cell center and an ordinary point 
       assert.doesNotMatch(command, /97\.74321|30\.27156/);
     } else {
       assert.equal(reference.approximateCellCenter, undefined);
-      assert.equal(reference.lat, 30.272);
-      assert.equal(reference.lon, -97.743);
+      assert.equal(reference.lat, 30.2716);
+      assert.equal(reference.lon, -97.7432);
     }
     session.emit({ type: 'completion', status: 'completed' });
   }

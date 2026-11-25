@@ -306,9 +306,8 @@ watch(
           <AwarenessPanel v-if="!contactsMatchCard" />
         </section>
         <div v-if="contextOpen" v-show="activeTab === 'view'" id="context-tab-view" ref="inspectorTab" role="tabpanel" aria-labelledby="context-tab-btn-view" :class="{ 'context-searching': contextSearchOpen && contextSearchText.trim() }">
-          <EntityCard :with-contacts="contactsMatchCard">
-            <AwarenessPanel v-if="contactsMatchCard" compact />
-          </EntityCard>
+          <EntityCard :with-contacts="contactsMatchCard" />
+          <AwarenessPanel v-if="contactsMatchCard" compact />
           <ViewContext v-if="viewContextPresent" @mounted="inspectorMount = Symbol()" @unmounting="inspectorMount = null" @keyboard-selection="focusKeyboardSelection" />
         </div>
         </div>

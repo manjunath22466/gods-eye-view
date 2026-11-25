@@ -6,6 +6,7 @@ import {
 } from './cctvFrames.js';
 
 import { createCctvVideoSurface } from './cctvVideo.js';
+import { CCTV_SELECTED_EVENT } from './cctvEvents.js';
 import { presentCctvCalibration } from './cctvCalibration.js';
 import { roundHeadingDegrees } from '../data/headingDegrees.js';
 import {
@@ -207,6 +208,28 @@ export function _renderCctvState(state) {
       explicit: Boolean(state?.explicitSelection),
     });
   }
+  // A camera someone picks (a click on the globe, next/previous, voice or
+  // Context's own lists) also opens its card in Context, even right after an
+  // empty-ground deselect left no camera active. The layer's own opening
+  // camera (`openingCamera`: the one nearest the view, moved again after
+  // each settled move until someone picks) and any camera on the render that
+  // turns the layer on open no card, so turning Cameras on and panning leave
+  // Context on what it shows. A timed Auto-hop step is quiet the same way
+  // (`openingCamera` while it activates), so it never replaces the open card
+  // or reopens Context; a manual or voice step with Auto-hop on opens its
+  // card.
+  if (
+    effectiveActiveId &&
+    this._lastSeenCctvEnabled &&
+    effectiveActiveId !== this._lastSeenCctvActiveId &&
+    !state?.openingCamera
+  ) {
+    globalThis.document?.dispatchEvent?.(
+      new CustomEvent(CCTV_SELECTED_EVENT, {
+        detail: { cameraId: effectiveActiveId },
+      }),
+    );
+  }
   this._lastSeenCctvActiveId = effectiveActiveId;
   // Switching the layer off closes the panel it opened: nothing is left to
   // show. Only the on → off change collapses, so a panel the user opens
@@ -222,6 +245,7 @@ export function _renderCctvState(state) {
     this.actions.setPanelCollapsed('cctv-panel', true);
   }
   this._wasCctvEnabled = enabled;
+  this._lastSeenCctvEnabled = enabled;
 
   this._updateCctvSyncChip(state?.loading, enabled);
 

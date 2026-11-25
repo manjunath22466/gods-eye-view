@@ -129,7 +129,10 @@ test('they hand-write no Material glyph; each is a UiIcon', () => {
   }
   // An item's motion glyph is an image with its own name, not decoration.
   // Each globe-view block's head and each nearby row lead with a mark.
-  assert.equal(tags(inView, 'EntityMark').length, 1);
+  assert.deepEqual(
+    tags(inView, 'EntityMark').map((mark) => mark.match(/:layer="([^"]+)"/)[1]),
+    ['tile.id', 'layer.id'],
+  );
   assert.equal(tags(nearby, 'EntityMark').length, 1);
   const [motion] = tags(nearby, 'UiIcon').filter((i) =>
     /nearby-lists__motion/.test(i),

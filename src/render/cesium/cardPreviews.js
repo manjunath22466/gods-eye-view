@@ -152,6 +152,7 @@ function modelPreview(
   let widget = null;
   let model = null;
   let loaded = false;
+  let still = reducedMotion();
   let removeTick = null;
   let loop = null;
   const fail = () => {
@@ -198,7 +199,6 @@ function modelPreview(
     let cycleMs = 0;
     let lastFrame = performance.now();
     let holdMs = null;
-    const still = reducedMotion();
     const range = sphere.radius * viewRange;
     const pitch = Cesium.Math.toRadians(-18);
     const ease = (x) => x * x * (3 - 2 * x);
@@ -281,7 +281,10 @@ function modelPreview(
   }
 
   return {
-    setActive: (active) => loop.set(active),
+    setActive(active) {
+      if (active) still = reducedMotion();
+      loop.set(active);
+    },
     update() {},
     destroy() {
       removeTick?.();
@@ -453,6 +456,8 @@ function routePreview(container, route, { onFailed = () => {} } = {}) {
   let removeGrow = null;
   /** True while the plane flies in from the origin; moves wait for it. */
   let flyingIn = false;
+  /** True once the route is drawn: until then it renders whether shown or not. */
+  let settled = false;
   /** The craft's latest position, kept through the fly-in and the load. */
   let latest = route.at;
 
@@ -562,6 +567,7 @@ function routePreview(container, route, { onFailed = () => {} } = {}) {
           removeGrow = null;
           // The craft may have moved on while the plane flew in.
           move(latest);
+          loop?.sync();
         }
       };
       removeGrow = scene.preRender.addEventListener(grow);
@@ -582,6 +588,8 @@ function routePreview(container, route, { onFailed = () => {} } = {}) {
       new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-62), range),
     );
     scene.requestRender();
+    settled = true;
+    loop?.sync();
   };
 
   try {
@@ -595,7 +603,9 @@ function routePreview(container, route, { onFailed = () => {} } = {}) {
     scene.globe.baseColor = Cesium.Color.fromCssColorString('#0b1820');
     scene.globe.showGroundAtmosphere = false;
     scene.globe.enableLighting = false;
-    loop = renderLoopSwitch(widget);
+    // It renders until the route is drawn and the plane has flown in, then
+    // only while active (shown, playing and on screen; EntityPreview.vue).
+    loop = renderLoopSwitch(widget, () => settled && !flyingIn);
   } catch {
     onFailed();
     return { setActive() {}, update() {}, destroy() {} };
@@ -663,13 +673,25 @@ const MIN_EYE_M = 60;
  * @param {HTMLElement} container
  * @param {{lat: number, lon: number, altitudeM?: number|null,
  *   heading?: number|null}} craft
- * @param {{onFailed?: () => void}} [events]
+ * @param {{onFailed?: () => void, onReady?: () => void}} [events] `onReady`
+ *   each time a shown view has its imagery on and all its tiles in.
  */
-function cockpitPreview(container, craft, { onFailed = () => {} } = {}) {
+function cockpitPreview(
+  container,
+  craft,
+  { onFailed = () => {}, onReady = () => {} } = {},
+) {
   let widget = null;
   let loop = null;
   let active = false;
   let at = craft;
+  // Ready means the imagery is on and its tiles are in, not only the plain
+  // globe under it.
+  let imageryOn = false;
+  let tilesLeft = 1;
+  const maybeReady = () => {
+    if (active && imageryOn && tilesLeft === 0) onReady();
+  };
   const place = () => {
     if (!widget || !Number.isFinite(at?.lat) || !Number.isFinite(at?.lon))
       return;
@@ -701,10 +723,13 @@ function cockpitPreview(container, craft, { onFailed = () => {} } = {}) {
     scene.globe.showGroundAtmosphere = true;
     scene.fog.enabled = true;
     scene.camera.frustum.fov = Cesium.Math.toRadians(70);
-    // Tiles arriving ask for a frame, so the still fills in as they load.
-    scene.globe.tileLoadProgressEvent.addEventListener(() =>
-      scene.requestRender(),
-    );
+    // Tiles arriving ask for a frame, so the still fills in as they load;
+    // once none are left to come, a shown view is ready.
+    scene.globe.tileLoadProgressEvent.addEventListener((left) => {
+      scene.requestRender();
+      tilesLeft = left;
+      maybeReady();
+    });
     place();
     // Hidden, it draws nothing at all, not even as tiles arrive.
     loop = renderLoopSwitch(widget);
@@ -717,6 +742,7 @@ function cockpitPreview(container, craft, { onFailed = () => {} } = {}) {
     (imagery) => {
       if (!widget) return;
       widget.scene.imageryLayers.addImageryProvider(imagery);
+      imageryOn = true;
       widget.scene.requestRender();
     },
     () => widget && onFailed(),
@@ -726,7 +752,10 @@ function cockpitPreview(container, craft, { onFailed = () => {} } = {}) {
       active = Boolean(next);
       if (!widget) return;
       loop.set(active);
-      if (active) place();
+      if (!active) return;
+      place();
+      // Shown again with its tiles already in: ready at once.
+      maybeReady();
     },
     /** While it shows, the view keeps up with the craft. */
     update(next) {

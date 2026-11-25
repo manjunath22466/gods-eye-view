@@ -107,10 +107,11 @@ function mockImages(t) {
 
 test('desktop: the Context card keeps refreshing while the accordion folds CCTV', async (t) => {
   const requests = mockImages(t);
-  const { controls, cardHost, panelEl } = fixture(t);
+  const { controls, cardHost, panelEl, store } = fixture(t);
   panelEl.classList.remove('collapsed');
   controls._renderCctvState(stillState('a1.jpg'));
   assert.equal(requests.length, 1);
+  assert.equal(store.frame.settledAt, null);
   requests[0].onload();
   await settle();
   await nextTick();
@@ -120,6 +121,8 @@ test('desktop: the Context card keeps refreshing while the accordion folds CCTV'
   await settle();
   controls._renderCctvState(stillState('a2.jpg'));
   assert.equal(requests.length, 2);
+  const firstTime = store.frame.settledAt;
+  assert.ok(Number.isFinite(firstTime));
   assert.equal(requests[1].src, 'a2.jpg');
   requests[1].onload();
   controls._renderCctvState(stillState('a3.jpg'));

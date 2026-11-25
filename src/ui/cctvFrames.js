@@ -84,6 +84,7 @@ export const CCTV_FRAME_DECODE_WAIT_MS = 1000;
 export const EMPTY_CCTV_FRAME = Object.freeze({
   cameraId: '',
   currentSrc: '',
+  settledAt: null,
   src: '',
   loading: false,
   error: false,
@@ -119,7 +120,7 @@ export function _queueCctvFrame(src, cameraId, cameraChanged) {
   // prior camera's pixels under the newly selected metadata.
   const hasFrame = cameraChanged ? false : this._frame.hasFrame;
   this._setCctvFrame({
-    ...(cameraChanged ? { src: '' } : {}),
+    ...(cameraChanged ? { src: '', settledAt: null } : {}),
     hasFrame,
     cameraId,
     currentSrc: src,
@@ -177,6 +178,7 @@ export function _settleCctvFrame(token, src, ok) {
           error: false,
           src,
           hasFrame: true,
+          settledAt: Date.now(),
         }
       : { loading: false, wrapLoading: false, error: true },
   );

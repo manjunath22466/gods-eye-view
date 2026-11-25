@@ -368,6 +368,8 @@ export function createLifecycle({ state, services, parts }) {
           state.rows.delete(row.stableId);
           state.rows.set(row.stableId, row);
           if (row.stableId === state.selectedId) state.selectedRow = row;
+          if (row.stableId === state.contextRecord?.row.stableId)
+            state.contextRecord.row = row;
         }
         // Selection owns a real observation until explicit deselection. It is
         // independent of sample/window/filter and ambient-card eligibility.
@@ -506,6 +508,7 @@ export function createLifecycle({ state, services, parts }) {
     initialSettle?.finish();
     initialCameraDeadline = 0;
     state.enabled = false;
+    state.contextRecord = null;
     services.clearTimer(state.cameraTimer);
     state.cameraTimer = null;
     state.request?.abort();

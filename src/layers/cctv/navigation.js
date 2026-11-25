@@ -76,6 +76,20 @@ export function createNavigation({
    * @returns {boolean} True when the active camera changed.
    */
 
+  /**
+   * Run a timer-driven activation quietly. Only Auto-hop's own steps are
+   * quiet: the Auto-hop preference stays on when a person picks or steps to
+   * a camera, and that pick opens its card.
+   */
+  function quietly(activate) {
+    layerState._quietActivation = true;
+    try {
+      activate();
+    } finally {
+      layerState._quietActivation = false;
+    }
+  }
+
   function reopenNearestCamera() {
     if (!layerState._openingCameraProvisional || !layerState._enabled)
       return false;
@@ -232,7 +246,7 @@ export function createNavigation({
         // Use setActiveCamera so the full activation path runs (obstruction
         // probe, projection runtime, geometry rewrite) — previously bypassed
         // with a bare assignment
-        parts.selection.setActiveCamera(nearest);
+        quietly(() => parts.selection.setActiveCamera(nearest));
         layerState._lastHopAt = nowMs;
         return;
       }
@@ -245,7 +259,9 @@ export function createNavigation({
       1,
       layerState._records.length,
     );
-    parts.selection.setActiveCamera(layerState._records[nextIdx].camera.id);
+    quietly(() =>
+      parts.selection.setActiveCamera(layerState._records[nextIdx].camera.id),
+    );
     layerState._lastHopAt = nowMs;
   }
 

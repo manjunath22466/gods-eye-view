@@ -11,7 +11,7 @@ import PreviewHud from './PreviewHud.vue';
 // moved along with the craft while it shows. It takes turns with the turning
 // model. Speed and altitude ride on tapes either side, as on a head-up
 // display: the ticks roll as the figures change, with the figure boxed in
-// the middle. Its credit line sits in the corner.
+// the middle. Its credit line runs along its foot.
 const props = defineProps({
   lat: { type: Number, default: null },
   lon: { type: Number, default: null },
@@ -24,7 +24,7 @@ const props = defineProps({
   /** Whether the view is the one showing. */
   active: { type: Boolean, default: false },
 });
-const emit = defineEmits(['failed']);
+const emit = defineEmits(['failed', 'ready']);
 const store = useEntityCardStore();
 
 const host = ref(null);
@@ -37,7 +37,7 @@ onMounted(() => {
     emit('failed');
     return;
   }
-  preview = previews.cockpit(host.value, craft(), { onFailed: () => emit('failed') });
+  preview = previews.cockpit(host.value, craft(), { onFailed: () => emit('failed'), onReady: () => emit('ready') });
   preview.setActive(props.active);
 });
 // While it shows, the view keeps up with the craft as the card refreshes.
@@ -67,19 +67,20 @@ const course = computed(() => (Number.isFinite(props.heading) ? `${String(Math.r
 </script>
 
 <template>
-  <div class="flight-cockpit" aria-hidden="true">
-    <div ref="host" class="flight-cockpit__scene"></div>
-    <PreviewHud variant="cockpit" :running="active" />
-    <span class="flight-cockpit__horizon"><i></i></span>
-    <span v-if="knots !== null" class="flight-cockpit__tape flight-cockpit__tape--speed">
+  <!-- The picture, the HUD and the tapes are decoration; the credit is read. -->
+  <div class="flight-cockpit">
+    <div ref="host" class="flight-cockpit__scene" aria-hidden="true"></div>
+    <PreviewHud variant="cockpit" :running="active" aria-hidden="true" />
+    <span class="flight-cockpit__horizon" aria-hidden="true"><i></i></span>
+    <span v-if="knots !== null" class="flight-cockpit__tape flight-cockpit__tape--speed" aria-hidden="true">
       <i class="flight-cockpit__ticks" :style="{ backgroundPositionY: speedRoll }"></i>
       <b>{{ formatNumber(knots) }}</b><em>{{ t('KT') }}</em>
     </span>
-    <span v-if="altFeet !== null" class="flight-cockpit__tape flight-cockpit__tape--alt">
+    <span v-if="altFeet !== null" class="flight-cockpit__tape flight-cockpit__tape--alt" aria-hidden="true">
       <i class="flight-cockpit__ticks" :style="{ backgroundPositionY: altRoll }"></i>
       <b>{{ formatNumber(altFeet) }}</b><em>{{ t('FT') }}</em>
     </span>
-    <span class="flight-cockpit__label">{{ t('Cockpit view') }}<strong>{{ [feet, course].filter(Boolean).join(' · ') }}</strong></span>
+    <span class="flight-cockpit__label" aria-hidden="true">{{ t('Cockpit view') }}<strong>{{ [feet, course].filter(Boolean).join(' · ') }}</strong></span>
     <span class="flight-cockpit__credit">{{ ESRI_IMAGERY_CREDIT }}</span>
   </div>
 </template>

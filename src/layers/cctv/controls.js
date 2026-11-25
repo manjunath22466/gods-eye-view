@@ -260,6 +260,58 @@ export function createControls({ state: layerState, services, parts, source }) {
     },
 
     /**
+     * The cameras the layer has loaded, as plain records (id, name, position)
+     * for Context's counts and nearby lists. Empty while the layer is off.
+     * @param {number} [maxCount]
+     * @returns {{ id: string, name: string, lat: number, lon: number }[]}
+     */
+    getAnalystRecords(maxCount) {
+      if (!layerState._enabled) return [];
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(0, Math.floor(maxCount))
+        : layerState._records.length;
+      const records = [];
+      for (const record of layerState._records) {
+        if (records.length >= limit) break;
+        const camera = record.camera;
+        if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon))
+          continue;
+        records.push({
+          id: String(camera.id),
+          name: camera.name || '',
+          lat: camera.lat,
+          lon: camera.lon,
+        });
+      }
+      return records;
+    },
+
+    /**
+     * What a camera's card shows about it: where it looks, how often its
+     * frame refreshes, and who runs its feed. Null for an unknown camera.
+     * @param {string} cameraId
+     */
+    cameraDetails(cameraId) {
+      const camera = layerState._recordById.get(String(cameraId))?.camera;
+      if (!camera) return null;
+      const finite = (value) => (Number.isFinite(value) ? value : null);
+      const words = (value) =>
+        (typeof value === 'string' && value.trim()) || null;
+      return {
+        name: words(camera.name),
+        city: words(camera.city),
+        provider: words(camera.provider),
+        // The owner a partner-supplied feed inside a pack names.
+        credit: words(camera.credit),
+        feedType: words(camera.feedType),
+        headingDeg: finite(camera.headingDeg),
+        fovDeg: finite(camera.fovDeg),
+        rangeM: finite(camera.rangeM),
+        refreshMs: Math.max(10_000, finite(camera.frameRefreshMs) ?? 0),
+      };
+    },
+
+    /**
      * Returns basic layer statistics, including initial-load progress while
      * the staggered geometry queue is draining.
      * @returns {{ count: number, lastUpdate: number|null, error: string|null, loading: boolean, loadingLoaded: number, loadingTotal: number }}

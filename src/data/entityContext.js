@@ -1,3 +1,4 @@
+import { aircraftCountryCode } from './aircraftCountry.js';
 import { getContextStore } from './contextStore.js';
 import {
   CONTEXT_FEATURE,
@@ -842,6 +843,8 @@ function readLayerPoints(dataManager, layerId, module, options, summarize) {
       const points = source?.points;
       // A lazy snapshot can fail during iteration or retained-row conversion.
       if (points != null) return summarize({ source, points });
+      if (options.viewRecords && typeof module?.getViewRecords === 'function')
+        return summarize({ points: module.getViewRecords(ALL_RECORDS) || [] });
     } catch (error) {
       if (!options.fallbackOnSnapshotError && !options.onSnapshotFallback)
         throw error;
@@ -1199,6 +1202,65 @@ function cardPhoto(dataManager, layerId, record) {
   };
 }
 
+/**
+ * A reading the item's layer describes for its card (`describeReading`): a
+ * value on a banded scale, or null when the layer has none for it.
+ */
+function cardReading(dataManager, layerId, record) {
+  if (!record) return null;
+  try {
+    const reading = dataManager?.layers
+      ?.get?.(layerId)
+      ?.module?.describeReading?.(record);
+    return reading && typeof reading === 'object' ? reading : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What picks the fleet model an item is drawn with (`fleet` names the
+ * table: aircraft, vessel or transit), from its layer's record; null for
+ * an item drawn without one.
+ * @param {string} layerId
+ * @param {string} kind
+ * @param {object|null} record
+ * @returns {object|null}
+ */
+function modelSubject(layerId, kind, record) {
+  if (!record) return null;
+  if (kind === 'aircraft')
+    return {
+      fleet: 'aircraft',
+      typeCode: text(record.typeCode ?? record.type) || null,
+      category: record.category ?? null,
+      callsign: text(record.callsign) || null,
+    };
+  if (kind === 'vessel')
+    return {
+      fleet: 'vessel',
+      type: text(record.shipType ?? record.type) || null,
+      mmsi: text(record.mmsi) || null,
+      virtual: record.virtual === true,
+      length: finite(record.length),
+      beam: finite(record.beam),
+      name: text(record.name) || null,
+    };
+  if (layerId === 'transit')
+    return {
+      fleet: 'transit',
+      mode: text(record.mode) || null,
+      routeType: record.routeType ?? null,
+    };
+  if (layerId === 'rail')
+    return {
+      fleet: 'transit',
+      railCategory: text(record.category) || null,
+      railMode: text(record.mode) || null,
+    };
+  return null;
+}
+
 export function describeEntity(
   dataManager,
   identity,
@@ -1320,18 +1382,18 @@ export function describeEntity(
     warningWords: warnings.map((entry) => entry.words),
     // For the aircraft card's model and route line.
     aircraftClass,
-    // What picks the fleet model the globe draws this aircraft with.
-    aircraftModel:
-      kind.kind === 'aircraft' && record
-        ? {
-            typeCode: text(record.typeCode ?? record.type) || null,
-            category: record.category ?? null,
-            callsign: text(record.callsign) || null,
-          }
-        : null,
+    // What picks the fleet model the globe draws it with, for any item
+    // drawn as one (aircraft, vessels, transit and rail); null otherwise.
+    modelSubject: modelSubject(layerId, kind.kind, record),
     photo: cardPhoto(dataManager, layerId, record),
+    // A reading on its layer's banded scale, which leads the card in place
+    // of the headline figures.
+    reading: cardReading(dataManager, layerId, record),
     // Its class's English name, for the UI to translate; null when unknown.
     aircraftClassName: AIRCRAFT_CLASS_LABELS[aircraftClass] || null,
+    // The country it is registered in (ISO code), when that can be told.
+    countryCode:
+      kind.kind === 'aircraft' && record ? aircraftCountryCode(record) : null,
     insights:
       kind.kind === 'aircraft' ? aircraftInsights(record, { nowMs }) : [],
     operator: text(record?.operator) || null,
@@ -1475,6 +1537,17 @@ function spatialRow(layerId, name, record, at, distanceKm) {
       record,
     },
   };
+}
+
+/**
+ * A layer's record as a list row: its key, title and the identity that opens
+ * its card (as Nearby's rows carry). Null without a position.
+ * @param {string} layerId
+ * @param {object} record
+ */
+export function recordRow(layerId, record) {
+  const at = recordPosition(record);
+  return at ? spatialRow(layerId, '', record, at, null) : null;
 }
 
 /**
@@ -1625,6 +1698,7 @@ export function nearbyByKind(
  * @param {number} [options.limit] Rows to retain.
  * @param {string} [options.query] Only items that hold this text.
  * @param {string} [options.excludeKey] A record to leave out (the selected one).
+ * @param {boolean} [options.breakdown] Summarize categories for the counted rows.
  * @param {(name: string, id: string) => string} [options.shownLayerName] A display alias to match.
  * @param {boolean} [options.throwOnReadError] Let a caller with a retry policy handle a reader error.
  * @param {() => void} [options.onSnapshotFallback] Use ordinary records and report an optional reader failure.
@@ -1639,6 +1713,7 @@ export function nearbyForLayer(
     limit = 3,
     query = '',
     excludeKey = '',
+    breakdown = false,
     shownLayerName,
     throwOnReadError = false,
     onSnapshotFallback,
@@ -1651,6 +1726,7 @@ export function nearbyForLayer(
   )
     return null;
   const layerId = layer.id;
+  const kind = entityKind(layerId);
   const module = dataManager?.layers?.get?.(layerId)?.module;
   if (typeof module?.getAnalystRecords !== 'function') return null;
   const name = layerName(dataManager, layerId);
@@ -1663,6 +1739,7 @@ export function nearbyForLayer(
   const latitudeSpan = radiusKm / 110;
   function summarize({ source, points }) {
     const best = [];
+    const classified = breakdown && BREAKDOWN_KINDS.has(kind.kind) ? [] : null;
     let count = 0;
     for (const point of points) {
       if (source && Math.abs(point.lat - here.lat) > latitudeSpan) continue;
@@ -1670,12 +1747,13 @@ export function nearbyForLayer(
         ? { at: point, km: distanceKm(here, point) }
         : nearestPart(here, point, { radiusKm });
       if (!(km <= radiusKm)) continue;
-      if (excludeKey || matchRecord) {
+      if (excludeKey || matchRecord || classified) {
         const record = source
           ? source.recordForPoint(point, Boolean(excludeKey))
           : point;
         if (isExcludedNearRecord(layerId, record, excludeKey)) continue;
         if (matchRecord && !recordMatches(record, needle)) continue;
+        classified?.push(record);
       }
       count++;
       keepBest(best, keep, -km, point, at);
@@ -1683,8 +1761,11 @@ export function nearbyForLayer(
     return {
       layerId,
       layerName: name,
-      icon: entityKind(layerId).icon,
+      icon: kind.icon,
       count,
+      ...(classified
+        ? { breakdown: recordBreakdown(kind.kind, classified) }
+        : {}),
       items: best.map(({ point, score, at }) => ({
         ...spatialRow(
           layerId,
@@ -1703,6 +1784,55 @@ export function nearbyForLayer(
     module,
     { throwOnReadError, onSnapshotFallback },
     summarize,
+  );
+}
+
+/**
+ * A layer's loaded items within a radius of a point, nearest first, each with
+ * its distance: what a card's charts count (fire hits by the hour, quakes
+ * nearby). Empty while the layer is off. By default, a failed optional
+ * point snapshot is retried through the ordinary layer records.
+ * @param {object} dataManager
+ * @param {string} layerId
+ * @param {{lat: number, lon: number}} here
+ * @param {number} radiusKm
+ * @param {object} [options]
+ * @param {boolean} [options.fallbackOnSnapshotError=true] Retry through ordinary records on a snapshot error.
+ * @param {boolean} [options.throwOnReadError=false] Propagate the final reader error instead of returning an empty list.
+ * @returns {Array<{record: object, km: number}>}
+ */
+export function layerRecordsNear(
+  dataManager,
+  layerId,
+  here,
+  radiusKm,
+  options,
+) {
+  if (!here || !Number.isFinite(here.lat) || !Number.isFinite(here.lon))
+    return [];
+  if (dataManager?.isEnabled && !dataManager.isEnabled(layerId)) return [];
+  const module = dataManager?.layers?.get?.(layerId)?.module;
+  return (
+    readLayerPoints(
+      dataManager,
+      layerId,
+      module,
+      { fallbackOnSnapshotError: true, ...options },
+      ({ source, points }) => {
+        const found = [];
+        const latitudeSpan = radiusKm / 110;
+        for (const point of points) {
+          if (source && Math.abs(point.lat - here.lat) > latitudeSpan) continue;
+          const km = distanceKm(here, source ? point : recordPosition(point));
+          if (km <= radiusKm)
+            found.push({
+              record: source ? source.recordForPoint(point, false) : point,
+              km,
+            });
+        }
+        return found.sort((a, b) => a.km - b.km);
+      },
+    ) ?? []
   );
 }
 
@@ -1740,6 +1870,14 @@ const AIRCRAFT_CLASS_NAMES = {
   station: msg('Ground stations / obstacles'),
 };
 
+const BREAKDOWN_KINDS = new Set([
+  'aircraft',
+  'vessel',
+  'satellite',
+  'earthquake',
+  'vehicle',
+]);
+
 /**
  * What a layer's items are made of, for Context: one or two ways of splitting
  * them, each a list of labelled counts that add up to `total`. Aircraft split
@@ -1755,15 +1893,16 @@ const AIRCRAFT_CLASS_NAMES = {
  */
 export function layerBreakdown(dataManager, layerId, { rect = null } = {}) {
   const kind = entityKind(layerId).kind;
-  if (
-    !['aircraft', 'vessel', 'satellite', 'earthquake', 'vehicle'].includes(kind)
-  )
-    return null;
+  if (!BREAKDOWN_KINDS.has(kind)) return null;
   let records = layerRecords(dataManager, layerId);
   if (rect)
     records = records.filter((record) =>
       insideRect(recordPosition(record), rect),
     );
+  return recordBreakdown(kind, records);
+}
+
+function recordBreakdown(kind, records) {
   if (!records.length) return null;
   const splits = [];
   if (kind === 'aircraft') {
@@ -2116,6 +2255,7 @@ export function viewSummaryForLayer(
     {
       // Globe can find a visible part even if the record has no main point.
       requirePosition: false,
+      viewRecords: true,
       throwOnReadError,
       fallbackOnSnapshotError,
       onSnapshotFallback,

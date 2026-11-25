@@ -59,20 +59,26 @@ const facts = computed(() => {
 });
 
 // The bigger view: a popup over the map with the same frame, closed by its
-// ×, Esc or a click outside.
+// ×, Esc or a click outside. While it is open its Esc is its own (it is
+// marked data-owns-escape): caught on the way down at the document, before
+// Context, the map or a panel can act on it, and stopped there, so one Esc
+// closes the popup and does nothing else.
 const big = ref(false);
 const onKey = (e) => {
-  if (e.key === 'Escape') big.value = false;
+  if (e.key !== 'Escape' || e.isComposing) return;
+  e.preventDefault();
+  e.stopPropagation();
+  big.value = false;
 };
 // The cleanup also runs when the card unmounts, even if `big` turned false in
 // the same tick and the watcher never saw it.
 watch([big, () => props.cameraId], ([open, cameraId], _, onCleanup) => {
   if (!open) return;
   cctv.showPreviewPopup(cameraId, true);
-  document.addEventListener('keydown', onKey);
+  document.addEventListener('keydown', onKey, true);
   onCleanup(() => {
     cctv.showPreviewPopup(cameraId, false);
-    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', onKey, true);
   });
 });
 watch(() => props.cameraId, (cameraId, _, onCleanup) => {
@@ -97,7 +103,7 @@ function openPanel() {
       </UiButton>
     </div>
     <Teleport to="body">
-      <div v-if="big" class="cctv-popup" role="dialog" :aria-label="name || t('Camera view')" @click.self="big = false">
+      <div v-if="big" class="cctv-popup" role="dialog" data-owns-escape :aria-label="name || t('Camera view')" @click.self="big = false">
         <figure class="cctv-popup__card">
           <header class="cctv-popup__head">
             <UiIcon name="videocam" :size="null" />

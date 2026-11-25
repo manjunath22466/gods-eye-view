@@ -53,6 +53,7 @@ export function createWildlifeSightingsLayer({
     cellSets: null,
     selectedId: null,
     selectedRow: null,
+    contextRecord: null,
     carriers: new Map(),
     contextIds: new Set(),
     publishingContext: false,

@@ -1,8 +1,11 @@
 import { ref, shallowRef, watch } from 'vue';
 import { resolvePickedContext } from '../data/pickedContext.js';
+import { CCTV_SELECTED_EVENT } from './cctvEvents.js';
+import { MOBILE_SHEET_ATTR } from './mobileSheets.js';
+import { ESCAPE_OWNING_DIALOGS } from './contextEvents.js';
 import { onScreen } from '../data/locate.js';
 import { clickCard } from '../data/pickRegistry.js';
-import { followedOf, onFollowChanged } from '../data/followed.js';
+import { followedOf, isFollowing, onFollowChanged } from '../data/followed.js';
 import { fromDegreesInto } from '../geo/ellipsoid.js';
 import { inputFor } from '../input/dispatcher.js';
 import {
@@ -12,6 +15,7 @@ import {
 import { applicationHooksOf } from '../render/applicationHooks.js';
 import { findCamera, rendererOf } from '../render/rendererOf.js';
 import { WORLD_FOCUS_FRAMING } from '../worldFocus.js';
+import { heightsOf } from '../queries/heights.js';
 import { useCockpitStore } from './stores/cockpit.js';
 import { isGlobeView, useEntityCardStore } from './stores/entityCard.js';
 import { useOmnibarStore } from './stores/omnibar.js';
@@ -57,6 +61,9 @@ const FOLLOWABLE = new Set(['flights', 'military', 'satellites']);
  *   The weather-only service for the unselected view.
  * @param {(fly: () => void) => unknown} [options.navigateToSelection] Hand an explicit row flight to the navigation owner.
  * @param {object} [options.inspector] The Inspector count owner and optional weather clock.
+ * @param {() => void} [options.revealContext] Reveal Context on the mobile shell.
+ * @param {() => void} [options.supersedeDeferredNavigation] Retire older navigation before a card's explicit flight.
+ * @param {() => void} [options.creditAirports] Show the OurAirports credit once an airport's card opens.
  * @returns {() => void} disconnects
  */
 export function installEntityContext({
@@ -67,7 +74,10 @@ export function installEntityContext({
   regionalBrief,
   spotWeather,
   inspector,
-  navigateToSelection = (fly) => fly(),
+  navigateToSelection,
+  revealContext,
+  supersedeDeferredNavigation,
+  creditAirports,
 }) {
   const store = useEntityCardStore(pinia);
   const omnibar = useOmnibarStore(pinia);
@@ -91,22 +101,58 @@ export function installEntityContext({
   const inCockpit = () =>
     Boolean(doc?.body?.classList.contains('cockpit-mode'));
 
-  function openPanel() {
+  /**
+   * Show Context: its rail item, and on a phone its sheet unless `reveal`
+   * is false (a camera stepped to from the Cameras sheet keeps that sheet,
+   * where its Next and Previous are).
+   */
+  function openPanel({ reveal = true } = {}) {
     const button = doc?.querySelector(
       '.ui-rail--right .ui-rail__item[data-rail-item="global-context-panel"]',
     );
     if (button && button.getAttribute('aria-pressed') !== 'true')
       button.click();
+    if (reveal) revealContext?.();
   }
 
-  function flyTo(card, { fromSelection = false } = {}) {
+  function flyTo(card, { explicit = false, fromSelection = false } = {}) {
+    const manager = getDataManager();
+    const layer = manager?.layers?.get?.(card?.layerId)?.module;
+    const id = card?.identity?.id;
+    if (card?.layerId === 'cctv') {
+      if (inCockpit()) return 'cockpit-active';
+      if (isFollowing(viewer)) return 'tracking-holds-view';
+      // Live cards use the camera layer's focus policy and framing. With
+      // the layer off, the card flies to its saved location without waking
+      // the layer.
+      if (manager?.isEnabled?.('cctv')) {
+        const result = layer?.focusCamera?.(id);
+        if (result != null && result !== 'no-active-camera') {
+          if (explicit && result === 'focused') supersedeDeferredNavigation?.();
+          return result;
+        }
+      }
+    }
+    let superseded = false;
+    if (manager?.isEnabled?.(card?.layerId)) {
+      if (card.layerId === 'ais-live-vessels') layer?.selectById?.(id);
+      else if (card.layerId === 'rail' && layer?.focusTrain) {
+        // A train flies the camera itself: retire older navigation first, so
+        // a late one cannot take the camera from it (nor this cancel its
+        // flight).
+        if (explicit) supersedeDeferredNavigation?.();
+        superseded = explicit;
+        if (layer.focusTrain(id)) return true;
+      } else if (card.layerId === 'transit') layer?.focusVehicle?.(id);
+    }
     const port = camera();
     if (!port || !Number.isFinite(card?.lat) || !Number.isFinite(card?.lon))
       return;
+    if (explicit && !superseded && !(fromSelection && navigateToSelection))
+      supersedeDeferredNavigation?.();
     const height = card.pinHeightM ?? card.altitudeM ?? 0;
     const framing = card.obscured ? WORLD_FOCUS_FRAMING['sighting-area'] : null;
-    const pitchDeg =
-      framing?.pitchDeg ?? (card.kind === 'satellite' ? -90 : -45);
+    const pitch = framing?.pitchDeg ?? (card.kind === 'satellite' ? -90 : -45);
     const range = framing?.rangeM ?? FRAME_RANGE[card.kind] ?? DEFAULT_RANGE;
     const fly = () =>
       port.flyToBounds(
@@ -121,14 +167,15 @@ export function installEntityContext({
         {
           offset: {
             heading: port.pose().heading,
-            pitch: (pitchDeg * Math.PI) / 180,
+            pitch: (pitch * Math.PI) / 180,
             range,
           },
           durationS: 2,
         },
       );
-    if (fromSelection) return navigateToSelection(fly);
-    return fly();
+    if (fromSelection && navigateToSelection) navigateToSelection(fly);
+    else fly();
+    return true;
   }
 
   function follow(card) {
@@ -175,6 +222,16 @@ export function installEntityContext({
   // track the craft, then enter Cockpit on it. Only layers the tracking
   // action can follow are offered (local ADS-B cannot be tracked).
   const COCKPIT_LAYERS = new Set(['flights', 'military', 'satellites']);
+  // Only a satellite whose class can be ridden offers the orbital view
+  // (debris cannot); the satellites layer says, by NORAD id.
+  function satelliteRideable(card) {
+    const layer = getDataManager()?.layers?.get?.('satellites');
+    try {
+      return layer?.module?.cockpitEnterable?.(card.identity?.id) === true;
+    } catch {
+      return false;
+    }
+  }
   async function cockpit(card) {
     try {
       await enterCockpit(card);
@@ -182,16 +239,37 @@ export function installEntityContext({
       // The craft left the feed or tracking failed; the card stays as it is.
     }
   }
+  // Anything else that moves has its own first-person view (a vessel's
+  // bridge, a train's or a bus's cab) once its layer says the picked item can
+  // be entered: the same check the entry itself makes.
+  function rideOffered(card) {
+    const presence = cockpitStore.presence;
+    return Boolean(
+      presence?.entryAvailable &&
+      presence.entryLayerId &&
+      presence.entryLayerId === card?.layerId &&
+      presence.entryId === String(card?.identity?.id),
+    );
+  }
   async function enterCockpit(card) {
     const run = omnibar.runner;
-    if (!run || !COCKPIT_LAYERS.has(card.layerId)) return;
-    await run('track_entity', {
+    if (!COCKPIT_LAYERS.has(card.layerId)) {
+      if (rideOffered(card)) cockpitStore.act('enter', card.identity);
+      return;
+    }
+    if (!run) return;
+    const generation = store.selectionGeneration();
+    const tracked = await run('track_entity', {
       query: card.identity.id || card.title,
       layerId: card.layerId,
     });
-    if (disposed) return;
+    const isCurrent = () =>
+      !disposed &&
+      store.card?.key === card.key &&
+      store.selectionGeneration() === generation;
+    if (tracked?.ok !== true || !isCurrent()) return;
     if (card.layerId !== 'satellites') {
-      await run('control_cockpit', { action: 'enter' });
+      cockpitStore.act('enter', card.identity);
       return;
     }
     // A satellite is ridden through the app's own Cockpit entry, which offers
@@ -199,10 +277,14 @@ export function installEntityContext({
     // if it never does (a class that cannot be ridden), nothing is entered.
     for (let tries = 0; tries < 40; tries++) {
       // Another pick or a closed card in the meantime calls the ride off.
-      if (disposed || store.card?.key !== card.key) return;
+      if (!isCurrent()) return;
       const presence = cockpitStore.presence;
-      if (presence?.entryAvailable && presence.entryKind === 'satellite') {
-        doc?.getElementById('cockpit-entry')?.click();
+      if (
+        presence?.entryAvailable &&
+        presence.entryKind === 'satellite' &&
+        presence.entryId === String(card.identity.id)
+      ) {
+        cockpitStore.act('enter', card.identity);
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -218,23 +300,24 @@ export function installEntityContext({
     voice.controls?.emit('chat-submit');
   }
 
-  function ask(card) {
-    const coordinates = {
-      lat: Number.isFinite(card.lat) ? Number(card.lat.toFixed(3)) : null,
-      lon: Number.isFinite(card.lon) ? Number(card.lon.toFixed(3)) : null,
-    };
-    askText('Tell me about this map item and what is around it.', {
-      name: card.title,
-      kind: card.kind,
+  // The card's Ask icon opens the Chat with the item already attached; the
+  // person writes the question.
+  function ask(card, title = card.title) {
+    voice.controls?.emit('chat-restore');
+    voice.controls?.emit('chat-item', {
+      key: card.key,
+      name: title,
+      itemKind: card.kind,
       layer: card.layerName,
-      ...(card.obscured
-        ? { approximateCellCenter: { ...coordinates, cellSizeDegrees: 0.2 } }
-        : coordinates),
+      lat: card.lat,
+      lon: card.lon,
+      obscured: card.obscured,
     });
   }
 
   store.connect({
     dataManager: getDataManager,
+    creditAirports,
     openPanel,
     flyTo,
     follow,
@@ -261,7 +344,10 @@ export function installEntityContext({
     askText,
     cockpit,
     canCockpit: (card) =>
-      Boolean(omnibar.runner) && COCKPIT_LAYERS.has(card?.layerId),
+      COCKPIT_LAYERS.has(card?.layerId)
+        ? Boolean(omnibar.runner) &&
+          (card.layerId !== 'satellites' || satelliteRideable(card))
+        : rideOffered(card),
     canFollow: (card, { auto = false } = {}) =>
       FOLLOWABLE.has(card?.layerId) && (!auto || Boolean(omnibar.runner)),
     // Where the camera is, so a search prefers what is close by.
@@ -296,13 +382,26 @@ export function installEntityContext({
       east: 180,
       north: 90,
     };
+    // The ground under the middle, where the terrain has loaded: tiles still
+    // on their way can answer kilometres below the ellipsoid.
+    let groundM = null;
+    if (middle) {
+      try {
+        const sampled = heightsOf(viewer).now(center, { against: 'terrain' });
+        if (Number.isFinite(sampled) && sampled > -500 && sampled < 9000)
+          groundM = sampled;
+      } catch {
+        groundM = null;
+      }
+    }
     hasCameraSnapshot = true;
     store.setView(
       {
         center,
         rect,
         heightM: pose.height,
-        // The horizon is measured from the camera, independently of screen center.
+        groundM,
+        // Horizon tests use the camera position even when the view is tilted.
         eye: { lat: pose.lat, lon: pose.lon },
       },
       { settled },
@@ -423,22 +522,35 @@ export function installEntityContext({
 
     stopInspectorWatchers.push(
       watch(
-        [countSample, ...metadataInputs],
-        ([sample, ...live]) => {
-          if (!sample || sample === appliedSample) return;
-          const { inputs, rows } = sample;
-          // A preceding post-flush callback may make the sample stale.
-          // Let the pre-flush publisher sample the latest inputs first.
-          if (inputs.some((value, index) => value !== live[index])) return;
-          const [visible, , missionsEnabled] = inputs;
-          appliedSample = sample;
-          if (!visible || !store.readViewContextShown()) {
-            inspector.counts.update({ shown: false, nothingOn: false });
-            return;
-          }
-          inspector.counts.update({
-            shown: true,
-            nothingOn: !inspectorHasLayers(rows, missionsEnabled),
+        countSample,
+        (sample) => {
+          // Finish the current flush before admitting a count request: a
+          // post-flush callback can still replace the manager or view.
+          queueMicrotask(() => {
+            if (
+              disposed ||
+              !sample ||
+              sample !== countSample.value ||
+              sample === appliedSample
+            )
+              return;
+            const { inputs, rows } = sample;
+            const live = metadataInputs.map((read) => read());
+            if (inputs[countInputs.length] !== live[countInputs.length]) {
+              store.syncDataManager();
+              return;
+            }
+            if (inputs.some((value, index) => value !== live[index])) return;
+            const [visible, , missionsEnabled] = inputs;
+            appliedSample = sample;
+            if (!visible || !store.readViewContextShown()) {
+              inspector.counts.update({ shown: false, nothingOn: false });
+              return;
+            }
+            inspector.counts.update({
+              shown: true,
+              nothingOn: !inspectorHasLayers(rows, missionsEnabled),
+            });
           });
         },
         { flush: 'post' },
@@ -539,9 +651,33 @@ export function installEntityContext({
     // A click on open ground, sea or sky lets go of what was selected. A
     // click on something else Context cannot describe (a label, a trail)
     // leaves the card as it is.
-    // Only a clean click lets go, as the layers' own clicks do.
+    // Only a clean click lets go, as the layers' own clicks do; Context then
+    // describes the view.
     if (event.surface && isTrackingClickGesture(event.gesture)) store.clear();
   });
+
+  // A camera someone picked (on the globe, with next/previous, by voice)
+  // opens its card in Context, which shows its feed; its tools stay in the
+  // card's Camera settings tab until that is chosen. Context's own pick of
+  // the same camera comes back here and is left as it is.
+  const onCameraPicked = ({ detail }) => {
+    const id = detail?.cameraId;
+    if (!id || inCockpit()) return;
+    // On a phone, a step made in the Cameras sheet (its Next or Previous, or
+    // voice while it is shown) keeps that sheet up; the card is there when
+    // the person turns to Context.
+    const inCamerasSheet =
+      doc?.body?.getAttribute?.(MOBILE_SHEET_ATTR) === 'cameras';
+    if (store.card?.layerId === 'cctv' && store.card.identity?.id === id) {
+      if (detail.explicitReselection && !inCamerasSheet) openPanel();
+      return;
+    }
+    store.select(
+      { layerId: 'cctv', id: String(id) },
+      { reveal: !inCamerasSheet },
+    );
+  };
+  doc?.addEventListener(CCTV_SELECTED_EVENT, onCameraPicked);
 
   // Layers that select through the context store (GeoJSON sites, fires,
   // installations) announce it; their selection opens the card too.
@@ -551,9 +687,17 @@ export function installEntityContext({
       record.layerId === 'ais-live-vessels'
         ? record.properties?.vesselId
         : null;
+
+    const id = vesselId ? String(vesselId) : record.id;
+    // A layer can echo a card selection. Keep its Back history.
+    if (
+      store.card?.layerId === record.layerId &&
+      store.card.identity?.id === id
+    )
+      return;
     store.select({
       layerId: record.layerId,
-      id: vesselId ? String(vesselId) : record.id,
+      id,
       ...(vesselId ? { vesselId: String(vesselId) } : {}),
       label: record.label || record.properties?.name,
       lat: record.latitude,
@@ -561,6 +705,31 @@ export function installEntityContext({
     });
   };
   globalThis.addEventListener?.('gev:entity-selected', onSelected);
+
+  // Esc on the map itself (focus on the page or the globe) clears the pick
+  // first, as it does inside Context. Every other Esc owner keeps its own:
+  // Cockpit, dialogs (a camera's enlarged view among them), a control that
+  // takes its own Esc (data-owns-escape), a phone sheet (which closes
+  // first), panels and fields.
+  const onKey = (event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing)
+      return;
+    if (!store.card || inCockpit()) return;
+    const target = event.target;
+    if (target?.closest?.('[data-owns-escape], dialog, [role="dialog"]'))
+      return;
+    const onMap =
+      !target ||
+      target === doc?.body ||
+      target === doc?.documentElement ||
+      Boolean(target.closest?.('canvas, .cesium-widget'));
+    if (!onMap) return;
+    if (doc?.body?.hasAttribute?.('data-mobile-sheet')) return;
+    if (doc?.querySelector?.(ESCAPE_OWNING_DIALOGS)) return;
+    event.preventDefault();
+    store.clear();
+  };
+  doc?.addEventListener?.('keydown', onKey);
 
   return () => {
     if (disposed) return;
@@ -582,6 +751,8 @@ export function installEntityContext({
     doc?.removeEventListener('focusin', onSearchFocus);
     clearTimeout(followCheck);
     globalThis.removeEventListener?.('gev:entity-selected', onSelected);
+    doc?.removeEventListener?.(CCTV_SELECTED_EVENT, onCameraPicked);
+    doc?.removeEventListener?.('keydown', onKey);
     store.connect(null);
   };
 }
