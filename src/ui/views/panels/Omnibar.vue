@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { getLocale, t, tn } from '../../../i18n/index.js';
 import { EXCLUSIVE_SURFACE_CLASSES } from '../../../exclusiveSurfaces.js';
 import { createOmnibar, drawAsked, escapeRegExp, readLine, VILLAGES } from '../../omnibarRows.js';
+import { RETIRED_PANEL_TARGETS } from '../../omnibarIntent.js';
 import { announcePlacePick } from '../../placePick.js';
 import { findAirportByCode } from '../../../data/airports.js';
 import { FEATURE_GUIDES, layerGuide, layerSettingsGuide, startGuide } from '../../omnibarGuide.js';
@@ -838,7 +839,9 @@ async function runPlan(steps, current) {
         result = await run('set_hud', { visible: step.visible });
         break;
       case 'panel':
-        if (!togglePanel(step)) throw new ActionFailed();
+        // Retired panels (Street Level, Space Missions): the runner routes them.
+        if (RETIRED_PANEL_TARGETS[step.item]) result = await run('set_panel_open', { panelId: RETIRED_PANEL_TARGETS[step.item], open: step.action === 'open' });
+        else if (!togglePanel(step)) throw new ActionFailed();
         break;
       case 'radio':
         result = await run(

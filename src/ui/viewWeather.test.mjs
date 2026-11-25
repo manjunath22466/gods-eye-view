@@ -418,19 +418,15 @@ for (const layersOn of [false, true]) {
     assert.match(weather(), /19 °C/);
     assert.doesNotMatch(weather(), /Updated/);
 
-    if (layersOn) f.host.querySelector('#context-tab-btn-props').click();
-    else
-      f.display.publishPhoneShell({ enabled: true, sheet: 'layers', tabs: [] });
+    const inspector = f.host.querySelector('.view-context');
+    assert.ok(inspector);
+    f.display.publishPhoneShell({ enabled: true, sheet: 'layers', tabs: [] });
     await nextTick();
+    assert.equal(f.host.querySelector('.view-context'), inspector);
     f.jumpWall(12 * 60 * 60_000);
-    if (layersOn) f.host.querySelector('#context-tab-btn-view').click();
-    else
-      f.display.publishPhoneShell({
-        enabled: true,
-        sheet: 'context',
-        tabs: [],
-      });
+    f.display.publishPhoneShell({ enabled: true, sheet: 'context', tabs: [] });
     await nextTick();
+    assert.equal(f.host.querySelector('.view-context'), inspector);
     assert.match(weather(), /Updated 12 h ago/);
     assert.equal(reads, 1);
 

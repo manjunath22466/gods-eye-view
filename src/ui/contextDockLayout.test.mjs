@@ -43,6 +43,45 @@ test('the expanded Context column starts below the Stories button and the style 
   );
 });
 
+// Expanded, the column already stands at the screen edge: the shift that
+// moves an open panel over the rail's gutter must not apply, or the panel's
+// right edge passes the window's and its header buttons are cut off.
+test("the expanded Context column ends at the window's right edge", () => {
+  const dock = read('./styles/context-dock.css');
+  const edge = read('./styles/panel-edge.css');
+  const column =
+    dock.match(/body\.context-docked #right-context-rail \{([^}]*)\}/)?.[1] ||
+    '';
+  assert.match(column, /right:\s*0\s*!important/, 'the column is at the edge');
+  assert.match(
+    column,
+    /width:\s*var\(--context-dock-width\)\s*!important/,
+    'as wide as the column',
+  );
+  const panel =
+    dock.match(
+      /body\.context-docked #right-context-rail > #global-context-panel \{([^}]*)\}/,
+    )?.[1] || '';
+  assert.match(panel, /width:\s*100%\s*!important/, 'the panel fills it');
+  // The gutter shift is set without !important, so the expanded panel's
+  // own none wins whichever mode or rail state applies.
+  assert.match(
+    edge,
+    /translateX\(var\(--panel-rail-clearance/,
+    'a shift exists',
+  );
+  assert.match(
+    panel,
+    /transform:\s*none\s*!important/,
+    'and the expanded panel cancels it',
+  );
+  assert.doesNotMatch(
+    edge,
+    /transform:[^;]*!important/,
+    'no gutter shift outranks it',
+  );
+});
+
 // Expanded, the column keeps its size and the panel keeps its own glass,
 // border, radius and glow, as the other panels have.
 test('the expanded panel keeps its usual look', () => {

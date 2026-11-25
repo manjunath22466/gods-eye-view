@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Scenes/CCTV action-button acceptance against dev or production preview:
+ * Scenes action-button acceptance, with the CCTV tools' Save and Reset,
+ * against dev or production preview:
  * QA_BASE_URL=http://127.0.0.1:4179 node scripts/qa-action-buttons.mjs
  * Uses the installed CCTV controller with fixture camera/action ports to prove
  * native dispatch/disabled/teardown without providers or world calibration writes.
@@ -51,12 +52,6 @@ try {
       'scene-export-btn',
       'scene-import-btn',
       'scene-download-btn',
-      'cctv-nearest-btn',
-      'cctv-prev-btn',
-      'cctv-next-btn',
-      'cctv-focus-btn',
-      'cctv-calib-save-btn',
-      'cctv-calib-reset-btn',
     ];
     const ordinary = ids.map((id) => document.getElementById(id));
     const generated = [
@@ -65,7 +60,6 @@ try {
       ),
     ];
     const toggles = [
-      'cctv-enable-btn',
       'cctv-coverage-btn',
       'cctv-auto-hop-btn',
       'cctv-projection-btn',
@@ -102,8 +96,7 @@ try {
   check('ordinary actions retain their panel sizing', inventory.layout);
 
   await page.evaluate(() => {
-    const manager = window.__godsEyeView.styleManager;
-    const owner = manager._cctvControls;
+    const owner = window.__godsEyeView.styleManager._cctvControls;
     owner._cctvUnsubscribe?.();
     owner._cctvUnsubscribe = null;
     window.__qaButtonCalls = [];
@@ -111,24 +104,8 @@ try {
     owner.actions = {
       ...owner.actions,
       isEnabled: () => true,
-      toggleEnabled: async () => {
-        record('enable');
-        return true;
-      },
-      runExplicitFocus: (select, focus) => focus(select()),
       setParams: (params, options) => record('params', params, options),
       showToast: () => {},
-    };
-    owner.cctv = {
-      focusNearest: () => {
-        record('nearest');
-        return 'a';
-      },
-      cycleCamera: (direction) => {
-        record('cycle', direction);
-        return 'b';
-      },
-      focusCamera: (id, seconds) => record('focus', id, seconds),
     };
     window.__qaCameraState = {
       enabled: true,
@@ -140,75 +117,11 @@ try {
       activeCamera: { id: 'a', name: 'A', basePose: {} },
     };
     owner._renderCctvState(window.__qaCameraState);
-    manager.setPanelCollapsed('cctv-panel', false, {
-      persist: false,
-      syncShare: false,
-    });
   });
-  await page.focus('#cctv-next-btn');
-  await page.keyboard.press('Space');
-  await page.waitForFunction(() => window.__qaButtonCalls.length === 3);
-  check(
-    'native Space dispatches Next and its focus once',
-    await page.evaluate(
-      () =>
-        JSON.stringify(window.__qaButtonCalls) ===
-        JSON.stringify([['enable'], ['cycle', 1], ['focus', 'b', 1.4]]),
-    ),
-  );
-  check(
-    'native keyboard activation keeps a visible focus ring',
-    await page.$eval(
-      '#cctv-next-btn',
-      (node) =>
-        document.activeElement === node &&
-        getComputedStyle(node).outlineStyle === 'solid',
-    ),
-  );
-  await page.evaluate(() => {
-    window.__qaButtonCalls = [];
-  });
-  await page.focus('#cctv-prev-btn');
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => window.__qaButtonCalls.length === 3);
-  check(
-    'native Enter dispatches Previous once',
-    await page.evaluate(
-      () =>
-        JSON.stringify(window.__qaButtonCalls) ===
-        JSON.stringify([['enable'], ['cycle', -1], ['focus', 'b', 1.4]]),
-    ),
-  );
-
-  for (const [id, expected] of [
-    ['cctv-nearest-btn', [['enable'], ['nearest'], ['focus', 'a', 1.8]]],
-    [
-      'cctv-focus-btn',
-      [
-        ['enable'],
-        ['focus', 'a', 1.9],
-        ['params', { selectedCameraId: 'a' }, { origin: 'user' }],
-      ],
-    ],
-  ]) {
-    await page.evaluate(() => {
-      window.__qaButtonCalls = [];
-    });
-    await page.click(`#${id}`);
-    await page.waitForFunction(() => window.__qaButtonCalls.length === 3);
-    const calls = await page.evaluate(() => window.__qaButtonCalls);
-    check(
-      `${id} retains its existing action and focus timing`,
-      JSON.stringify(calls) === JSON.stringify(expected),
-      calls,
-    );
-  }
-
-  await page.evaluate(() => {
-    window.__qaButtonCalls = [];
-  });
-  await page.click('#cctv-calib-save-btn');
-  await page.click('#cctv-calib-reset-btn');
+  // The camera tools wait, hidden, until a camera card's Camera settings
+  // tab shows them, so they are clicked in place.
+  await page.$eval('#cctv-calib-save-btn', (node) => node.click());
+  await page.$eval('#cctv-calib-reset-btn', (node) => node.click());
   const calibration = await page.evaluate(() => window.__qaButtonCalls);
   check(
     'Save and Reset retain camera identity and user-origin dispatch',
@@ -230,34 +143,9 @@ try {
       ]),
     calibration,
   );
-  await page.evaluate(() => {
-    window.__qaButtonCalls = [];
-    window.__godsEyeView.styleManager._cctvControls._renderCctvState({
-      enabled: false,
-    });
-  });
-  await page.click('#cctv-next-btn');
-  await page.waitForFunction(
-    () => {
-      const node = document.getElementById('cctv-next-btn');
-      return node.disabled && Number(getComputedStyle(node).opacity) === 0.45;
-    },
-    { timeout: 3000 },
-  );
-  check(
-    'disabled actions stay inert and keep disabled presentation',
-    await page.$eval(
-      '#cctv-next-btn',
-      (node) =>
-        node.disabled &&
-        getComputedStyle(node).opacity === '0.45' &&
-        window.__qaButtonCalls.length === 0,
-    ),
-  );
-
   for (const width of [1440, 620, 390]) {
     await page.setViewport({ width, height: 900 });
-    for (const panel of ['scene-panel', 'cctv-panel']) {
+    for (const panel of ['scene-panel']) {
       await page.evaluate((panel) => {
         window.__godsEyeView.styleManager.setPanelCollapsed(panel, false, {
           persist: false,
@@ -292,10 +180,9 @@ try {
   await page.evaluate(() => {
     const owner = window.__godsEyeView.styleManager._cctvControls;
     owner.destroy();
-    document.getElementById('cctv-next-btn').disabled = false;
     window.__qaButtonCalls = [];
   });
-  await page.click('#cctv-next-btn');
+  await page.$eval('#cctv-calib-save-btn', (node) => node.click());
   check(
     'destroyed controllers revoke action listeners',
     await page.evaluate(() => window.__qaButtonCalls.length === 0),
@@ -309,7 +196,7 @@ try {
       document.getElementById('loading-screen')?.classList.contains('hidden'),
     { timeout: 60000 },
   );
-  for (const panel of ['scene-panel', 'cctv-panel']) {
+  for (const panel of ['scene-panel']) {
     await page.evaluate((panel) => {
       window.__godsEyeView.styleManager.setPanelCollapsed(panel, false, {
         persist: false,

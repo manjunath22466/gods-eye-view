@@ -4,9 +4,6 @@ import { utcClock } from './rail/utcClock.js';
 import WeatherReadout from './weather/WeatherReadout.vue';
 import { setContextListPresence } from './contextLists.js';
 
-// Remounting controls must not reopen a panel the user already collapsed.
-// Keyed by the page's Weather panel, which outlives remounted controls.
-const appearedPanels = new WeakSet();
 const ORDER = [
   'weather-cyclones',
   'wind',
@@ -49,9 +46,6 @@ const shownNow = (state) =>
   state?.mode === 'history' && Number.isFinite(Date.parse(state.target))
     ? Date.parse(state.target)
     : Date.now();
-const set = (node, key, value) => {
-  if (node[key] !== value) node[key] = value;
-};
 const OBSERVED_NAMES = {
   'weather-radar': () => t('Rain radar'),
   'weather-satellite': () => t('Satellite clouds'),
@@ -213,9 +207,9 @@ export function weatherBriefing(active, state, clock) {
 }
 
 /**
- * Map weather descriptors and the observed clock into reusable rail readouts.
- * It also reports through `onPresence` whether a weather layer is on, and how
- * many products show, so Context shows Weather's list tab only then.
+/**
+ * Map weather descriptors and the observed clock into the Weather list in
+ * Context. Presence keeps its tab in sync with the active products.
  */
 export function createWeatherPanel({
   container,
@@ -226,8 +220,6 @@ export function createWeatherPanel({
 } = {}) {
   const document = container?.ownerDocument;
   if (!document?.createElement) return null;
-  const panel = container.closest?.('#weather-panel');
-  const count = panel?.querySelector('#weather-panel-count');
   let entries = [];
   let destroyed = false;
   // The product whose details show, or null for the list.
@@ -345,19 +337,6 @@ export function createWeatherPanel({
       frameTime,
       cards: models,
     });
-    if (count) set(count, 'textContent', String(active.length));
-    if (panel) set(panel, 'hidden', hidden);
-    if (!hidden && panel && !appearedPanels.has(panel)) {
-      appearedPanels.add(panel);
-      // First appearance opens the panel unless a stored or shared collapse
-      // choice exists (marked by the panel chrome when it restored the state).
-      const preference = panel.dataset?.collapsedPreference;
-      if (
-        panel.classList.contains('collapsed') &&
-        (preference === undefined || preference === 'default')
-      )
-        panel.querySelector('[data-collapse-target="weather-panel"]')?.click();
-    }
     onPresence(hidden ? null : { count: active.length });
   };
   const unsubscribe = clock?.subscribe(render);
@@ -370,8 +349,6 @@ export function createWeatherPanel({
       destroyed = true;
       unsubscribe?.();
       renderVue(null, container);
-      if (panel) set(panel, 'hidden', true);
-      if (count) set(count, 'textContent', '0');
       onPresence(null);
     },
   };

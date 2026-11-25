@@ -1,4 +1,3 @@
-import { PLACE_PICK_EVENT } from '../ui/contextEvents.js';
 import { isFollowing, stopFollowing } from '../data/followed.js';
 import { interruptGlobeRotation } from '../cameraVerbs.js';
 import { normalizeDisplayText } from '../data/displayText.js';
@@ -20,6 +19,18 @@ import { msg } from '../i18n/index.js';
 import { useProviderSettingsStore } from '../ui/stores/providerSettings.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
 import { useEntityCardStore } from '../ui/stores/entityCard.js';
+import { usePinnedStore } from '../ui/stores/pinned.js';
+import {
+  CAMERA_SETTINGS_EVENT,
+  CONTEXT_NEARBY_EVENT,
+  PLACE_PICK_EVENT,
+} from '../ui/contextEvents.js';
+import { contextListPresence, showContextList } from '../ui/contextLists.js';
+import { useStreetLevelStore } from '../ui/stores/streetLevel.js';
+import {
+  STREET_LEVEL_PHOTO_EVENT,
+  streetLevelCardKey,
+} from '../ui/streetLevelEvents.js';
 import {
   distance as chordM,
   fromRadians,
@@ -124,17 +135,26 @@ const PANEL_ALIASES = new Map([
   ['visual preset', 'control-panel'],
   ['visual presets', 'control-panel'],
   ['provider settings', 'provider-settings'],
-  ['cctv', 'cctv-panel'],
-  ['cameras', 'cctv-panel'],
+  ['cctv', 'global-context-panel'],
+  ['cameras', 'global-context-panel'],
+  // A camera's tools are Context's Camera settings tab.
+  ['camera settings', 'global-context-panel'],
+  ['camera tools', 'global-context-panel'],
+  // A street-level photo's card is in Context; its panel is retired.
+  ['street level', 'global-context-panel'],
+  ['street view', 'global-context-panel'],
+  ['street level panel', 'global-context-panel'],
+  ['street view panel', 'global-context-panel'],
   ['voice settings', 'voice-settings'],
   ['voice-settings', 'voice-settings'],
   ['voice preview', 'voice-preview'],
   ['voice-preview', 'voice-preview'],
   ['voice control', 'voice-preview'],
   ['voice controls', 'voice-preview'],
-  ['radio', 'radio-panel'],
-  ['internet radio', 'radio-panel'],
-  ['radio stations', 'radio-panel'],
+  // Radio's stations live in Context.
+  ['radio', 'global-context-panel'],
+  ['internet radio', 'global-context-panel'],
+  ['radio stations', 'global-context-panel'],
   ['context', 'global-context-panel'],
   ['context panel', 'global-context-panel'],
   ['global context', 'global-context-panel'],
@@ -165,12 +185,27 @@ const PANEL_ALIASES = new Map([
   ['imagery panel', 'recent-imagery-panel'],
 ]);
 
+/** Retired panels whose content lives in Context now. */
+const RETIRED_CONTEXT_PANELS = new Set([
+  'radio-panel',
+  'cctv-panel',
+  'street-level-panel',
+]);
+
+/**
+ * Retired panels whose list is a tab in Context while their layer is on: the
+ * ids still name them, and open Context on that list (contextLists.js).
+ */
+const CONTEXT_LIST_PANELS = new Map([
+  ['space-missions-panel', { list: 'space-missions', name: 'Space Missions' }],
+  ['weather-panel', { list: 'weather', name: 'Weather' }],
+  ['recent-imagery-panel', { list: 'recent-imagery', name: 'Recent Imagery' }],
+]);
+
 const PANEL_IDS = new Set([
   'data-panel',
   'location-bar',
   'control-panel',
-  'cctv-panel',
-  'radio-panel',
   'global-context-panel',
   'space-missions-panel',
   'utilities-panel',
@@ -184,6 +219,7 @@ const CONTEXT_MODE_ALIASES = new Map([
   ['off', 'off'],
   ['none', 'off'],
   ['clear', 'off'],
+  ['nearby', 'flights'],
   ['contacts', 'flights'],
   ['contact', 'flights'],
   ['flights', 'flights'],
@@ -928,6 +964,116 @@ export function createGevActionRunner({
       };
     }
 
+    /** Open Context on one of its lists (and, on a phone, its sheet). */
+    function showListInContext(list) {
+      showContextList(list);
+      const opened = setPanelOpen(styleManager, 'global-context-panel', true);
+      if (opened) styleManager?.revealPanel?.('global-context-panel');
+      return opened;
+    }
+
+    /**
+     * A retired list panel's id: open Context on that list. Space Missions is
+     * turned on first if it is off; Weather and Recent Imagery are not (a
+     * weather product or an imagery box is the person's choice), so their
+     * list is refused with a reason while they are off. Closing is refused,
+     * as for the other retired panels: the list is part of Context, and
+     * closing it must not close Context with everything else in it.
+     */
+    async function openContextList(
+      { list, name: listName },
+      { panelId, open, runOptions },
+    ) {
+      const refuse = (say) => ({
+        ok: false,
+        action: 'set_panel_open',
+        panelId,
+        open,
+        applied: false,
+        unavailable: true,
+        say,
+        error: say,
+      });
+      if (!open) {
+        const say = `The ${listName} list is part of Context now; nothing was closed. Turn its layer off to hide it, or close Context.`;
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          panelId,
+          open,
+          applied: false,
+          say,
+          error: say,
+        };
+      }
+      // The Cockpit owns the screen and hides Context. Nothing waits to open
+      // it later, so the reply says what is on now and what did not happen.
+      const refuseInCockpit = (layerOn) =>
+        refuse(
+          layerOn
+            ? `${listName} is on, but its list cannot open in Context while you are in the cockpit.`
+            : list === 'space-missions'
+              ? 'Space Missions is still off: its list cannot open in Context while you are in the cockpit.'
+              : `The ${listName} list cannot open in Context while you are in the cockpit.`,
+        );
+      if (styleManager?.getCockpitState?.()?.active)
+        return refuseInCockpit(
+          list === 'space-missions' &&
+            Boolean(dataManager?.isEnabled?.('rocket-launches')),
+        );
+      let turnedOn = false;
+      if (list === 'space-missions') {
+        if (
+          !dataManager?.isEnabled?.('rocket-launches') ||
+          !dataManager?.isEffectivelyEnabled?.('rocket-launches')
+        ) {
+          const result = await runGevAction(
+            'set_layer_visibility',
+            { layerId: 'rocket-launches', enabled: true },
+            runOptions,
+          );
+          if (result?.ok !== true)
+            return { ...result, action: 'set_panel_open', panelId, open };
+          turnedOn = true;
+          if (!current())
+            return {
+              ok: false,
+              action: 'set_panel_open',
+              panelId,
+              open,
+              applied: false,
+              cancelled: true,
+            };
+        }
+      } else if (!contextListPresence[list]) {
+        return refuse(
+          list === 'weather'
+            ? 'The Weather list shows in Context while a weather layer is on. Turn one on first.'
+            : 'The Recent Imagery list shows in Context while Recent Imagery is on. Turn it on first.',
+        );
+      }
+      if (styleManager?.getCockpitState?.()?.active)
+        return refuseInCockpit(turnedOn);
+      if (!showListInContext(list))
+        return refuse(
+          turnedOn
+            ? `${listName} is on, but Context could not be opened here.`
+            : 'There is no panel to open here.',
+        );
+      return {
+        ok: true,
+        action: 'set_panel_open',
+        panelId: 'global-context-panel',
+        requestedPanelId: panelId,
+        list,
+        open,
+        ...(turnedOn ? { layerTurnedOn: true } : {}),
+        say: turnedOn
+          ? `${listName} is on; Context shows its list.`
+          : `Context shows the ${listName} list.`,
+      };
+    }
+
     if (name === 'set_panel_open') {
       const panelId = normalizePanelId(args.panelId || args.panel);
       if (!panelId)
@@ -935,6 +1081,141 @@ export function createGevActionRunner({
           `Unknown panel: ${args.panelId || args.panel || 'missing'}`,
         );
       const open = args.open !== false;
+      const requested = String(args.panelId || args.panel || '').trim();
+      const streetLevelRequest = /^street[- ]?(level|view)([- ]panel)?$/i.test(
+        requested,
+      );
+      const radioRequest = /radio/i.test(requested);
+      const cameraRequest =
+        /^(cctv|cameras?)([- ]panel)?$|^camera[- ](settings|tools)$/i.test(
+          requested,
+        );
+      // The retired Radio and Street Level panels live in Context, which the
+      // Cockpit hides: as for contacts, say so rather than open it unseen.
+      if (
+        open &&
+        (streetLevelRequest || radioRequest || cameraRequest) &&
+        styleManager?.getCockpitState?.()?.active
+      )
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          applied: false,
+          error: 'Cockpit is active; exit Cockpit first to open Context.',
+        };
+      // The retired Radio, CCTV and Street Level panels have nothing of
+      // their own to close: their content is part of Context, and closing
+      // them must not close Context with everything else in it.
+      if (
+        !open &&
+        (streetLevelRequest || radioRequest || cameraRequest) &&
+        panelId === 'global-context-panel'
+      ) {
+        const say =
+          'That panel is part of Context now; nothing was closed. Turn its layer off to hide it, or close Context.';
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          panelId,
+          open,
+          applied: false,
+          say,
+          error: say,
+        };
+      }
+      // Radio's stations show in Context only while Radio is on: say so
+      // rather than open Context on no stations.
+      if (
+        open &&
+        radioRequest &&
+        panelId === 'global-context-panel' &&
+        !dataManager?.isEnabled?.('radio')
+      ) {
+        const say =
+          'Radio is off, so Context has no stations to show. Turn Radio on first.';
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          panelId,
+          open,
+          applied: false,
+          say,
+          error: say,
+        };
+      }
+      // Camera settings exist only on an open camera card: with none there
+      // is nothing to show, so say so rather than open Context on nothing.
+      if (
+        open &&
+        cameraRequest &&
+        panelId === 'global-context-panel' &&
+        !cameraSettingsCardOpen()
+      ) {
+        const say =
+          'No camera card is open, so there are no camera settings to show. Pick a camera on the map, in Context, in search or by voice first.';
+        return {
+          ok: false,
+          action: 'set_panel_open',
+          panelId,
+          open,
+          applied: false,
+          say,
+          error: say,
+        };
+      }
+      // Street Level's panel is retired: a photo the viewer has accepted
+      // has its card in Context; otherwise (none, still opening, rejected)
+      // its filters and OPEN are on its Data Layers row.
+      if (open && streetLevelRequest) {
+        const { photo, reason } = acceptedStreetLevelPhoto(
+          dataManager?.layers?.get?.(STREET_LEVEL_LAYER_ID)?.module,
+        );
+        if (!photo) {
+          // Its filters and OPEN are on Street Level's Data Layers row.
+          const menu = await runGevAction(
+            'show_data_layers_menu',
+            { layerId: STREET_LEVEL_LAYER_ID },
+            runOptions,
+          );
+          return {
+            ...menu,
+            reason,
+            say:
+              menu.say ??
+              `${reason} Its filters and OPEN are on Street Level's Data Layers row.`,
+          };
+        }
+        if (!setPanelOpen(styleManager, 'global-context-panel', true)) {
+          const say = 'There is no panel to open here.';
+          return {
+            ok: false,
+            action: 'set_panel_open',
+            panelId,
+            open,
+            applied: false,
+            say,
+            error: say,
+          };
+        }
+        styleManager?.revealPanel?.('global-context-panel');
+        announceStreetLevelPhoto(photo);
+        // A later request that did not open leaves its error beside the
+        // photo still shown: say which one this is.
+        const lastError = dataManager?.layers
+          ?.get?.(STREET_LEVEL_LAYER_ID)
+          ?.module?.getUIState?.()?.street?.error;
+        return {
+          ok: true,
+          action: 'set_panel_open',
+          panelId: 'global-context-panel',
+          open,
+          ...(lastError
+            ? {
+                say: 'Showing the current street-level photo. The latest request failed.',
+              }
+            : {}),
+        };
+      }
       if (panelId === 'voice-settings' || panelId === 'voice-preview')
         return showVoicePanel(
           panelId === 'voice-settings' ? 'settings' : 'preview',
@@ -994,47 +1275,11 @@ export function createGevActionRunner({
           ...(!applied ? { error: say } : {}),
         };
       }
-      // The Space Missions panel exists only while its layer is on; opening it
-      // otherwise would fold the other right-rail panels for nothing.
-      if (
-        open &&
-        panelId === 'space-missions-panel' &&
-        !dataManager?.isEnabled?.('rocket-launches')
-      ) {
-        const say = dataManager?.isEffectivelyEnabled?.('rocket-launches')
-          ? 'Space Missions is still starting; its panel opens when it is on.'
-          : 'The Space Missions panel shows while Space Missions is on. Turn on Space Missions first.';
-        return {
-          ok: false,
-          action: 'set_panel_open',
-          panelId,
-          open,
-          applied: false,
-          unavailable: true,
-          say,
-          error: say,
-        };
-      }
-      // The Cockpit owns the screen and hides the right rail: the panel is
-      // not opened (or its preference written) under it.
-      if (
-        open &&
-        panelId === 'space-missions-panel' &&
-        styleManager?.getCockpitState?.()?.active
-      ) {
-        const say =
-          'The Space Missions panel opens once you leave the cockpit.';
-        return {
-          ok: false,
-          action: 'set_panel_open',
-          panelId,
-          open,
-          applied: false,
-          unavailable: true,
-          say,
-          error: say,
-        };
-      }
+      // Space Missions, Weather and Recent Imagery have no panels of their
+      // own: their lists are tabs in Context while their layer is on.
+      const contextList = CONTEXT_LIST_PANELS.get(panelId);
+      if (contextList)
+        return openContextList(contextList, { panelId, open, runOptions });
       if (!setPanelOpen(styleManager, panelId, open)) {
         const say = 'There is no panel to open here.';
         return {
@@ -1046,9 +1291,25 @@ export function createGevActionRunner({
           error: say,
         };
       }
-      // A phone shows the right rail only as tab sheets: show this one's.
-      if (open && panelId === 'space-missions-panel')
+      // Radio's panel is retired: a request for it opens Context on its
+      // station list (Inspect with nothing picked lists the stations while
+      // Radio is on).
+      if (open && radioRequest && panelId === 'global-context-panel') {
         styleManager?.revealPanel?.(panelId);
+        if (typeof CustomEvent === 'function')
+          globalThis.document?.dispatchEvent?.(
+            new CustomEvent(CONTEXT_NEARBY_EVENT),
+          );
+      }
+      // The CCTV panel is retired: a request for it, or for a camera's
+      // settings, shows the open camera card's Camera settings tab.
+      if (open && cameraRequest && panelId === 'global-context-panel') {
+        styleManager?.revealPanel?.(panelId);
+        if (typeof CustomEvent === 'function')
+          globalThis.document?.dispatchEvent?.(
+            new CustomEvent(CAMERA_SETTINGS_EVENT),
+          );
+      }
       return { ok: true, action: 'set_panel_open', panelId, open };
     }
 
@@ -1087,28 +1348,73 @@ export function createGevActionRunner({
           ...cancellationState(),
         };
       }
+      if (mode === 'flights') {
+        // Contacts is retired: Context's Nearby view (nothing picked) lists
+        // what is around, so a contacts request opens Context there and
+        // switches no mode. (Cockpit still uses its own internal mode.)
+        if (styleManager?.getCockpitState?.()?.active) {
+          return {
+            ok: false,
+            action: 'set_context_mode',
+            error:
+              'Cockpit is active; exit Cockpit first to see what is nearby in Context.',
+          };
+        }
+        if (!setPanelOpen(styleManager, 'global-context-panel', true)) {
+          const say = 'There is no Context panel to open here.';
+          return {
+            ok: false,
+            action: 'set_context_mode',
+            mode: 'nearby',
+            applied: false,
+            say,
+            error: say,
+          };
+        }
+        styleManager?.revealPanel?.('global-context-panel');
+        if (typeof CustomEvent === 'function')
+          globalThis.document?.dispatchEvent?.(
+            new CustomEvent(CONTEXT_NEARBY_EVENT),
+          );
+        return {
+          ok: true,
+          action: 'set_context_mode',
+          mode: 'nearby',
+          say: 'Context shows what is nearby.',
+        };
+      }
       if (mode === 'space-missions') {
-        // Space Missions is an ordinary layer with its own panel, not a
-        // Context mode; older phrasings still reach it through this alias.
+        // Space Missions is an ordinary layer, not a Context mode; older
+        // phrasings still reach it through this alias. Turning it on leaves
+        // the person's other layers as they are, apart from Satellites, which
+        // the layer switches on (no dots or orbits drawn) for its orbit data
+        // and restores when it turns off. Its list is a tab in Context.
         const result = await runGevAction(
           'set_layer_visibility',
           { layerId: 'rocket-launches', enabled: true },
           runOptions,
         );
-        // Open the panel even when the layer was already on, but never under
+        if (result?.ok !== true || !current())
+          return {
+            ...result,
+            action: 'set_context_mode',
+            mode: 'space-missions',
+          };
+        // Show the list even when the layer was already on, but never under
         // the Cockpit, which owns the screen (as the layer's own reveal).
-        if (
-          result?.ok === true &&
-          current() &&
-          !styleManager?.getCockpitState?.()?.active
-        ) {
-          setPanelOpen(styleManager, 'space-missions-panel', true);
-          styleManager?.revealPanel?.('space-missions-panel');
-        }
+        // Nothing opens the list once the Cockpit ends.
+        const cockpit = Boolean(styleManager?.getCockpitState?.()?.active);
+        const listShown = !cockpit && showListInContext('space-missions');
         return {
           ...result,
           action: 'set_context_mode',
           mode: 'space-missions',
+          listShown,
+          say: listShown
+            ? 'Space Missions is on; Context shows its Missions list.'
+            : cockpit
+              ? 'Space Missions is on, but its list cannot open in Context while you are in the cockpit.'
+              : 'Space Missions is on, but Context could not be opened here.',
         };
       }
       const contextState = styleManager.getContextModeState?.() || {};
@@ -1135,9 +1441,6 @@ export function createGevActionRunner({
           mode: 'off',
         };
       }
-      if (mode && mode !== 'off') {
-        setPanelOpen(styleManager, 'global-context-panel', true);
-      }
       const result = await styleManager.setContextMode(
         mode === 'off' ? null : mode,
         {
@@ -1157,13 +1460,7 @@ export function createGevActionRunner({
           ...cancellationState(),
         };
       }
-      const contactsWindow = ['contacts', 'flights'].includes(mode)
-        ? activeContactsWindow(dataManager)
-        : null;
-      return {
-        ...withContextModeVocabulary(result),
-        ...(contactsWindow ? { contactsWindow } : {}),
-      };
+      return withContextModeVocabulary(result);
     }
 
     if (name === 'control_cockpit') {
@@ -1487,7 +1784,9 @@ export function createGevActionRunner({
     }
 
     if (name === 'adjust_camera_zoom') {
-      return adjustCameraZoom(viewer, args);
+      const result = adjustCameraZoom(viewer, args);
+      if (result.ok) useEntityCardStore(applicationPinia()).noteViewCommand();
+      return result;
     }
 
     if (name === 'zoom_to_globe') {
@@ -1664,7 +1963,7 @@ export function createGevActionRunner({
             error: `Not run: another navigation took the camera during the flight, so the ${motion} was dropped.`,
           };
       }
-      return moveCamera(args, (navigate, releaseOptions) =>
+      const result = await moveCamera(args, (navigate, releaseOptions) =>
         runManagedVoiceNavigation(
           styleManager,
           'camera',
@@ -1673,6 +1972,9 @@ export function createGevActionRunner({
           releaseOptions,
         ),
       );
+      if (result?.ok && !result.cancelled && motion !== 'stop')
+        useEntityCardStore(applicationPinia()).noteViewCommand();
+      return result;
     }
 
     if (name === 'fly_route') {
@@ -2218,6 +2520,67 @@ function controlScene(sceneDirector, args = {}) {
 }
 
 /**
+ * The street-level photo open now (`{id, lat, lon}`), or null.
+ * @returns {?{id: string, lat: number, lon: number}}
+ */
+function openStreetLevelPhoto() {
+  try {
+    return useStreetLevelStore(applicationPinia()).view?.viewer?.photo || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The open photo once the Street Level layer has accepted it, else why not:
+ * `{photo}` or `{reason}`. A pose still loading, a photo its provider
+ * rejected, or a docked photo that could not be restored is not a photo to
+ * announce; an unrelated lookup running over a settled photo does not
+ * refuse it.
+ * @param {object} [layerModule] The Street Level layer.
+ * @returns {{photo?: {id: string, lat: number, lon: number}, reason?: string}}
+ */
+function acceptedStreetLevelPhoto(layerModule) {
+  const photo = openStreetLevelPhoto();
+  const settled = layerModule?.settledPhotoId?.();
+  if (photo && settled === photo.id) return { photo };
+  if (layerModule?.photoOpening?.() === true)
+    return { reason: 'The street-level photo is still opening.' };
+  if (photo || layerModule?.getUIState?.()?.street?.error)
+    return { reason: 'The street-level photo did not open.' };
+  return { reason: 'No street-level photo is open.' };
+}
+
+/** Announce the settled photo after explicitly opening its Context surface. */
+function announceStreetLevelPhoto(photo) {
+  if (typeof CustomEvent === 'function')
+    globalThis.document?.dispatchEvent?.(
+      new CustomEvent(STREET_LEVEL_PHOTO_EVENT, {
+        detail: { layerId: STREET_LEVEL_LAYER_ID, ...photo, explicit: true },
+      }),
+    );
+}
+
+/**
+ * Whether Context shows a camera card with the Cameras layer on, the case
+ * in which its Camera settings tab exists (ContextView's
+ * `cameraSettingsAvailable`).
+ */
+function cameraSettingsCardOpen() {
+  try {
+    const cards = useEntityCardStore(applicationPinia());
+    const card = cards.card;
+    return (
+      card?.layerId === 'cctv' &&
+      Boolean(card.identity?.id) &&
+      !cards.layerOff('cctv')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Context's entity card store while it shows this camera's card, else null.
  * @param {?string} cameraId
  */
@@ -2233,15 +2596,6 @@ function openCameraCard(cameraId) {
     return card?.layerId === 'cctv' && card?.key === `cctv:${cameraId}`
       ? cards
       : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The key of the card Context shows now, or null. */
-function shownCardKey() {
-  try {
-    return useEntityCardStore(applicationPinia()).card?.key ?? null;
   } catch {
     return null;
   }
@@ -3983,6 +4337,9 @@ function nextSatellitePass(viewer, dataManager, args) {
 function normalizePanelId(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
+  // Radio's stations, cameras' cards and street-level photos live in
+  // Context; the retired Radio, CCTV and Street Level panels' ids open it.
+  if (RETIRED_CONTEXT_PANELS.has(raw)) return 'global-context-panel';
   if (PANEL_IDS.has(raw)) return raw;
   return PANEL_ALIASES.get(raw.toLowerCase()) || null;
 }
@@ -4137,8 +4494,8 @@ function normalizeStyle(value) {
   return null;
 }
 
-/** The application panel that holds the street-level photo. */
-const STREET_LEVEL_PANEL_ID = 'street-level-panel';
+/** The application panel that holds the street-level photo: its card in Context. */
+const STREET_LEVEL_PANEL_ID = 'global-context-panel';
 
 /**
  * The layer-state origin of an action's changes. The assistant's are the
@@ -4514,14 +4871,16 @@ async function requestStreetLevel(
   // this looks and closes if nothing opens; a found photo loads only while
   // the camera and the panel are still the request's.
   reportProgress('imagery', label);
-  const cardBefore = shownCardKey();
+  const cards = useEntityCardStore(applicationPinia());
+  const cardBefore = cards.card?.key ?? null;
+  const selectionBefore = cards.selectionGeneration();
   if (admitDockedPhoto?.() === false)
     return fail('imagery', 'The dock changed before the photo lookup', {
       cancelled: true,
       location,
     });
   let dockedFailure = null;
-  const opened = await layerModule.openNearest(point, {
+  const opening = layerModule.openNearest(point, {
     providerIds: [provider],
     frame: false,
     replace: !dockedReplacement,
@@ -4541,6 +4900,9 @@ async function requestStreetLevel(
       ? { radiusM: STREET_LEVEL_WIDE_RADIUS_M }
       : {}),
   });
+  // The layer claims the request before its first provider await.
+  const photoRequest = layerModule.getUIState?.()?.photoRequests;
+  const opened = await opening;
   const street = dockedFailure ?? layerModule.getUIState?.()?.street ?? {};
   // Close a late ordinary photo and the card it opened. A dock replacement
   // owns its commit or rollback and keeps control of its photo and card.
@@ -4627,14 +4989,37 @@ async function requestStreetLevel(
     }
   }
   // Every explicit request shows its photo, also one replacing a photo whose
-  // panel or phone sheet the user had closed. Embed mode lifts the photo.
+  // Context panel or phone sheet the user had closed. Embed mode lifts the
+  // photo.
   if (!globalThis.document?.body?.classList?.contains('ui-embed')) {
     styleManager?.setPanelCollapsed?.(STREET_LEVEL_PANEL_ID, false, {
       persist: false,
     });
-    styleManager?.revealPanel?.(STREET_LEVEL_PANEL_ID, {
-      keepContextSheet: true,
-    });
+    styleManager?.revealPanel?.(STREET_LEVEL_PANEL_ID);
+    // The passive photo event can run before Context is visible. Show the
+    // settled photo if it still belongs to this request.
+    if (
+      !dockedReplacement &&
+      photoRequest != null &&
+      !layerModule.hasDockedPhoto?.()
+    ) {
+      const settled = layerModule.getUIState?.();
+      const active = settled?.street;
+      const photo = openStreetLevelPhoto();
+      if (
+        settled?.photoRequests === photoRequest &&
+        active?.open === true &&
+        active.loading !== true &&
+        active.providerId === provider &&
+        active.imageId === street.imageId &&
+        photo?.id === `${provider}:${active.imageId}`
+      ) {
+        if (cards.card?.key === streetLevelCardKey(photo.id))
+          usePinnedStore(applicationPinia()).show('inspect');
+        else if (cards.selectionGeneration() === selectionBefore)
+          announceStreetLevelPhoto(photo);
+      }
+    }
   }
   return {
     ok: true,

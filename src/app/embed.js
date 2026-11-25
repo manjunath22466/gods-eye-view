@@ -18,6 +18,7 @@ import {
 import { toRadians } from '../geo/index.js';
 import { t, translateKnown } from '../i18n/index.js';
 import { GOOGLE_LABEL } from '../layers/streetLevel/providers/google/policy.js';
+import { STREET_LEVEL_LAYER_ID } from '../layers/streetLevel/policy.js';
 import { cameraOf } from '../render/rendererOf.js';
 import {
   annotationsFromParams,
@@ -139,7 +140,20 @@ function streetLevelArgs(streetLevel, { autoOpen = true } = {}) {
   };
 }
 
-const STREET_LEVEL_PANEL_ID = 'street-level-panel';
+/** The panel that holds OPEN: Street Level's row in Data Layers. */
+const STREET_LEVEL_PANEL_ID = 'data-panel';
+
+/**
+ * Bring Street Level's Data Layers row, which holds OPEN, into view: on a
+ * long layer list it can sit below the fold of the panel just opened.
+ * @param {?Document} doc
+ */
+function showStreetLevelRow(doc) {
+  const row = doc?.querySelector?.(
+    `#data-toggles [data-layer-id="${STREET_LEVEL_LAYER_ID}"]`,
+  );
+  row?.scrollIntoView?.({ block: 'center' });
+}
 /** Dispatched on the window when a link opened after start-up has restored. */
 const SHARE_NAVIGATION_RESTORED_EVENT = 'gev:share-navigation-restore-settled';
 
@@ -343,16 +357,18 @@ export function installViews({
       shell._showToast?.(keyToast(result));
       return;
     }
-    // OPEN must be in view, but embed mode hides the rail that holds it: in
-    // a frame a posted view is the way to open a photo.
+    // OPEN (on Street Level's Data Layers row) must be in view, but embed
+    // mode hides the rail that holds it: in a frame a posted view is the way
+    // to open a photo.
     if (result?.armed === true && !isEmbedded(location)) {
       // Opened for this link only: the recipient's saved layout stays theirs.
       shell.setPanelCollapsed?.(STREET_LEVEL_PANEL_ID, false, {
         explicit: true,
         persist: false,
       });
-      // On a phone the panel sits in a tab sheet: open it so OPEN shows.
+      // On a phone Data Layers sits in a tab sheet: open it so OPEN shows.
       shell.revealPanel?.(STREET_LEVEL_PANEL_ID);
+      showStreetLevelRow(windowRef?.document ?? globalThis.document);
       shell._showToast?.(armedToast());
     }
   };

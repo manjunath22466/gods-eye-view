@@ -331,7 +331,6 @@ test('the phone tab bar joins the end of the page while the shell publishes', as
     ),
     [
       'layers:layers:Layers',
-      'cameras:videocam:Cameras',
       'context:radar:Context',
       'search:search:Search',
       'more:more_horiz:More',
@@ -339,7 +338,7 @@ test('the phone tab bar joins the end of the page while the shell publishes', as
   );
   assert.deepEqual(
     tabs.map((tab) => tab.getAttribute('aria-expanded')),
-    ['false', 'false', 'false', 'false', 'false'],
+    ['false', 'false', 'false', 'false'],
   );
   store.publishPhoneShell({
     enabled: true,
@@ -350,7 +349,7 @@ test('the phone tab bar joins the end of the page while the shell publishes', as
   assert.equal(backdrop.hidden, false);
   assert.deepEqual(
     tabs.map((tab) => tab.getAttribute('aria-expanded')),
-    ['false', 'false', 'true', 'false', 'false'],
+    ['false', 'true', 'false', 'false'],
   );
   store.publishPhoneShell({ enabled: false, sheet: null, tabs: MOBILE_TABS });
   await nextTick();
@@ -358,7 +357,7 @@ test('the phone tab bar joins the end of the page while the shell publishes', as
   assert.equal(backdrop.hidden, true);
   assert.deepEqual(
     tabs.map((tab) => tab.getAttribute('aria-expanded')),
-    ['false', 'false', 'false', 'false', 'false'],
+    ['false', 'false', 'false', 'false'],
   );
   store.publishPhoneShell(null);
   await nextTick();

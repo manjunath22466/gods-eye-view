@@ -12,13 +12,6 @@ import { usePinnedStore } from '../stores/pinned.js';
 import { useCctvStore } from '../stores/cctv.js';
 import { useDisplayStore } from '../stores/display.js';
 import { useCockpitStore } from '../stores/cockpit.js';
-import { useContextStore } from '../stores/context.js';
-import AwarenessPanel from './panels/AwarenessPanel.vue';
-import SpaceMissionsPanel from './panels/SpaceMissionsPanel.vue';
-import RadioPanel from './panels/RadioPanel.vue';
-import { cockpitEntryFace } from '../cockpitPresentation.js';
-import { LAYER_TABS, TAB_AFFECTS, activeTab, availableTabs, contextReady, enabledLayerIds, setEnabledLayers, tabTarget } from '../contextLayerTabs.js';
-import { shownLayerName } from '../layerNames.js';
 import BhoteKoshiPanel from './panels/BhoteKoshiPanel.vue';
 import EntityCard from './panels/EntityCard.vue';
 import ViewContext from './panels/ViewContext.vue';
@@ -28,13 +21,17 @@ import RadioStations from './panels/RadioStations.vue';
 import RadioMiniPlayer from './panels/RadioMiniPlayer.vue';
 import LocalReceiverPlayer from './panels/LocalReceiverPlayer.vue';
 import DockedView from './panels/DockedView.vue';
-import { placeCctvTools, returnCctvToolsHome } from '../cctvToolsPlacement.js';
+import CctvTools from './panels/CctvTools.vue';
+import { placeCctvTools, registerCctvToolsHome, returnCctvToolsHome } from '../cctvToolsPlacement.js';
 import { CAMERA_SETTINGS_EVENT, CONTEXT_NEARBY_EVENT, ESCAPE_OWNING_DIALOGS } from '../contextEvents.js';
-import { placeStreetLevelViewer } from '../streetLevelViewerPlacement.js';
+import StreetLevelViewer from './panels/StreetLevelViewer.vue';
+import { placeStreetLevelViewer, registerStreetLevelViewerHome } from '../streetLevelViewerPlacement.js';
 import { useStreetLevelStore } from '../stores/streetLevel.js';
 import { useDockedStore } from '../stores/docked.js';
 import { useRadioLayer } from '../radioContext.js';
 import { useSpaceMissionsStore } from '../stores/spaceMissions.js';
+import MissionRoster from './panels/MissionRoster.vue';
+import MissionDetail from './panels/MissionDetail.vue';
 import {
   contextListChoice,
   contextListPresence,
@@ -46,6 +43,8 @@ import {
   showContextList,
   shownList,
 } from '../contextLists.js';
+import RadioFold from './panels/RadioFold.vue';
+import SdrCard from './panels/SdrCard.vue';
 import CameraList from './panels/CameraList.vue';
 import LivePanel from './panels/LivePanel.vue';
 import StationPanel from './panels/StationPanel.vue';
@@ -63,54 +62,10 @@ const sceneRuntime = computed(() => scenePanel.value?.runtime ?? '');
 // summarises the layers that are on around the view.
 const entityCards = useEntityCardStore();
 const { card: entityCard } = storeToRefs(entityCards);
-
-// ContextControls presents the mode switch and the nearby sites search and
-// publishes them; until it does, the panel shows its initial markup.
-const { view: ctx, awareness } = storeToRefs(useContextStore());
-const { presence: cockpit } = storeToRefs(useCockpitStore());
+const cameraListHost = ref(null);
+const inlineCameraId = computed(() => entityCard.value?.layerId === 'cctv' && !entityCards.fromPin && !entityCards.layerOff('cctv')
+  ? entityCard.value.identity?.id ?? null : null);
 const { phoneShell } = storeToRefs(useDisplayStore());
-// The entry names the subject it would ride (cockpitEntryFace).
-const entry = computed(() =>
-  cockpitEntryFace(cockpit.value?.entryKind, cockpit.value?.entryFace),
-);
-const contactsSubject = computed(() =>
-  ctx.value?.flightsActive ? awareness.value?.subjectIdentity : null,
-);
-const contactsMatchCard = computed(() => {
-  const card = entityCard.value;
-  const subject = contactsSubject.value;
-  return Boolean(
-    card?.kind === 'aircraft' &&
-      subject?.layerId === card.layerId &&
-      String(subject.id) === String(card.identity.id),
-  );
-});
-watch(
-  [() => contactsSubject.value?.layerId, () => contactsSubject.value?.id],
-  ([layerId, id]) => {
-    if (!['flights', 'military'].includes(layerId) || !id || contactsMatchCard.value) return;
-    // Contacts has already picked whom to follow. Only update the Inspector.
-    entityCards.select({ layerId, id, label: awareness.value?.subjectLabel }, { follow: false });
-  },
-);
-
-// Layer tabs: settings for the layers that are on, beside the card.
-let layerTimer = null;
-const readLayers = () => {
-  const rows = entityCards.liveLayers();
-  layerNames.value = Object.fromEntries(rows.map((row) => [row.id, shownLayerName(row.name, row.id)]));
-  setEnabledLayers(rows.map((row) => row.id));
-};
-const paneRefs = {};
-const setPane = (id) => (el) => {
-  if (el) {
-    paneRefs[id] = el;
-    const target = tabTarget(id);
-    if (target instanceof HTMLElement && target.parentElement !== el) el.appendChild(target);
-  }
-};
-// Turning on Radio reveals the Inspector.
-const showView = () => (activeTab.value = 'view');
 onMounted(() => {
   const body = globalThis.document?.body;
   if (body && globalThis.MutationObserver) {
@@ -123,61 +78,18 @@ onMounted(() => {
   }
   globalThis.document?.addEventListener('visibilitychange', updatePageVisibility);
   updatePageVisibility();
-  globalThis.addEventListener?.('gev:context-show-view', showView);
-  contextReady.value = true;
-  readLayers();
-  layerTimer = setInterval(readLayers, 1500);
 });
 onBeforeUnmount(() => {
   bodyWatch?.disconnect();
   globalThis.document?.removeEventListener('visibilitychange', updatePageVisibility);
-  entityCards.setViewContextShown(false, null);
-  globalThis.removeEventListener?.('gev:context-show-view', showView);
-  clearInterval(layerTimer);
-  contextReady.value = false;
-  // A later mount starts with no tab classes.
-  for (const layerTab of LAYER_TABS) globalThis.document?.body.classList.remove(`ctx-tab-${layerTab.id}`);
 });
-watch(availableTabs, (tabs) => {
-  for (const layerTab of LAYER_TABS)
-    globalThis.document?.body.classList.toggle(`ctx-tab-${layerTab.id}`, tabs.some((x) => x.id === layerTab.id));
-  if (activeTab.value === 'props' && !tabs.length) activeTab.value = 'view';
-});
-// Picking something shows its card. A street-level photo's card moving on
-// to the next image is the same card: its tab stays.
-watch(entityCard, (next, prev) => {
-  const walked = next?.layerId === 'street-level' && prev?.layerId === 'street-level';
-  if (next && next?.key !== prev?.key && !walked) activeTab.value = 'view';
-});
-// The two tabs swap with the arrow keys, and focus follows (tabs pattern).
-function switchTab() {
-  activeTab.value = activeTab.value === 'view' ? 'props' : 'view';
-  void nextTick(() => globalThis.document?.getElementById(`context-tab-btn-${activeTab.value}`)?.focus());
-}
-const isShown = (id) => availableTabs.value.some((layerTab) => layerTab.id === id);
-// The names of the layers a section's settings act on.
-const layerNames = ref({});
-// Each layer gets a steady colour of its own for its dot.
-const DOT_COLORS = ['#36dcff', '#4be3a0', '#ffb547', '#c792ff', '#ff7a45', '#ff6b9a', '#9ad7ff', '#e6e36b'];
-const dotColor = (layer) => {
-  let h = 0;
-  for (const ch of layer) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return DOT_COLORS[h % DOT_COLORS.length];
-};
-const affects = (id) => {
-  void enabledLayerIds.value;
-  const ids = TAB_AFFECTS[id]?.(enabledLayerIds.value) ?? [];
-  return ids.map((layer) => ({ id: layer, name: layerNames.value[layer] || layer, color: dotColor(layer) }));
-};
 // What is pinned: with anything pinned, Context has two tabs, Inspect (the
 // pick, or awareness) and Pinned (the grid); with nothing pinned, no tabs.
 const pinned = usePinnedStore();
 const { pins, tab: pinnedTab } = storeToRefs(pinned);
 // A layer with a list of its own (Space Missions, Weather, News, Recent
-// Imagery) adds a tab while it is on: named for it when it is the only one,
-// Lists with a sub-tab per layer when two or more are on. While its list
-// shows, Context borrows the layer's right-rail readout (each is teleported
-// into its target in the lists below).
+// Imagery) adds a list while it is on. The list bodies stay mounted in
+// Context so the readouts can retain their state while another tab shows.
 const lists = computed(() => listsOn(contextListPresence));
 const listShown = computed(() =>
   contextListsActive.value ? shownList(lists.value, contextListChoice.value) : '',
@@ -245,17 +157,14 @@ watch(listShown, (shown, previous) => {
 });
 // A list layer a person turned on directly shows its list; one a link or a
 // restore turned on does not take Context over.
-// Cameras never does: turning them on leaves Context on what is nearby, and
-// their list opens from its tab or Nearby's "Show all".
 const DIRECT_ON_MS = 15_000;
-const QUIET_LISTS = new Set(['cctv']);
 watch(
   () => lists.value.map((list) => list.id),
   (ids, before) => {
     const added = ids.find((id) => !before.includes(id));
     const direct = entityCards.lastDirectOn;
-    if (added && !QUIET_LISTS.has(added) && direct && Date.now() - direct.at < DIRECT_ON_MS && listForLayer(direct.layerId) === added) {
-      showView();
+    if (added && direct && Date.now() - direct.at < DIRECT_ON_MS && listForLayer(direct.layerId) === added) {
+
       showContextList(added);
     }
   },
@@ -264,7 +173,7 @@ watch(
 // their readouts (contextLists.js). Turned off while its list shows, Lists
 // moves to the next list that is on; with none left, Context goes to Inspect
 // (never back to Pinned).
-const { enabled: missionsOn, roster: missionRoster } = storeToRefs(useSpaceMissionsStore());
+const { enabled: missionsOn, roster: missionRoster, mission: selectedMission } = storeToRefs(useSpaceMissionsStore());
 watch(
   [missionsOn, () => missionRoster.value?.entries?.length],
   ([on, count]) => {
@@ -283,7 +192,7 @@ watch(
     const focused = doc?.activeElement;
     const gone = before.filter((id) => !ids.includes(id));
     const stripGone = ids.length === 1 && before.length > 1 && focused?.closest?.('.context-list-tabs');
-    if (!ids.length || !(stripGone || gone.some((id) => focused?.closest?.(`#context-list-tab-${id}, #${listPaneId(id)}`)))) return;
+    if (!ids.length || !(stripGone || gone.some((id) => focused?.closest?.(`#context-list-tab-${id}, #context-list-${id}`)))) return;
     void nextTick(() =>
       (doc.getElementById(`context-list-tab-${listShown.value}`) ?? doc.getElementById('context-tab-lists'))?.focus({ preventScroll: true }),
     );
@@ -301,8 +210,19 @@ watch(tabIds, (ids, before) => {
     (doc.getElementById(`context-tab-${tab.value}`) ?? doc.getElementById('context-tab-inspect') ?? contextScroller.value)?.focus({ preventScroll: true }),
   );
 });
-// A list shows only on the Inspector, while Context is open.
-const showsList = (id) => contextOpen.value && activeTab.value === 'view' && tab.value === 'lists' && listShown.value === id;
+// Keep focus in Missions when its detail replaces the roster or closes.
+const missionHost = ref(null);
+watch(
+  () => Boolean(selectedMission.value),
+  async (selected) => {
+    const host = missionHost.value;
+    if (!host?.contains(globalThis.document?.activeElement)) return;
+    await nextTick();
+    const active = globalThis.document?.activeElement;
+    if (!selected && active?.closest('[data-mission-roster-id]') && host.contains(active)) return;
+    host.querySelector(selected ? '[data-mission-close]' : '[data-mission-roster-id]')?.focus();
+  },
+);
 // Radio: with the layer on, its stations show in Context while nothing is
 // picked; the station selected or heard is in the mini player as well,
 // whatever Context shows. Tapping a pinned station plays it and leaves
@@ -318,7 +238,7 @@ const radioListShown = computed(() =>
 // A station picked on the globe (or Radio just turned on) shows in the list:
 // Inspect, with the pick let go so the list is in view.
 function showStations() {
-  showView();
+
   entityCards.clear();
   pinned.show('inspect');
 }
@@ -373,9 +293,6 @@ function onTabKey(event) {
   selectTab(next);
   void nextTick(() => globalThis.document?.getElementById(`context-tab-${next}`)?.focus());
 }
-// The pane each Lists sub-tab controls: a borrowed readout's target, or the
-// camera list.
-const listPaneId = (id) => (id === 'cctv' ? 'context-list-cctv' : id === 'space-missions' ? 'context-live-missions' : `context-live-${id}`);
 function onListKey(event) {
   const next = stepTab(event, lists.value.map((list) => list.id), listShown.value);
   if (!next) return;
@@ -450,7 +367,6 @@ const searchInput = ref(null);
 function toggleSearch() {
   if (contextSearchOpen.value) return closeContextSearch();
   contextSearchOpen.value = true;
-  activeTab.value = 'view';
   void nextTick(() => searchInput.value?.focus());
 }
 const searchHint = computed(() =>
@@ -494,17 +410,17 @@ const readInspectorVisibility = () =>
   !isRailCovered() && globalThis.document?.visibilityState !== 'hidden';
 // Only an open panel reads what is picked and in view; closed, it does no work.
 const contextOpen = computed(() => chromePanels.value['global-context-panel']?.collapsed === false);
+const { presence: cockpit } = storeToRefs(useCockpitStore());
 const inspectorMount = ref(null);
-const viewContextPresent = computed(() => showInspect.value && !entityCard.value);
+const viewContextPresent = computed(() => showInspect.value && (!entityCard.value || Boolean(inlineCameraId.value)));
 const inspectorShown = computed(() =>
   inspectorMount.value !== null &&
   contextOpen.value &&
   viewContextPresent.value &&
-  activeTab.value === 'view' &&
   pageVisible.value &&
   !railCovered.value &&
   !bhotePanel.value &&
-  (!phoneShell.value?.enabled || phoneShell.value.sheet === 'context') &&
+  contextOnScreen.value &&
   !cockpit.value?.active,
 );
 watch(
@@ -514,6 +430,7 @@ watch(
 );
 // A later mount starts as the button says: not expanded.
 onBeforeUnmount(() => setDocked(false));
+onBeforeUnmount(() => entityCards.setViewContextShown(false, null));
 const panelChrome = usePanelChromeStore();
 // The folded name goes as the panel opens: opened from the keyboard, focus
 // moves to the expanded header's fold button.
@@ -537,39 +454,43 @@ watch(
     if (collapsed && docked.value) setDocked(false);
   },
 );
-// Opening one of the old list panels leaves Context's list for Inspect.
-// A layer a person just turned on opens its panel by itself (Space Missions
-// reveals it, Weather opens it on first appearance): that open leaves the
-// list its layer showed in Context.
-const LIST_PANEL = ['space-missions-panel', 'weather-panel', 'news-panel', 'recent-imagery-panel'];
-const PANEL_LIST = ['space-missions', 'weather', 'news', 'recent-imagery'];
-const oldListOpens = () => LIST_PANEL.map((id) => chromePanels.value[id]?.collapsed);
-const openedWithItsLayer = (i) => {
-  const direct = entityCards.lastDirectOn;
-  return Boolean(
-    direct && Date.now() - direct.at < DIRECT_ON_MS && listForLayer(direct.layerId) === PANEL_LIST[i] && listShown.value === PANEL_LIST[i],
-  );
-};
-watch(oldListOpens, (next, prev) => {
-  if (next.some((value, i) => value === false && prev[i] === true && !openedWithItsLayer(i))) selectTab('inspect');
-});
+// The fold's element moves between its hidden home and the slot under the
+// station list, after each update; the same element stays, so the controls
+// RadioControls holds keep working.
+const radioFoldHome = ref(null);
+// Held from the first mount: once moved, the element may be out of the page
+// (the list it sat under closed), where no lookup by id finds it.
+let radioFold = null;
+function placeRadioFold() {
+  const home = radioFoldHome.value;
+  radioFold ??= home?.querySelector('#radio-panel') ?? null;
+  const fold = radioFold;
+  if (!home || !fold) return;
+  const slot = radioListShown.value ? globalThis.document.getElementById('radio-fold-slot') : null;
+  const target = slot || home;
+  if (fold.parentElement !== target) target.appendChild(fold);
+}
+watch([radioListShown, () => entityCard.value?.key, tab], placeRadioFold, { flush: 'post' });
+onMounted(placeRadioFold);
+
 // A camera's tools (projection, coverage, auto-hop, calibration, summary)
-// move from the CCTV panel into the Camera settings tab while it shows
-// (cctvToolsPlacement). They go home before the tab's slot leaves the page,
-// and come in once it is there.
-const cctvToolsSlotShown = computed(
-  () => contextOpen.value && activeTab.value === 'view' && tab.value === 'camera' && !contextNeedle.value,
-);
+// move the same way, into the Camera settings tab while it shows; the
+// standalone CCTV panel is retired (cctvToolsPlacement). They go home before
+// the tab's slot leaves the page, and come in once it is there.
+const cctvToolsHome = ref(null);
+onMounted(() => registerCctvToolsHome(cctvToolsHome.value));
+const cctvToolsSlotShown = computed(() => contextOpen.value && tab.value === 'camera' && !contextNeedle.value);
 watch(cctvToolsSlotShown, (shown) => shown || returnCctvToolsHome(), { flush: 'pre' });
 watch([cctvToolsSlotShown, () => entityCard.value?.key], placeCctvTools, { flush: 'post' });
 onBeforeUnmount(returnCctvToolsHome);
 
-// The street-level photo moves the same way, from the Street Level panel
-// onto its card's top image or into the dock (streetLevelViewerPlacement).
-// Its card's × closes the photo. A settled photo stays open through other
-// navigation, in the dock or back under Street Level.
+// The card's × closes its photo. During other navigation, the photo stays
+// in the dock or goes back to the viewer's offscreen home.
+const streetLevelHome = ref(null);
 const streetLevel = useStreetLevelStore();
-watch([() => entityCard.value?.key, tab, activeTab, contextOpen], placeStreetLevelViewer, { flush: 'post' });
+onMounted(() => registerStreetLevelViewerHome(streetLevelHome.value));
+onBeforeUnmount(() => registerStreetLevelViewerHome(null));
+watch([() => entityCard.value?.key, tab, contextOpen], placeStreetLevelViewer, { flush: 'post' });
 watch(entityCard, (next, previous) => {
   if (previous?.layerId !== 'street-level' || next?.key === previous.key) return;
   const dismissed = entityCards.wasDismissed(previous.key);
@@ -785,19 +706,7 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
 <template>
   <!-- Global Context is deliberately independent from the left layer accordion. -->
   <aside id="right-context-rail" class="ui-scroll" v-class-toggle="{ 'bhote-event-active': !!bhotePanel }" @keydown.capture="onEscape">
-    <RailPanel id="weather-panel" hidden :title="t('WEATHER')" sideways rail-scroller>
-      <template #badge><span id="weather-panel-count" :aria-label="t('Active weather products')">0</span></template>
-      <Teleport defer to="#context-live-weather" :disabled="!showsList('weather')"><div id="weather-panel-body" class="ui-scroll" data-rail-scroller></div></Teleport>
-    </RailPanel>
-    <RailPanel id="news-panel" hidden :title="t('NEWS')" sideways rail-scroller>
-      <template #badge><span id="news-panel-count" :aria-label="t('News items in the feed')">0</span></template>
-      <Teleport defer to="#context-live-news" :disabled="!showsList('news')"><div id="news-panel-body" class="ui-scroll" data-rail-scroller></div></Teleport>
-    </RailPanel>
-    <RailPanel id="recent-imagery-panel" hidden :title="t('RECENT IMAGERY')" sideways rail-scroller>
-      <template #badge><span id="recent-imagery-panel-count" :aria-label="t('Imagery days in the box')"></span></template>
-      <Teleport defer to="#context-live-recent-imagery" :disabled="!showsList('recent-imagery')"><div id="recent-imagery-panel-body" class="ui-scroll" data-rail-scroller></div></Teleport>
-    </RailPanel>
-    <RailPanel id="global-context-panel" start-collapsed v-class-toggle="{ ...(ctx && { 'context-enabled': ctx.enabled }) }" :data-context-mode="ctx?.mode" :data-context-tab="activeTab" :title="t('CONTEXT')" sideways scroll rail-scroller>
+    <RailPanel id="global-context-panel" start-collapsed :title="t('CONTEXT')" sideways scroll rail-scroller>
         <!-- Folded, the name opens the panel too, not only the ◀ button. -->
         <template #title>
           <UiButton v-if="!contextOpen" class="ui-panel__title panel-title context-title-open" :label="t('Expand {name}', { name: t('CONTEXT') })" :native-title="false" @click="openContext">{{ t('CONTEXT') }}</UiButton>
@@ -813,56 +722,9 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
         </template>
         <div ref="contextScroller" class="cyber-panel-body ui-scroll" data-rail-scroller tabindex="-1">
         <!-- Escape is the panel's (onEscape, in the capture phase): the card
-             clears before the search closes. On a phone onEscape leaves it,
-             and the field, which stops the key, closes the search. -->
+             clears before the search closes. -->
         <UiSearchField v-if="contextSearchOpen" ref="searchInput" v-model="contextSearchText" class="context-search" @escape="onSearchEscape" role="search" input-class="context-search__input" :label="searchHint" :placeholder="searchHint" autocomplete="off" spellcheck="false" :clear-label="t('Clear search')" clear-class="context-search__clear" />
-        <div v-if="availableTabs.length" class="context-tabs" role="tablist" :aria-label="t('Context tabs')">
-          <UiButton id="context-tab-btn-view" role="tab" class="context-tabs__tab" :class="{ active: activeTab === 'view' }" :aria-selected="String(activeTab === 'view')" aria-controls="context-tab-view" :tabindex="activeTab === 'view' ? 0 : -1" @click="activeTab = 'view'" @keydown.left.prevent="switchTab" @keydown.right.prevent="switchTab">
-            <UiIcon name="visibility" :size="null" /><span class="context-tabs__label">{{ t('Inspector') }}</span>
-          </UiButton>
-          <UiButton id="context-tab-btn-props" role="tab" class="context-tabs__tab" :class="{ active: activeTab === 'props' }" :aria-selected="String(activeTab === 'props')" aria-controls="context-tab-props" :tabindex="activeTab === 'props' ? 0 : -1" @click="activeTab = 'props'" @keydown.left.prevent="switchTab" @keydown.right.prevent="switchTab">
-            <UiIcon name="tune" :size="null" /><span class="context-tabs__label">{{ t('Properties') }}</span>
-          </UiButton>
-        </div>
-        <!-- Properties: settings of the layers that are on, one section each. -->
-        <div id="context-tab-props" class="context-props" :hidden="activeTab !== 'props'" role="tabpanel" aria-labelledby="context-tab-btn-props">
-          <section v-for="layerTab in LAYER_TABS" v-show="isShown(layerTab.id)" :key="layerTab.id" class="context-props__section">
-            <h4 class="context-props__heading"><UiIcon :name="layerTab.icon" :size="null" />{{ t(layerTab.label) }}</h4>
-            <ul v-if="affects(layerTab.id).length" class="context-props__layers">
-              <li v-for="layer in affects(layerTab.id)" :key="layer.id"><i :style="{ background: layer.color }" aria-hidden="true"></i>{{ layer.name }}</li>
-            </ul>
-            <div :id="`context-tab-${layerTab.id}`" :ref="setPane(layerTab.id)" class="context-tab-pane"></div>
-          </section>
-        </div>
-        <!-- Sections PanelChrome owns sit outside the Inspector view, which mounts
-             only while Context is open: PanelChrome finds collapsible panels once,
-             at startup. -->
-        <StationPanel />
-        <LivePanel />
-        <RadioPanel />
-        <div class="global-context-modes" role="tablist" :aria-label="t('Context mode')">
-          <UiButton id="global-context-flights-btn" class="context-mode-button" v-class-toggle="{ active: ctx?.flightsActive }" role="tab" tabindex="0" :aria-selected="String(ctx?.flightsActive ?? false)" :aria-disabled="ctx && String(ctx.busy)" :aria-busy="ctx && String(ctx.busy)" aria-controls="context-flights-view" :aria-label="t('CONTACTS')" :title="t('Cycles the nearest contacts of whatever type you select — planes, vessels, installations. Satellites track independently.')">
-            <UiIcon name="radar" :size="null" />
-            <span>{{ t('CONTACTS') }}</span>
-          </UiButton>
-        </div>
-        <div id="context-mode-standby" class="context-mode-standby" :hidden="ctx?.enabled">
-          <strong>{{ t('SELECT CONTEXT') }}</strong>
-          <span>{{ t('CONTACTS — nearest planes · vessels · sites') }}</span>
-        </div>
-        <section id="context-flights-view" class="context-mode-view" role="tabpanel" aria-labelledby="global-context-flights-btn" :hidden="!ctx?.flightsActive">
-          <div class="global-context-actions" :aria-label="t('Contact Context actions')">
-            <UiButton id="cockpit-entry" :hidden="!cockpit?.entryAvailable">
-              <UiIcon :name="entry.icon" :size="null" />
-              <span>{{ entry.label }}</span>
-            </UiButton>
-            <UiButton id="installations-search-btn" class="panel-layer-toggle" :aria-disabled="ctx && String(ctx.installationsBusy)" :aria-busy="ctx && String(ctx.installationsBusy)">{{ t('SEARCH NEARBY SITES') }}</UiButton>
-            <UiButton id="tr3b-toggle" class="tr3b-toggle" :pressed="!!cockpit?.tr3b?.converted" :hidden="!cockpit?.tr3b" :aria-label="t('Reclassify tracked contact as TR-3B')" :title="cockpit?.tr3b?.converted ? t('Restore real aircraft') : t('Reclassify as TR-3B')">🛸</UiButton>
-          </div>
-          <AwarenessPanel v-if="!contactsMatchCard" />
-        </section>
-        <div v-if="contextOpen" v-show="activeTab === 'view'" id="context-tab-view" role="tabpanel" aria-labelledby="context-tab-btn-view" :class="{ 'context-searching': contextSearchOpen && contextSearchText.trim() }">
-        <div id="context-body">
+        <div v-if="contextOpen" id="context-body" :class="{ 'context-searching': contextSearchOpen && contextSearchText.trim() }">
           <div v-if="tabIds.length > 1" class="context-pin-tabs context-pin-tabs--main" role="tablist" :aria-label="t('Context')" @keydown="onTabKey">
             <!-- Inspect holds the start of the row; the other tabs scroll
                  beside it on one line, the row's end fading while more are
@@ -884,13 +746,13 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
           <div id="context-tab-panel" :hidden="tab === 'lists'" :role="tabIds.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="tabIds.length > 1 ? `context-tab-${tab === 'lists' ? 'inspect' : tab}` : undefined">
             <template v-if="tab === 'lists'"></template>
             <template v-else-if="showInspect">
-              <EntityCard />
-              <AwarenessPanel v-if="contactsMatchCard" compact />
+              <EntityCard v-if="!inlineCameraId" />
               <!-- Nothing picked: the place, then Radio's stations while it
                    is on, then what is nearby. -->
               <ViewContext v-if="viewContextPresent" @mounted="inspectorMount = Symbol()" @unmounting="inspectorMount = null">
                 <!-- Radio shows only the source chosen on its row: the
                      internet stations, or the local receiver. -->
+                <template #cameras><div ref="cameraListHost"></div></template>
                 <template #lead><RadioStations :module="radioModule" :ui="radioUi" /><LocalReceiverPlayer v-if="radioUi?.localReceiver" /></template>
               </ViewContext>
             </template>
@@ -902,29 +764,40 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
             <PinnedGrid v-else :radio-on="Boolean(radioUi?.enabled)" @open-station="openStation" />
           </div>
         </div>
-        </div>
         <!-- The lists stay in the page while Context is closed or on another
-             tab: each borrowed readout is teleported into its target. -->
-        <div v-show="contextOpen && activeTab === 'view' && tab === 'lists'" id="context-lists" role="tabpanel" aria-labelledby="context-tab-lists">
+             tab: each readout renders into its own body. -->
+        <div v-show="contextOpen && tab === 'lists'" id="context-lists" role="tabpanel" aria-labelledby="context-tab-lists">
           <div v-if="lists.length > 1" class="context-pin-tabs context-list-tabs" role="tablist" :aria-label="t('Lists')" @keydown="onListKey">
-            <UiButton v-for="list in lists" :id="`context-list-tab-${list.id}`" :key="list.id" role="tab" :aria-selected="String(listShown === list.id)" :tabindex="listShown === list.id ? 0 : -1" :aria-controls="listPaneId(list.id)" @click="showContextList(list.id)">{{ listLabel(list) }}</UiButton>
+            <UiButton v-for="list in lists" :id="`context-list-tab-${list.id}`" :key="list.id" role="tab" :aria-selected="String(listShown === list.id)" :tabindex="listShown === list.id ? 0 : -1" :aria-controls="`context-list-${list.id}`" @click="showContextList(list.id)">{{ listLabel(list) }}</UiButton>
           </div>
-          <div v-show="listShown === 'space-missions'" id="context-live-missions" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-space-missions' : undefined"></div>
-          <div v-show="listShown === 'weather'" id="context-live-weather" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-weather' : undefined"></div>
-          <div v-show="listShown === 'news'" id="context-live-news" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-news' : undefined"></div>
-          <div v-show="listShown === 'recent-imagery'" id="context-live-recent-imagery" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-recent-imagery' : undefined"></div>
-          <!-- Every camera within the radius, nearest first: it publishes its
-               own tab and the order Prev and Next walk, so it stays in the page. -->
-          <div v-show="listShown === 'cctv'" id="context-list-cctv" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-cctv' : undefined">
-            <div class="context-list__body ui-scroll"><CameraList :shown="contextOpen && activeTab === 'view' && tab === 'lists' && listShown === 'cctv' && contextOnScreen" /></div>
+          <div v-show="listShown === 'space-missions'" id="context-list-space-missions" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-space-missions' : undefined">
+            <div id="space-mission-panel-host" ref="missionHost">
+              <MissionRoster />
+              <MissionDetail />
+            </div>
           </div>
+          <div v-show="listShown === 'weather'" id="context-list-weather" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-weather' : undefined">
+            <div id="weather-panel-body" class="context-list__body ui-scroll"></div>
+          </div>
+          <div v-show="listShown === 'news'" id="context-list-news" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-news' : undefined">
+            <div id="news-panel-body" class="context-list__body ui-scroll"></div>
+          </div>
+          <div v-show="listShown === 'recent-imagery'" id="context-list-recent-imagery" class="context-list" :role="lists.length > 1 ? 'tabpanel' : undefined" :aria-labelledby="lists.length > 1 ? 'context-list-tab-recent-imagery' : undefined">
+            <div id="recent-imagery-panel-body" class="context-list__body ui-scroll"></div>
+          </div>
+
         </div>
+        <!-- A selected space station's STATION and LIVE sections, after the
+             card. PanelChrome finds collapsible panels once, at startup, and
+             the tab content mounts only while Context is open, so they stay
+             in the page, each hidden while it has nothing to show. -->
+        <StationPanel />
+        <LivePanel />
         </div>
         <!-- Expanded, the radio mini player stands here, at the column's
              foot, while what is above it scrolls. -->
         <div v-show="docked" id="context-mini-foot" class="context-mini-foot"></div>
     </RailPanel>
-    <SpaceMissionsPanel :list-open="showsList('space-missions')" />
     <BhoteKoshiPanel />
   </aside>
 
@@ -937,5 +810,34 @@ watch(contextOpen, (open) => open || pinned.releaseNotice());
       <RadioMiniPlayer :module="radioModule" :ui="radioUi" @closed="onMiniPlayerClosed" />
     </Teleport>
   </div>
+  <!-- Radio's own controls are always in the page (RadioControls reads their
+       elements once); they move under the station list while it shows. -->
+  <div ref="radioFoldHome" class="radio-fold-home" hidden>
+    <RadioFold />
+  </div>
+  <!-- The local receiver's card likewise (LocalSdrControls reads it once);
+       Radio's Data Layers row borrows it while the local receiver is chosen
+       (RowPanel.vue). -->
+  <div class="sdr-card-home" hidden>
+    <SdrCard />
+  </div>
+  <!-- The camera tools likewise (CctvControls reads their elements once);
+       they move into the Camera settings tab while it shows. -->
+  <div ref="cctvToolsHome" class="cctv-tools-home" hidden>
+    <CctvTools />
+  </div>
+  <!-- The street-level photo likewise (a provider mounts its viewer in it);
+       it moves onto the open photo's card, or into the dock. Its home is out
+       of view rather than hidden, so a viewer built before the card shows
+       has a size (street-level.css). -->
+  <div ref="streetLevelHome" class="sl-viewer-home" aria-hidden="true" inert>
+    <StreetLevelViewer />
+  </div>
   <div id="scene-runtime" :class="{ active: !!sceneRuntime }">{{ sceneRuntime }}</div>
+  <!-- Keep the camera walk connected while other tabs hide its list. -->
+  <div hidden>
+    <Teleport :to="cameraListHost" :disabled="!cameraListHost">
+      <CameraList :shown="Boolean(cameraListHost && inspectorShown && !inlineCameraId)" :selected="inlineCameraId" />
+    </Teleport>
+  </div>
 </template>

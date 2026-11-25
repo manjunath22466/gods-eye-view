@@ -414,24 +414,36 @@ async function main() {
       tracked,
       `tracked=${tracked}`,
     );
-    // Cockpit entry is gated on the Contacts (flights) context mode.
-    await page.evaluate(() =>
-      window.__godsEyeView.styleManager._contextControls._selectContextMode(
-        'flights',
-      ),
+    // Cockpit is entered from the tracked aircraft's Context card.
+    await page.evaluate(async () => {
+      const [{ applicationPinia }, { useEntityCardStore }] = await Promise.all([
+        import('/src/ui/vueRuntime.js'),
+        import('/src/ui/stores/entityCard.js'),
+      ]);
+      useEntityCardStore(applicationPinia()).select(
+        { layerId: 'military', id: 'ae7700' },
+        { follow: false },
+      );
+      window.__godsEyeView.styleManager.setPanelCollapsed(
+        'global-context-panel',
+        false,
+        { persist: false, syncShare: false },
+      );
+    });
+    const cockpitEntry =
+      '#entity-card[data-layer="military"] [data-entity-cockpit-entry]';
+    const entryShown = await page
+      .waitForSelector(cockpitEntry, { visible: true, timeout: 20000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    record(
+      'HUD: the Context card offers Enter Cockpit',
+      entryShown,
+      `entry=${entryShown}`,
     );
-    await page
-      .waitForFunction(
-        () => {
-          const entry = document.getElementById('cockpit-entry');
-          return entry && !entry.hidden && !entry.disabled;
-        },
-        { timeout: 20000 },
-      )
-      .catch(() => {});
-    await page
-      .$eval('#cockpit-entry', (entry) => entry.click())
-      .catch(() => {});
+    if (entryShown) await page.click(cockpitEntry);
     const hudReady = await page
       .waitForFunction(
         () =>

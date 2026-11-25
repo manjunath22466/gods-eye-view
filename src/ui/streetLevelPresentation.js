@@ -339,12 +339,12 @@ export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
     },
     since: presentSince(filter.sinceDays, now),
     sinceNote: state.sinceNote || null,
-    viewer: presentViewer(state),
     dockPhotoLoading: state.dockPhotoLoading === true,
     dockPhotoUnavailable: state.dockPhotoUnavailable === true,
     dockPhotoRestoring: state.dockPhotoRestoring === true,
     // 'failed' or 'restoring': a replacement the dock could not show.
     dockPhotoNotice: state.dockPhotoNotice || null,
+    viewer: presentViewer(state),
     meta: presentMeta(state),
     nearest: presentNearest(state),
   };

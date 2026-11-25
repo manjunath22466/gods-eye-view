@@ -277,23 +277,25 @@ within the resulting scroll range. The left pass notifies its caller after
 alignment so the right pass can follow. Neither pass installs listeners, timers
 or observers; construction/import does no work. Scheduling, preference writes,
 share restoration and movement of controls between containers remain caller-owned.
-Existing helper imports from `cockpitMath.js` and `rightRailPolicy.js` remain
-compatible through re-exports.
+Existing imports of `resolveHudRailLayout` from `cockpitMath.js` remain
+compatible through a re-export.
 
-### Adding a right-rail readout panel
+### Adding a Context list
 
-Add the shell in `src/ui/views/ContextView.vue` inside `#right-context-rail`:
-a `.panel-collapsible` with a stable `id` and matching `data-panel-id`, the
-existing `.panel-header`, collapse button and a dedicated body. Register it
-with the existing panel chrome/layout owners; do not allocate rail space in
-the body renderer. Set `hidden` while empty so the allocator ignores it, and
-expand through the existing collapse button only on first appearance per page
-session, and only when the chrome marked the restored state as a default
-(`data-collapsed-preference`), never over a stored or shared choice. Preserve
-the user's later collapse choice, including body remounts. Mark the body
-`data-rail-scroller` when it scrolls: the rail's measuring pass lifts its
-`max-height` and puts the scroll offset back afterwards. Panel bodies only
-scroll on an open-card change, with one write, never on a refresh.
+A layer's readout is a list in Context, not a right-rail panel of its own.
+Add its id, label and layers to `CONTEXT_LISTS` and `LIST_LAYERS` in
+`src/ui/contextLists.js`, and its body (`#context-list-<id>`, holding a
+dedicated body element) to `#context-lists` in `src/ui/views/ContextView.vue`.
+The body stays in the page while Context is closed or shows another tab, so
+the readout renders into it at any time. The readout reports
+`setContextListPresence(id, { count })` while its layer is on and
+`setContextListPresence(id, null)` when it goes off; that adds and removes the
+list tab. When one list is active, it has its own tab. When several are
+active, Lists holds a sub-tab for each.
+`showContextList(id)` opens a list only on an explicit request. Do not
+allocate rail space in the body renderer; Context's own body is the rail
+scroller. List bodies only scroll on an open-card change, with one write,
+never on a refresh.
 
 Compose `createRailCards({ container, document, onParams, onOpen })`. Rails
 have no time controls of their own; the world timeline moves time. Cards
@@ -374,8 +376,8 @@ facade's asynchronous teardown can yield.
 
 ## Ordinary action buttons
 
-The scene panels view and the CCTV panel draw their action buttons with the shared
-`gev-action-button` classes in `src/ui/styles/action-button.css`. Feature
+The scene panels view and the render failure notice draw their action buttons
+with the shared `gev-action-button` classes in `src/ui/styles/action-button.css`. Feature
 controllers own action dispatch, state, persistence and cleanup, and the views
 preserve IDs and layout hooks.
 
@@ -431,17 +433,18 @@ importing the renderer or station providers. Pure tuner calculations retain
 compatibility exports from the data layer. Disposal revokes DOM listeners and
 subscriptions before ending the active tuning interaction.
 
-### Camera panel controls
+### Camera controls
 
 `ui/cctv` composes camera controls, frame loading, calibration editing and status
-presentation. It receives DOM elements, the existing camera port and explicit
+presentation for Context's Camera settings tab and the camera card. It receives
+DOM elements, the existing camera port and explicit
 application actions; it imports no provider, layer or camera engine. Selection,
 placement, navigation and storage policy remain outside the component family.
 
 ### Context coordination
 
-`ui/context` owns mode controls, transactions, session restoration and manager
-subscriptions. Composition supplies the manager, installations search and
+`ui/context` owns the internal Contacts mode Cockpit uses, its transactions,
+session restoration and manager subscriptions. Composition supplies the manager and
 explicit visual/panel actions. `ui/context/policy` exposes the existing pure
 mode and restoration rules. No source transport or renderer is imported by
 these components; initial state and action results retain their existing shape.

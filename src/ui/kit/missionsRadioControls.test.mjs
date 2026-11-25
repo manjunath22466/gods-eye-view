@@ -1,15 +1,15 @@
-// The space missions, Contacts, Radio and provider settings controls are the
-// kit's: none of their views hand-writes a <button>, a Material Symbols span,
-// a select or a checkbox. Radio's Enable, the RTL-SDR card's Connect and its
-// FM and ADS-B modes are pressed toggles with `active`; the pins of the
-// mission card, the radio mini player and Now playing are pressed toggles
-// with their own pressed class, as are the station tag chips and the
-// speaker's mute. Radio's Play and the card's Locate keep their own `active`
-// class, since their words change with their state rather than saying they
-// are pressed. The RTL-SDR card's
-// FM frequency stays a native number field (the kit has none), and the radio
-// tuner's range stays native: its owner moves the handle back to the
-// selected station on a drag's first input without changing the slot.
+// The space missions, Radio and provider settings controls are the kit's:
+// none of their views hand-writes a <button>, a Material Symbols span, a
+// select or a checkbox. The RTL-SDR card's Connect and its FM and ADS-B
+// modes are pressed toggles with `active`; the pins of the mission card,
+// the radio mini player and Now playing are pressed toggles with their own
+// pressed class, as are the station tag chips and the speaker's mute.
+// Radio's Play and the card's Locate keep their own `active` class, since
+// their words change with their state rather than saying they are pressed.
+// The RTL-SDR card's FM frequency stays a native number field (the kit has
+// none), and the radio tuner's range stays native: its owner moves the
+// handle back to the selected station on a drag's first input without
+// changing the slot.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -47,15 +47,11 @@ const VIEWS = {
   // A mission's row.
   'panels/MissionRoster.vue': [1, 0, 0, 0, 0],
   'panels/MissionReplayOverlay.vue': [0, 0, 0, 0, 0],
-  'panels/SpaceMissionsPanel.vue': [0, 0, 0, 0, 0],
-  // PREV, FOCUS, NEXT and a contact's row.
-  'panels/AwarenessPanel.vue': [4, 0, 0, 0, 0],
   'panels/AwarenessDirection.vue': [0, 0, 0, 0, 0],
-  'panels/AwarenessNames.vue': [0, 0, 0, 0, 0],
   // Connect, Locate, Change device, FM, ADS-B, Tune and the two seeks.
   'panels/SdrCard.vue': [8, 0, 0, 1, 1],
-  // Enable, PREV, PLAY, NEXT and STOP.
-  'panels/RadioPanel.vue': [5, 0, 0, 1, 1],
+  // PREV, PLAY, NEXT and STOP, and the volume.
+  'panels/RadioFold.vue': [4, 0, 0, 0, 1],
   'panels/RadioTuner.vue': [0, 0, 0, 0, 0],
   // Pin, Previous, Play or Pause, Next and Close; the station's glyph and
   // the four buttons' glyphs.
@@ -116,7 +112,6 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
   const pressed = {
     'panels/MissionDetail.vue': 1,
     'panels/SdrCard.vue': 3,
-    'panels/RadioPanel.vue': 1,
     'panels/RadioMiniPlayer.vue': 1,
     'panels/RadioStations.vue': 2,
     'panels/RadioVolume.vue': 2,
@@ -133,14 +128,8 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
     assert.equal(toggles.length, pressed[file] ?? 0, file);
   }
   const sdr = views.find((v) => v.file === 'panels/SdrCard.vue').markup;
-  const radio = views.find((v) => v.file === 'panels/RadioPanel.vue').markup;
-  for (const [markup, id] of [
-    [sdr, 'sdr-connect-btn'],
-    [sdr, 'sdr-mode-fm-btn'],
-    [sdr, 'sdr-mode-adsb-btn'],
-    [radio, 'radio-enable-btn'],
-  ])
-    assert.match(byId(markup, 'UiButton', id), /\spressed-class="active"/, id);
+  for (const id of ['sdr-connect-btn', 'sdr-mode-fm-btn', 'sdr-mode-adsb-btn'])
+    assert.match(byId(sdr, 'UiButton', id), /\spressed-class="active"/, id);
   // The pins keep the class their stylesheets key on.
   for (const [file, pin, on] of [
     ['panels/MissionDetail.vue', 'data-mission-pin', 'entity-card__action--on'],
@@ -161,7 +150,7 @@ test('no tag hand-writes aria-pressed; the pressed toggles take :pressed', () =>
 
 test('Play and Locate keep their own active class rather than pressed', () => {
   const sdr = views.find((v) => v.file === 'panels/SdrCard.vue').markup;
-  const radio = views.find((v) => v.file === 'panels/RadioPanel.vue').markup;
+  const radio = views.find((v) => v.file === 'panels/RadioFold.vue').markup;
   for (const [markup, id] of [
     [radio, 'radio-play-btn'],
     [sdr, 'sdr-locate-btn'],

@@ -1,6 +1,5 @@
 /** Own rail measurement, layout scheduling and dock tray observation. */
 import { layoutLeftPanelRail, layoutRightPanelRail } from './panelRails.js';
-import { syncRadioPanelPlacement } from './radioPanelPlacement.js';
 import { isPanelRailMutation } from './panelRailCatalog.js';
 const COCKPIT_LAYOUT_SETTLE_MS = 240;
 /**
@@ -51,6 +50,7 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#cockpit-hud .cockpit-topline > div',
   '#title-bar',
   '#style-indicator',
+  '#gev-stories .gs-entry',
   '#top-center-actions',
   '#traffic-sync-chip',
   '#cctv-sync-chip',
@@ -132,11 +132,6 @@ export class PanelLayoutController {
     this._leftPanelStack = document.getElementById('left-panel-stack');
     this._rightPanelStack = document.getElementById('right-context-rail');
     this._ppToggles = document.getElementById('pp-toggles');
-    this._cctvPanel = document.getElementById('cctv-panel');
-    this._weatherPanel = document.getElementById('weather-panel');
-    this._newsPanel = document.getElementById('news-panel');
-    this._recentImageryPanel = document.getElementById('recent-imagery-panel');
-    this._streetLevelPanel = document.getElementById('street-level-panel');
   }
   _scheduleAdaptivePanelLayout({ settle = false } = {}) {
     if (this.destroyed) return;
@@ -232,35 +227,16 @@ export class PanelLayoutController {
       this._leftPanelStack.append(this._ppToggles);
     else stack.prepend(this._ppToggles);
     const globalContextPanel = document.getElementById('global-context-panel');
-    for (const panel of [
-      this._cctvPanel,
-      this._weatherPanel,
-      this._newsPanel,
-      this._recentImageryPanel,
-      this._streetLevelPanel,
-    ]) {
-      if (!panel) continue;
-      stack.insertBefore(panel, globalContextPanel);
-    }
     // Context leads the right column: it is the panel for whatever is picked,
-    // and the camera panels follow it.
+    // and holds the layers' lists (Weather, News, Recent Imagery, Space
+    // Missions) as tabs.
     if (globalContextPanel) stack.prepend(globalContextPanel);
     if (typeof ResizeObserver !== 'undefined') {
       this._rightStackResizeObserver = new ResizeObserver(() => {
         this._scheduleRightPanelLayout();
       });
       this._rightStackResizeObserver.observe(stack);
-      for (const panel of [
-        this._ppToggles,
-        this._cctvPanel,
-        this._weatherPanel,
-        this._newsPanel,
-        this._recentImageryPanel,
-        this._streetLevelPanel,
-        globalContextPanel,
-        document.getElementById('space-missions-panel'),
-        document.getElementById('radio-panel'),
-      ]) {
+      for (const panel of [this._ppToggles, globalContextPanel]) {
         if (panel) this._rightStackResizeObserver.observe(panel);
       }
       document
@@ -367,7 +343,6 @@ export class PanelLayoutController {
 
   _syncRightPanelAdaptiveLayout() {
     if (this.destroyed) return;
-    syncRadioPanelPlacement(document);
     layoutRightPanelRail({
       stack: this._rightPanelStack,
       obstacles: document.querySelectorAll(RIGHT_STACK_OBSTACLE_SELECTOR),

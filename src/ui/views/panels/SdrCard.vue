@@ -11,7 +11,9 @@ import { useRadioStore } from '../../stores/radio.js';
 import UiButton from '../../kit/UiButton.vue';
 import UiSelect from '../../kit/UiSelect.js';
 
-// The local RTL-SDR card in the Radio panel. LocalSdrControls presents it and
+// The local RTL-SDR card, shown on Radio's Data Layers row while the local
+// receiver is chosen (it lives in a hidden home in Context and the row
+// borrows it, RowPanel.vue). LocalSdrControls presents it and
 // publishes it; until it does, the card shows its initial markup. Its
 // controls call LocalSdrControls through the store. The numeric gain
 // options read in the page language; their values stay numeric.

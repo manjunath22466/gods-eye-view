@@ -4,7 +4,7 @@ import { reactive } from 'vue';
 // The card's per-card memory for the session and the split of its items
 // into groups for the bar under its heading.
 
-/** The page sizes a card's range label offers; the first is the default. */
+/** The sizes offered in a card's page-size menu; the first is the default. */
 export const LIST_PAGE_SIZES = Object.freeze([5, 10, 15]);
 
 /** How many groups the bar names before "Other". */
@@ -71,19 +71,21 @@ import {
   onBeforeUpdate,
   onUpdated,
   ref,
+  shallowRef,
   watch,
 } from 'vue';
 import { formatNumber, t } from '../../i18n/index.js';
 import UiButton from './UiButton.vue';
+import UiCloseButton from './UiCloseButton.vue';
 import UiIcon from './UiIcon.vue';
 import UiSelect from './UiSelect.js';
 
 // A list card in Context: a layer block's head (feed dot, icon, title and
 // how many), an optional bar of what those are made of (the largest groups
 // named, the rest as Other), then the items a page at a time, Previous and
-// Next beside a range label that sets the page size. A row emits `select`;
+// Next beside the current range and page-size menu. A row emits `select`;
 // with `selected` set, the item's detail (the `detail` slot) shows in the
-// list's place under a Back that emits `back`, and Esc there does the same.
+// list's place with a return control that emits `back`; Escape does the same.
 // Focus follows: onto Back, then back onto the item's row. The card keeps
 // its page and page size for the session by `id`, and reports the order it
 // lists in (`order`), for a caller that walks it. It knows nothing of what
@@ -116,12 +118,19 @@ const props = defineProps({
   /** Each row a button; false for rows that hold controls of their own,
    * which get `select` in the row slot instead. */
   rowButton: { type: Boolean, default: true },
-  /** Back's hover text. */
+  /** Close the detail from the header in place of its total. */
+  headerClose: Boolean,
+  /** A selected camera can move outside the current radius. */
+  allowUnlisted: Boolean,
+  /** Accessible return-to-list label. */
   backTitle: { type: String, default: '' },
+  /** A caller-supplied revision opts into holding row order after a pick. */
+  returnRevision: { type: [Number, String], default: null },
 });
 const emit = defineEmits([
   'select',
   'back',
+  'release-order',
   'order',
   'row-pointer',
   'row-focus',
@@ -134,9 +143,16 @@ const memory = listCardMemory(props.id);
 const shown = computed(() =>
   props.filter ? props.items.filter((item) => props.filter(item)) : props.items,
 );
-const order = computed(() =>
-  props.sort ? props.sort(shown.value) : shown.value,
-);
+// Keep positions by key so a refresh can still update or remove its rows.
+const returnOrder = shallowRef(null);
+const order = computed(() => {
+  const sorted = props.sort ? props.sort(shown.value) : shown.value;
+  const remembered = returnOrder.value?.positions;
+  if (!remembered) return sorted;
+  const position = (item) =>
+    remembered.get(props.itemKey(item)) ?? remembered.size;
+  return [...sorted].sort((a, b) => position(a) - position(b));
+});
 watch(
   () => order.value.map((item) => props.itemKey(item)),
   (keys, before) => {
@@ -146,9 +162,17 @@ watch(
   { immediate: true },
 );
 defineExpose({ order });
+function releaseOrder() {
+  if (!returnOrder.value) return;
+  returnOrder.value = null;
+  emit('release-order');
+}
 watch(
-  () => props.query,
-  () => (memory.page = 0),
+  [() => props.query, () => props.returnRevision],
+  ([query], [previous]) => {
+    releaseOrder();
+    if (query !== previous) memory.page = 0;
+  },
 );
 
 const groups = computed(() => {
@@ -179,30 +203,24 @@ const atStart = computed(() => page.value === 0);
 const atEnd = computed(() => page.value === pages.value - 1);
 // Paged: more than the smallest page holds, so the range is a control.
 const paged = computed(() => order.value.length > LIST_PAGE_SIZES[0]);
-// How far a page of each size reaches from the first item shown: the range
-// label's options, so a new size keeps that item in view.
-const rangeAt = (size) => {
-  const from = Math.floor(first.value / size) * size;
-  return t('{from}–{to} of {total}', {
-    from: formatNumber(from + 1),
-    to: formatNumber(Math.min(from + size, order.value.length)),
+const rangeText = computed(() =>
+  t('{from}–{to} of {total}', {
+    from: formatNumber(first.value + 1),
+    to: formatNumber(Math.min(first.value + memory.size, order.value.length)),
     total: formatNumber(order.value.length),
-  });
-};
-const rangeText = computed(() => rangeAt(memory.size));
+  }),
+);
 const sizeOptions = computed(() =>
   LIST_PAGE_SIZES.map((size) => ({
     value: String(size),
-    label: t('{range} · {size}/page', {
-      range: rangeAt(size),
-      size: formatNumber(size),
-    }),
+    label: formatNumber(size),
   })),
 );
 function resize(value) {
   const size = Number(value);
   if (!LIST_PAGE_SIZES.includes(size) || size === memory.size) return;
   const firstShown = first.value;
+  releaseOrder();
   memory.size = size;
   memory.page = Math.floor(firstShown / size);
 }
@@ -210,7 +228,9 @@ function resize(value) {
 // on Next never drops focus to the page.
 function turn(step) {
   if (step < 0 ? atStart.value : atEnd.value) return;
-  memory.page = page.value + step;
+  const nextPage = page.value + step;
+  releaseOrder();
+  memory.page = nextPage;
 }
 
 const selectedItem = computed(() =>
@@ -219,6 +239,23 @@ const selectedItem = computed(() =>
     : (props.items.find((item) => props.itemKey(item) === props.selected) ??
       null),
 );
+const detailShown = computed(
+  () =>
+    Boolean(selectedItem.value) ||
+    (props.allowUnlisted && props.selected !== null),
+);
+function select(item, event) {
+  if (props.returnRevision !== null) {
+    returnOrder.value = {
+      positions: new Map(
+        order.value.map((row, index) => [props.itemKey(row), index]),
+      ),
+      key: props.itemKey(item),
+      index: rows.value.indexOf(item),
+    };
+  }
+  emit('select', item, event);
+}
 function back() {
   emit('back');
 }
@@ -269,14 +306,23 @@ const rowOf = (key) =>
     (button) => button.dataset.listKey === String(key),
   );
 watch(
-  () => (selectedItem.value ? props.selected : null),
+  () => (detailShown.value ? props.selected : null),
   async (key, before) => {
     if (!focusInCard()) return;
     await nextTick();
+    const returned = returnOrder.value;
+    const buttons = root.value?.querySelectorAll('[data-list-key]');
+    const rowIndex = returned?.key === before ? returned.index : -1;
+    const neighbor =
+      rowIndex >= 0 && buttons?.length
+        ? buttons[Math.min(rowIndex, buttons.length - 1)]
+        : null;
     const target =
       key !== null
         ? root.value?.querySelector('[data-list-back]')
-        : (rowOf(before) ?? root.value?.querySelector(`#${headId.value}`));
+        : (rowOf(before) ??
+          neighbor ??
+          root.value?.querySelector(`#${headId.value}`));
     // Focus without the browser's own scroll, then only as far as it takes
     // to bring the control into view in its scroller.
     target?.focus({ preventScroll: true });
@@ -352,16 +398,29 @@ onBeforeUnmount(() => {
         :size="null"
       />
       <span class="view-context__block-name">{{ title }}</span>
-      <strong v-if="state === 'ready'">{{ formatNumber(order.length) }}</strong>
+      <UiCloseButton
+        v-if="headerClose && detailShown"
+        class="context-list-card__close"
+        data-list-back
+        data-owns-escape
+        :label="backTitle || t('Close card')"
+        :title="backTitle || t('Close card')"
+        @keydown="onDetailKey"
+        @click="back"
+      />
+      <strong v-else-if="state === 'ready'">{{
+        formatNumber(order.length)
+      }}</strong>
     </h4>
     <!-- The detail in the list's place: Esc here is the card's (Back). -->
     <div
-      v-if="selectedItem"
+      v-if="detailShown"
       class="context-list-card__detail"
       data-owns-escape
       @keydown="onDetailKey"
     >
       <UiButton
+        v-if="!headerClose"
         class="context-list-card__back"
         data-list-back
         :title="backTitle || undefined"
@@ -418,14 +477,14 @@ onBeforeUnmount(() => {
                   name="row"
                   :item="item"
                   :index="first + index"
-                  :select="() => emit('select', item)"
+                  :select="() => select(item)"
                 />
               </div>
               <UiButton
                 v-else
                 :data-list-key="itemKey(item)"
                 :data-list-index="index"
-                @click="emit('select', item, $event)"
+                @click="select(item, $event)"
                 @mouseenter="pointerEnter(item)"
                 @mousemove="pointerMove(item)"
                 @mouseleave="emit('row-pointer', null)"
@@ -447,10 +506,13 @@ onBeforeUnmount(() => {
               @click="turn(-1)"
               ><span aria-hidden="true">‹</span> {{ t('Previous') }}</UiButton
             >
+            <span class="context-list-card__range" data-list-range>{{
+              rangeText
+            }}</span>
             <UiSelect
               v-if="paged"
               class="context-list-card__range"
-              data-list-range
+              data-list-size
               :model-value="String(memory.size)"
               :options="sizeOptions"
               :aria-label="
@@ -461,9 +523,6 @@ onBeforeUnmount(() => {
               "
               @update:model-value="resize"
             />
-            <span v-else class="context-list-card__range" data-list-range>{{
-              rangeText
-            }}</span>
             <UiButton
               v-if="paged"
               class="nearby-lists__all"

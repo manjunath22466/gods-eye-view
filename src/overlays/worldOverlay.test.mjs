@@ -854,9 +854,9 @@ test('genuine chrome changes still invalidate: add, remove, and own-attribute fl
 
   // Chrome appearing later, nested: an added subtree CONTAINING inventory chrome.
   const wrapper = env.document.createElement('div');
-  const awareness = env.document.createElement('div');
-  awareness.id = 'military-awareness-panel';
-  wrapper.appendChild(awareness);
+  const eventPanel = env.document.createElement('div');
+  eventPanel.id = 'bhote-koshi-event-panel';
+  wrapper.appendChild(eventPanel);
   renders = env.viewer.scene.requestRenderCount;
   observer.callback([{
     type: 'childList', target: env.document.body, addedNodes: [wrapper], removedNodes: [],
@@ -866,7 +866,7 @@ test('genuine chrome changes still invalidate: add, remove, and own-attribute fl
   // Chrome disappearing: a removed node that IS inventory chrome.
   renders = env.viewer.scene.requestRenderCount;
   observer.callback([{
-    type: 'childList', target: env.document.body, addedNodes: [], removedNodes: [awareness],
+    type: 'childList', target: env.document.body, addedNodes: [], removedNodes: [eventPanel],
   }]);
   assert.equal(env.viewer.scene.requestRenderCount, renders + 1, 'removed chrome invalidates');
   env.cleanup();
@@ -884,9 +884,9 @@ test('chrome observers scope: body is childList discovery; occluder attributes a
 
   // Chrome discovered LATE goes through the refresh-time observe site too.
   const late = env.document.createElement('div');
-  late.id = 'military-awareness-panel';
+  late.id = 'bhote-koshi-event-panel';
   late._rect = { left: 10, top: 10, width: 100, height: 80 };
-  Object.assign(late.style, shippedStacking('#military-awareness-panel'));
+  Object.assign(late.style, shippedStacking('#bhote-koshi-event-panel'));
   env.document.body.appendChild(late);
   env.mutationObservers[0].callback([{
     type: 'childList', target: env.document.body, addedNodes: [late], removedNodes: [],

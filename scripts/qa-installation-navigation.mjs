@@ -268,9 +268,12 @@ try {
         () => window.__qaInstallationDots().length > 0,
         { timeout: 5000 },
       );
+      // Contacts has no control of its own now (Cockpit starts it), so the
+      // check drives its session directly.
       await page.evaluate(() => {
-        const button = document.getElementById('global-context-flights-btn');
-        if (button.getAttribute('aria-selected') !== 'true') button.click();
+        const controls = window.__godsEyeView.styleManager._contextControls;
+        if (controls._contextMode !== 'flights')
+          void controls._selectContextMode('flights');
       });
       await page.waitForFunction(
         () => {
@@ -320,9 +323,8 @@ try {
       );
       await page.waitForFunction(
         () =>
-          document
-            .getElementById('global-context-flights-btn')
-            .getAttribute('aria-busy') === 'false',
+          !window.__godsEyeView.styleManager._contextControls
+            ._contextModeChanging,
         { timeout: 30000 },
       );
       const anchored = await page.evaluate(() =>
@@ -346,7 +348,10 @@ try {
           };
           clearSelectedEntityContextForLayer('military-installations');
           return before;
-        } else document.getElementById('global-context-flights-btn').click();
+        } else
+          void window.__godsEyeView.styleManager._contextControls._selectContextMode(
+            null,
+          );
       }, gesture === 'contacts-clear');
       if (gesture === 'contacts-clear') {
         await page.waitForFunction(
@@ -359,13 +364,8 @@ try {
       } else {
         await page.waitForFunction(
           () => {
-            const button = document.getElementById(
-              'global-context-flights-btn',
-            );
-            return (
-              button.getAttribute('aria-selected') === 'false' &&
-              button.getAttribute('aria-busy') === 'false'
-            );
+            const controls = window.__godsEyeView.styleManager._contextControls;
+            return !controls._contextMode && !controls._contextModeChanging;
           },
           { timeout: 30000 },
         );

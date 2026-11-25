@@ -78,9 +78,7 @@ function mount(t, props = {}, { slots = {} } = {}) {
     );
   const range = () => {
     const label = $('[data-list-range]');
-    return label?.tagName === 'SELECT'
-      ? label.selectedOptions[0]?.textContent
-      : label?.textContent;
+    return label?.textContent;
   };
   return { state, events, $, names, range, card: () => card, scroller };
 }
@@ -154,29 +152,29 @@ test('a page at a time: Next and Previous stop at either end', async (t) => {
     'Fruit 4',
     'Fruit 5',
   ]);
-  assert.equal(range(), '1–5 of 12 · 5/page');
+  assert.equal(range(), '1–5 of 12');
   const previous = $('[data-list-previous]');
   const next = $('[data-list-next]');
   assert.equal(previous.getAttribute('aria-disabled'), 'true');
   previous.click();
   await settle();
-  assert.equal(range(), '1–5 of 12 · 5/page');
+  assert.equal(range(), '1–5 of 12');
   next.click();
   await settle();
   next.click();
   await settle();
-  assert.equal(range(), '11–12 of 12 · 5/page');
+  assert.equal(range(), '11–12 of 12');
   assert.equal(next.getAttribute('aria-disabled'), 'true');
   next.click();
   await settle();
-  assert.equal(range(), '11–12 of 12 · 5/page');
+  assert.equal(range(), '11–12 of 12');
   assert.equal($('nav').getAttribute('aria-label'), 'Pages');
 });
 
 test('the range label sets the page size, keeping the first item shown, and the card remembers it by id', async (t) => {
   const { $, names, range, state } = mount(t, { items: fruit(24) });
   await settle();
-  const label = () => $('[data-list-range]');
+  const label = () => $('[data-list-size]');
   assert.equal(label().tagName, 'SELECT');
   assert.equal(
     label().getAttribute('aria-label'),
@@ -189,15 +187,15 @@ test('the range label sets the page size, keeping the first item shown, and the 
   assert.deepEqual(
     [...label().options].map((option) => [option.value, option.textContent]),
     [
-      ['5', '11–15 of 24 · 5/page'],
-      ['10', '11–20 of 24 · 10/page'],
-      ['15', '1–15 of 24 · 15/page'],
+      ['5', '5'],
+      ['10', '10'],
+      ['15', '15'],
     ],
   );
   label().value = '10';
   label().dispatchEvent(new Event('change'));
   await settle();
-  assert.equal(range(), '11–20 of 24 · 10/page');
+  assert.equal(range(), '11–20 of 24');
   assert.equal(names()[0], 'Fruit 11');
   assert.equal(names().length, 10);
   // Gone and back: the same page and size.
@@ -205,7 +203,7 @@ test('the range label sets the page size, keeping the first item shown, and the 
   await settle();
   state.shown = true;
   await settle();
-  assert.equal(range(), '11–20 of 24 · 10/page');
+  assert.equal(range(), '11–20 of 24');
 });
 
 test('five or fewer: the range is plain text, with no Previous or Next', async (t) => {
@@ -219,7 +217,7 @@ test('five or fewer: the range is plain text, with no Previous or Next', async (
 test('page-size choices remain distinct when sizes cover the same rows', async (t) => {
   const { $ } = mount(t, { items: fruit(8) });
   await settle();
-  const options = [...$('[data-list-range]').options];
+  const options = [...$('[data-list-size]').options];
   assert.deepEqual(
     options.map((option) => option.value),
     ['5', '10', '15'],
@@ -243,7 +241,7 @@ test('sort and filter shape the list; a new query starts at page one; the order 
   state.filter = (item) => item.kind === 'apple';
   state.query = 'apple';
   await settle();
-  assert.equal(range(), '1–5 of 6 · 5/page', 'page one of the matches');
+  assert.equal(range(), '1–5 of 6', 'page one of the matches');
   assert.equal($('h4 strong').textContent, '6');
   assert.deepEqual(
     card().order.map((item) => item.id),
@@ -274,7 +272,7 @@ test('a row selects; the detail shows in the list’s place, Back returns to the
   assert.equal(focused(back), true, 'focus moves to Back');
   back.click();
   await settle();
-  assert.equal(range(), '6–10 of 12 · 5/page');
+  assert.equal(range(), '6–10 of 12');
   assert.equal(focused($('[data-list-key="f7"]')), true, 'and back to the row');
 });
 

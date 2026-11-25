@@ -1,10 +1,11 @@
 /**
  * Sent on the document when a street-level photo opens or the viewer moves on
  * to another image (a click on the map, OPEN, voice, a walk through the
- * photo): Context shows that photo's card when it is on screen or already
- * shows a photo's card (see entityContextBridge.js). Its detail carries the
- * photo identity, position and request id (null for a viewer step),
- * the id being `<providerId>:<imageId>` (layers/streetLevel/photos.js).
+ * photo). The detail carries its identity, position and request id, or
+ * null as the request id for a viewer step. An explicit panel command can
+ * reannounce the accepted photo with `explicit: true`. Data Layers OPEN
+ * sets `revealFromOpen: true` to reveal Context after its photo settles.
+ * The photo id is `<providerId>:<imageId>`.
  */
 export const STREET_LEVEL_PHOTO_EVENT = 'gev:street-level-photo';
 

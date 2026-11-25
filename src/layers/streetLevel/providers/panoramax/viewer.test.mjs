@@ -348,3 +348,17 @@ test('an SD panorama refused for its size is not fetched again as a flat photo',
   await viewer.open('pano');
   assert.equal(loads.filter((l) => l.url === PHOTOS.pano.urls.sd).length, 1);
 });
+
+test('a failed replacement can leave the previous picture on screen', async () => {
+  const { viewer, poses, host } = setup();
+  await viewer.mount(host);
+  const { picture } = parts(host);
+  await viewer.open('flat');
+  const previous = picture.src;
+  assert.equal(picture.hidden, false);
+  assert.equal(poses.at(-1).imageId, 'flat');
+  await assert.rejects(viewer.open('missing'), /no such picture/);
+  assert.equal(picture.hidden, false);
+  assert.equal(picture.src, previous);
+  assert.equal(poses.at(-1).imageId, 'flat');
+});

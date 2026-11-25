@@ -244,5 +244,7 @@ const metaDistance = computed(() => (selected.value ? distance(away(selected.val
     <!-- Every way a station starts (a row, the globe, voice, a pinned tile)
          streams from its broadcaster: said where the stations are, in view. -->
     <p class="radio-stations__privacy">{{ t('Stations play straight from their broadcasters, who see your IP address.') }}</p>
+    <!-- Radio's tuner, transport and volume (RadioFold) move in here. -->
+    <div id="radio-fold-slot"></div>
   </section>
 </template>

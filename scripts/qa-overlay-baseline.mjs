@@ -585,15 +585,6 @@ async function prepareDetection(page, densityPct) {
 }
 
 async function prepareTrackedFlight(page, cockpit) {
-  if (cockpit) {
-    const contacts = await page.evaluate(() => window.__godsEyeView.styleManager.setContextMode(
-      'contacts',
-      { origin: 'user' },
-    ));
-    if (!contacts?.ok) {
-      return `Contacts activation failed (${contacts?.error || 'unknown error'})`;
-    }
-  }
   const tracked = await page.evaluate(() => {
     const entry = window.__godsEyeView.dataManager.layers.get('flights');
     const layer = entry?.module;
@@ -605,23 +596,36 @@ async function prepareTrackedFlight(page, cockpit) {
   });
   if (!tracked.ok) return `Civil tracking unavailable (${tracked.reason})`;
   try {
-    await page.waitForFunction(() => Boolean(window.__godsEyeView.viewer.trackedEntity?.position), { timeout: 10_000 });
+    await page.waitForFunction(async () => {
+      const { followedOf } = await import('/src/data/followed.js');
+      return Boolean(followedOf(window.__godsEyeView.viewer)?.entity?.position);
+    }, { timeout: 10_000 });
   } catch {
     return 'Civil tracking did not create a tracked entity';
   }
   await sleep(2_000);
   if (!cockpit) return null;
-  const entryAvailable = await page.evaluate(() => {
-    const button = document.getElementById('cockpit-entry');
-    if (!button || button.hidden || button.disabled) return false;
-    button.click();
-    return true;
-  });
-  if (!entryAvailable) return 'Cockpit entry control was unavailable for the tracked aircraft';
+  // Cockpit is entered from the tracked aircraft's Context card, which also
+  // starts Contacts on it.
+  await page.evaluate(async (id) => {
+    const [{ applicationPinia }, { useEntityCardStore }] = await Promise.all([
+      import('/src/ui/vueRuntime.js'),
+      import('/src/ui/stores/entityCard.js'),
+    ]);
+    useEntityCardStore(applicationPinia()).select({ layerId: 'flights', id }, { follow: false });
+    window.__godsEyeView.styleManager.setPanelCollapsed('global-context-panel', false, { persist: false, syncShare: false });
+  }, tracked.id);
+  const entry = '#entity-card[data-layer="flights"] [data-entity-cockpit-entry]';
   try {
-    await page.waitForFunction(() => document.body.classList.contains('cockpit-mode'), { timeout: 5_000 });
+    await page.waitForSelector(entry, { visible: true, timeout: 10_000 });
   } catch {
-    return 'Cockpit entry control did not enter cockpit mode';
+    return 'Cockpit entry was unavailable on the tracked aircraft\'s Context card';
+  }
+  await page.click(entry);
+  try {
+    await page.waitForFunction(() => document.body.classList.contains('cockpit-mode'), { timeout: 15_000 });
+  } catch {
+    return 'Cockpit entry did not enter cockpit mode';
   }
   await sleep(2_000);
   return null;

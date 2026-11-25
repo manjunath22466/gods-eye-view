@@ -21,6 +21,7 @@ import {
 } from '../navigationPolicy.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
+import { CONTEXT_NEARBY_EVENT } from '../ui/contextEvents.js';
 import {
   controlCctv,
   controlRadio as runControlRadio,
@@ -31,8 +32,22 @@ import {
   normalizeStackId,
 } from './gevActions.js';
 import { useEntityCardStore } from '../ui/stores/entityCard.js';
+import { useStreetLevelStore } from '../ui/stores/streetLevel.js';
+import { STREET_LEVEL_PHOTO_EVENT } from '../ui/streetLevelEvents.js';
+import {
+  CAMERA_SETTINGS_EVENT,
+  PLACE_PICK_EVENT,
+} from '../ui/contextEvents.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
-import { PLACE_PICK_EVENT } from '../ui/contextEvents.js';
+import {
+  contextListChoice,
+  contextListPresence,
+  contextListsActive,
+  listsOn,
+  resetContextLists,
+  setContextListPresence,
+  shownList,
+} from '../ui/contextLists.js';
 import { MAP_STACKS } from '../mapStackController.js';
 import { KEY_REJECTED_MESSAGE } from '../layers/streetLevel/providers/google/policy.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
@@ -3277,7 +3292,7 @@ test('set_context_mode forwards cancellation authority and reports a stale turn'
   });
   const result = await runner(
     'set_context_mode',
-    { mode: 'contacts' },
+    { mode: 'off' },
     {
       signal: controller.signal,
       isCurrent: () => !controller.signal.aborted,
@@ -3294,41 +3309,33 @@ test('set_context_mode forwards cancellation authority and reports a stale turn'
   assert.equal(result.changing, false);
 });
 
-test('opening Contacts expands Context before activation and returns its settled aircraft window', async () => {
+test('a schema-valid Nearby request opens Context on Nearby and switches no mode', async () => {
+  const modeSchema = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'set_context_mode',
+  ).parameters.properties.mode;
+  assert.ok(
+    modeSchema.enum.includes('nearby'),
+    'Nearby must be advertised to the provider',
+  );
   globalThis.window = globalThis.window || {
     clearTimeout,
     setTimeout,
     requestIdleCallback: null,
   };
   const order = [];
-  const contactsWindow = {
-    centeredOn: 'SWA2120',
-    radiusKm: 250,
-    aircraft: 17,
-    flights: 14,
-    military: 3,
-    vessels: 2,
-  };
   const styleManager = {
-    getContextModeState: () => ({
-      mode: 'flights',
-      active: true,
-      changing: false,
-    }),
+    getContextModeState: () => ({ mode: null, active: false, changing: false }),
     setPanelCollapsed(panelId, collapsed) {
       order.push(`panel:${panelId}:${collapsed ? 'closed' : 'open'}`);
     },
     async setContextMode(mode) {
       order.push(`mode:${mode}`);
-      return {
-        ok: true,
-        action: 'set_context_mode',
-        mode: 'flights',
-        active: true,
-        contactsWindow,
-      };
+      return { ok: true };
     },
   };
+  const events = [];
+  const onNearby = () => events.push('nearby');
+  globalThis.document?.addEventListener?.(CONTEXT_NEARBY_EVENT, onNearby);
   const viewer = {
     clock: { onTick: { addEventListener: () => () => {} } },
     scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
@@ -3339,11 +3346,115 @@ test('opening Contacts expands Context before activation and returns its settled
     styleManager,
     dataManager: { layers: new Map(), getAll: () => [] },
   });
-  const result = await runner('set_context_mode', { mode: 'contacts' });
-  assert.deepEqual(order, ['panel:global-context-panel:open', 'mode:flights']);
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.contactsWindow, contactsWindow);
-  assert.equal(result.contactsWindow.aircraft, 17);
+  for (const mode of ['nearby', 'contacts', 'flights']) {
+    const result = await runner('set_context_mode', { mode });
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, 'nearby');
+  }
+  assert.deepEqual(
+    order,
+    Array(3).fill('panel:global-context-panel:open'),
+    'Context opens; no mode is entered',
+  );
+  assert.deepEqual(events, ['nearby', 'nearby', 'nearby']);
+  await runner('set_panel_open', {
+    panelId: 'global-context-panel',
+    open: true,
+  });
+  assert.equal(
+    events.length,
+    3,
+    'ordinary Open Context preserves the current card or tab',
+  );
+  globalThis.document?.removeEventListener?.(CONTEXT_NEARBY_EVENT, onNearby);
+
+  // In Cockpit, Context is hidden: the request says so instead of claiming
+  // success, and opens nothing.
+  order.length = 0;
+  styleManager.getCockpitState = () => ({ active: true });
+  const inCockpit = await runner('set_context_mode', { mode: 'contacts' });
+  assert.equal(inCockpit.ok, false);
+  assert.match(inCockpit.error, /exit Cockpit first/);
+  assert.deepEqual(order, [], 'nothing opens or switches in Cockpit');
+});
+
+test("a request for the CCTV panel or camera settings shows Context's Camera settings tab", async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const order = [];
+  const styleManager = {
+    setPanelCollapsed(panelId, collapsed) {
+      order.push(`panel:${panelId}:${collapsed ? 'closed' : 'open'}`);
+    },
+  };
+  const events = [];
+  const onSettings = () => events.push('camera-settings');
+  globalThis.document?.addEventListener?.(CAMERA_SETTINGS_EVENT, onSettings);
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: { moveEnd: { addEventListener() {} } },
+  };
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager,
+    dataManager: { layers: new Map(), getAll: () => [] },
+  });
+  // With no camera card there are no camera settings: the request says so
+  // and opens nothing, rather than reporting an open panel with nothing in it.
+  for (const panelId of ['cctv-panel', 'camera settings']) {
+    const result = await runner('set_panel_open', { panelId, open: true });
+    assert.equal(result.ok, false, panelId);
+    assert.match(result.error, /No camera card is open/, panelId);
+  }
+  assert.deepEqual(order, [], 'nothing opens without a camera card');
+  assert.deepEqual(events, []);
+  const cards = useEntityCardStore(applicationPinia());
+  const record = { id: 'cam-a', name: 'Camera A', lat: 30.26, lon: -97.74 };
+  const cameras = {
+    layers: new Map([
+      ['cctv', { module: { getAnalystRecords: () => [record] } }],
+    ]),
+    isEnabled: () => true,
+    getAll: () => [{ id: 'cctv', name: 'CCTV', enabled: true }],
+  };
+  cards.connect({
+    dataManager: () => cameras,
+    flyTo: () => true,
+    follow() {},
+    openPanel() {},
+  });
+  cards.select({ layerId: 'cctv', id: 'cam-a', record, label: 'Camera A' });
+  assert.equal(cards.card?.key, 'cctv:cam-a');
+  for (const panelId of ['cctv-panel', 'camera settings']) {
+    const result = await runner('set_panel_open', { panelId, open: true });
+    assert.equal(result.ok, true, panelId);
+    assert.equal(result.panelId, 'global-context-panel', panelId);
+  }
+  // Context itself, or closing, is not a camera-settings request.
+  await runner('set_panel_open', {
+    panelId: 'global-context-panel',
+    open: true,
+  });
+  await runner('set_panel_open', { panelId: 'cctv-panel', open: false });
+  globalThis.document?.removeEventListener?.(CAMERA_SETTINGS_EVENT, onSettings);
+  assert.deepEqual(events, ['camera-settings', 'camera-settings']);
+  cards.clear();
+  cards.connect(null);
+
+  // In Cockpit, Context is hidden: the request says so and opens nothing.
+  order.length = 0;
+  styleManager.getCockpitState = () => ({ active: true });
+  const inCockpit = await runner('set_panel_open', {
+    panelId: 'cctv-panel',
+    open: true,
+  });
+  assert.equal(inCockpit.ok, false);
+  assert.match(inCockpit.error, /exit Cockpit first/);
+  assert.deepEqual(order, []);
 });
 
 test('set_context_mode pre-dispatch cancellation includes authoritative Context state', async () => {
@@ -4524,7 +4635,7 @@ test('a genuine set_context_mode request DOES claim the visual lane', async () =
     requestIdleCallback: null,
   };
   const probe = contextClaimProbe();
-  await probe.runner('set_context_mode', { mode: 'contacts' });
+  await probe.runner('set_context_mode', { mode: 'off' });
 
   assert.equal(probe.calls.length, 1);
   // The operator's own request must take authority: undefined (the facade
@@ -4771,7 +4882,7 @@ test('a lost cross-mode switch reports every mode field in the shared vocabulary
     styleManager,
     dataManager: { layers: new Map(), getAll: () => [] },
   });
-  const result = await runner('set_context_mode', { mode: 'contacts' });
+  const result = await runner('set_context_mode', { mode: 'off' });
   assert.equal(result.mode, 'off');
   assert.equal(result.modeInternal, null);
   assert.equal(
@@ -4795,6 +4906,7 @@ function spaceMissionsVoiceRig({
   cockpit = false,
   missionsOn = false,
   contextMode = null,
+  panels = true,
 } = {}) {
   globalThis.window = globalThis.window || {
     clearTimeout,
@@ -4835,7 +4947,10 @@ function spaceMissionsVoiceRig({
       active: Boolean(contextMode),
     }),
     getCockpitState: () => ({ active: cockpit }),
-    setPanelCollapsed: (...args) => calls.panels.push(args),
+    // Without panels (a host with no Context panel) nothing can open.
+    ...(panels
+      ? { setPanelCollapsed: (...args) => calls.panels.push(args) }
+      : {}),
     async setContextMode(mode) {
       calls.contextModes.push(mode);
       return { ok: true, mode };
@@ -4853,8 +4968,9 @@ function spaceMissionsVoiceRig({
   return { calls, runner };
 }
 
-test('set_context_mode space-missions switches the layer on and opens its panel', async () => {
+test('set_context_mode space-missions switches the layer on and shows its list in Context', async () => {
   for (const mode of ['space-missions', 'missions', 'space mission']) {
+    resetContextLists();
     const { calls, runner } = spaceMissionsVoiceRig();
     const result = await runner('set_context_mode', { mode });
     assert.equal(result.ok, true, mode);
@@ -4866,11 +4982,20 @@ test('set_context_mode space-missions switches the layer on and opens its panel'
       [],
       'Space Missions is not a Context mode',
     );
+    // Only Space Missions switches: the other layers stay as they are.
     assert.deepEqual(calls.setEnabled, [['rocket-launches', true, 'voice']]);
+    assert.equal(result.listShown, true);
+    assert.equal(
+      result.say,
+      'Space Missions is on; Context shows its Missions list.',
+    );
     assert.deepEqual(calls.panels, [
-      ['space-missions-panel', false, { explicit: true }],
+      ['global-context-panel', false, { explicit: true }],
     ]);
+    assert.equal(contextListsActive.value, true, 'Context shows its list');
+    assert.equal(contextListChoice.value, 'space-missions');
   }
+  resetContextLists();
 });
 
 test('set_context_mode off leaves Space Missions when no Context mode is on', async () => {
@@ -4892,16 +5017,64 @@ test('set_context_mode off still ends Contacts first and leaves Space Missions o
   assert.deepEqual(calls.setEnabled, []);
 });
 
-test('set_context_mode space-missions leaves the panel shut under the Cockpit', async () => {
+test('set_context_mode space-missions leaves Context shut under the Cockpit', async () => {
+  resetContextLists();
   const { calls, runner } = spaceMissionsVoiceRig({ cockpit: true });
   const result = await runner('set_context_mode', { mode: 'space-missions' });
   assert.equal(result.ok, true, 'the layer still switches on');
+  assert.equal(result.listShown, false);
+  // Nothing opens the list once the Cockpit ends, so the reply promises
+  // nothing for later.
+  assert.equal(
+    result.say,
+    'Space Missions is on, but its list cannot open in Context while you are in the cockpit.',
+  );
+  assert.doesNotMatch(result.say, /once you leave|opens in Context/);
   assert.deepEqual(calls.setEnabled, [['rocket-launches', true, 'voice']]);
   assert.deepEqual(
     calls.panels,
     [],
     'no panel write while the Cockpit owns the screen',
   );
+  assert.equal(contextListsActive.value, false);
+});
+
+test('set_context_mode space-missions says so when Context cannot open', async () => {
+  resetContextLists();
+  const { calls, runner } = spaceMissionsVoiceRig({ panels: false });
+  const result = await runner('set_context_mode', { mode: 'space-missions' });
+  assert.equal(result.ok, true, 'the layer did switch on');
+  assert.deepEqual(calls.setEnabled, [['rocket-launches', true, 'voice']]);
+  assert.equal(result.listShown, false);
+  assert.equal(
+    result.say,
+    'Space Missions is on, but Context could not be opened here.',
+  );
+  resetContextLists();
+});
+
+test('set_context_mode nearby reports a Context panel that cannot open', async () => {
+  const nearby = [];
+  const onNearby = () => nearby.push(true);
+  globalThis.document?.addEventListener?.(CONTEXT_NEARBY_EVENT, onNearby);
+  try {
+    const { runner } = spaceMissionsVoiceRig({ panels: false });
+    const refused = await runner('set_context_mode', { mode: 'nearby' });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.mode, 'nearby');
+    assert.equal(refused.say, 'There is no Context panel to open here.');
+    assert.deepEqual(nearby, [], 'Nearby is not asked to show');
+
+    const { calls, runner: able } = spaceMissionsVoiceRig();
+    const shown = await able('set_context_mode', { mode: 'nearby' });
+    assert.equal(shown.ok, true);
+    assert.equal(shown.say, 'Context shows what is nearby.');
+    assert.deepEqual(calls.panels, [
+      ['global-context-panel', false, { explicit: true }],
+    ]);
+  } finally {
+    globalThis.document?.removeEventListener?.(CONTEXT_NEARBY_EVENT, onNearby);
+  }
 });
 
 test('a Space Missions start that fails opens no panel and says so', async () => {
@@ -4958,7 +5131,7 @@ test('an absent secondary mode stays absent instead of claiming to be off', asyn
     styleManager,
     dataManager: { layers: new Map(), getAll: () => [] },
   });
-  const result = await runner('set_context_mode', { mode: 'contacts' });
+  const result = await runner('set_context_mode', { mode: 'off' });
   assert.equal(result.mode, 'contacts');
   assert.equal(
     result.entering,
@@ -8163,7 +8336,10 @@ test('set_panel_open accepts the Authoring name for the scene panel', async () =
   assert.deepEqual(calls.at(-1), ['scene-panel', false, { explicit: true }]);
 });
 
-test('set_panel_open reaches the Space Missions panel by its id or name', async () => {
+/** A runner whose Space Missions layer is on (or starting) as `state` says. */
+function listPanelRig(state = {}) {
+  resetContextLists();
+  if (state.missionsOn) setContextListPresence('space-missions', { count: 0 });
   const calls = [];
   const runner = createGevActionRunner({
     viewer: {
@@ -8175,92 +8351,294 @@ test('set_panel_open reaches the Space Missions panel by its id or name', async 
       },
     },
     styleManager: {
-      setPanelCollapsed: (...args) => calls.push(args),
+      ...(state.noPanels
+        ? {}
+        : { setPanelCollapsed: (...args) => calls.push(args) }),
+      revealPanel: (id) => calls.push(['reveal', id]),
+      getCockpitState: () => ({ active: Boolean(state.cockpit) }),
+      setContextMode() {},
     },
     dataManager: {
-      layers: new Map(),
-      isEnabled: () => false,
+      layers: new Map([['rocket-launches', { module: {} }]]),
+      isEnabled: (id) => id === 'rocket-launches' && Boolean(state.missionsOn),
+      isEffectivelyEnabled: (id) =>
+        id === 'rocket-launches' && Boolean(state.missionsOn || state.starting),
       getAll: () => [],
+      async setEnabled(id, enabled, options) {
+        calls.push(['setEnabled', id, enabled, options?.origin]);
+        if (state.settlement) {
+          const succeeded = await state.settlement;
+          state.starting = false;
+          if (!succeeded) return false;
+        }
+        if (id === 'rocket-launches') {
+          state.missionsOn = enabled;
+          setContextListPresence(
+            'space-missions',
+            enabled ? { count: 0 } : null,
+          );
+        }
+        return true;
+      },
     },
   });
-  for (const panel of ['space-missions-panel', 'space missions panel']) {
+  return { calls, runner, state };
+}
+
+test('closing a retired list panel closes nothing, as for the other retired panels', async () => {
+  // "Close the weather panel" with a card open in Context must not fold all
+  // of Context and call that done: the list is part of Context now.
+  const { calls, runner } = listPanelRig({ missionsOn: true });
+  for (const panel of [
+    'space-missions-panel',
+    'space missions panel',
+    'weather-panel',
+    'recent-imagery-panel',
+  ]) {
     const result = await runner('set_panel_open', {
       panelId: panel,
       open: false,
     });
-    assert.equal(result.panelId, 'space-missions-panel', panel);
+    assert.equal(result.ok, false, panel);
+    assert.equal(result.applied, false, panel);
+    assert.match(result.error, /nothing was closed/, panel);
   }
-  assert.deepEqual(calls.at(-1), [
-    'space-missions-panel',
-    true,
-    { explicit: true },
-  ]);
+  assert.deepEqual(calls, [], 'Context is left as it was');
+  resetContextLists();
 });
 
-test('set_panel_open opens the Space Missions panel only while its layer is on', async () => {
-  const calls = [];
-  let missionsOn = false;
-  let starting = false;
-  let cockpit = false;
-  const runner = createGevActionRunner({
-    viewer: {
-      clock: { onTick: { addEventListener: () => () => {} } },
-      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
-      camera: {
-        moveEnd: { addEventListener() {} },
-        positionWC: Cesium.Cartesian3.fromDegrees(-97.7, 30.2, 1000),
-      },
-    },
-    styleManager: {
-      setPanelCollapsed: (...args) => calls.push(args),
-      revealPanel: (id) => calls.push(['reveal', id]),
-      getCockpitState: () => ({ active: cockpit }),
-    },
-    dataManager: {
-      layers: new Map(),
-      isEnabled: (id) => id === 'rocket-launches' && missionsOn,
-      isEffectivelyEnabled: (id) =>
-        id === 'rocket-launches' && (missionsOn || starting),
-      getAll: () => [],
-    },
-  });
-  const refused = await runner('set_panel_open', {
-    panelId: 'space-missions-panel',
-    open: true,
-  });
-  assert.equal(refused.ok, false);
-  assert.equal(refused.applied, false);
-  assert.match(refused.say, /Turn on Space Missions first/);
-  assert.deepEqual(calls, [], 'no right-rail panel is folded for nothing');
-  starting = true;
-  const early = await runner('set_panel_open', {
-    panelId: 'space-missions-panel',
-    open: true,
-  });
-  assert.equal(early.ok, false);
-  assert.match(early.say, /still starting/);
-  assert.deepEqual(calls, []);
-  missionsOn = true;
+test('set_panel_open for the Space Missions panel turns the layer on if needed and shows its list in Context', async () => {
+  // Off: voice turns Space Missions on (only that layer switches), then
+  // shows Context's Missions list and says it turned the layer on.
+  const { calls, runner, state } = listPanelRig();
   const opened = await runner('set_panel_open', {
     panelId: 'space-missions-panel',
     open: true,
   });
   assert.equal(opened.ok, true);
-  // On a phone the Missions sheet shows too.
+  assert.equal(opened.panelId, 'global-context-panel');
+  assert.equal(opened.list, 'space-missions');
+  assert.equal(opened.layerTurnedOn, true);
+  assert.equal(opened.say, 'Space Missions is on; Context shows its list.');
+  assert.equal(state.missionsOn, true);
   assert.deepEqual(calls, [
-    ['space-missions-panel', false, { explicit: true }],
-    ['reveal', 'space-missions-panel'],
+    ['setEnabled', 'rocket-launches', true, 'voice'],
+    ['global-context-panel', false, { explicit: true }],
+    ['reveal', 'global-context-panel'],
   ]);
-  // The Cockpit owns the screen: nothing opens and no preference is written.
-  calls.length = 0;
-  cockpit = true;
-  const underCockpit = await runner('set_panel_open', {
+  assert.equal(contextListsActive.value, true);
+  assert.equal(contextListChoice.value, 'space-missions');
+
+  // Already on: nothing is switched, and the actual list shows.
+  const again = listPanelRig({ missionsOn: true });
+  const result = await again.runner('set_panel_open', {
+    panelId: 'missions panel',
+    open: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.say, 'Context shows the Space Missions list.');
+  assert.deepEqual(again.calls, [
+    ['global-context-panel', false, { explicit: true }],
+    ['reveal', 'global-context-panel'],
+  ]);
+  assert.equal(
+    shownList(listsOn(contextListPresence), contextListChoice.value),
+    'space-missions',
+  );
+
+  // The Cockpit owns the screen: nothing switches or opens, and the reply
+  // says the layer is still off without promising the list for later.
+  const underCockpit = listPanelRig({ cockpit: true });
+  const refused = await underCockpit.runner('set_panel_open', {
     panelId: 'space-missions-panel',
     open: true,
   });
-  assert.equal(underCockpit.ok, false);
-  assert.match(underCockpit.say, /leave the cockpit/);
+  assert.equal(refused.ok, false);
+  assert.equal(
+    refused.say,
+    'Space Missions is still off: its list cannot open in Context while you are in the cockpit.',
+  );
+  assert.deepEqual(underCockpit.calls, []);
+  assert.equal(underCockpit.state.missionsOn, undefined);
+  assert.equal(contextListsActive.value, false);
+  resetContextLists();
+});
+
+test('set_panel_open for the Space Missions panel under the Cockpit says it is on when it is', async () => {
+  const { calls, runner } = listPanelRig({ cockpit: true, missionsOn: true });
+  const refused = await runner('set_panel_open', {
+    panelId: 'space-missions-panel',
+    open: true,
+  });
+  assert.equal(refused.ok, false);
+  assert.equal(
+    refused.say,
+    'Space Missions is on, but its list cannot open in Context while you are in the cockpit.',
+  );
+  assert.doesNotMatch(refused.say, /once you leave|opens in Context/);
   assert.deepEqual(calls, []);
+  resetContextLists();
+});
+
+test('set_panel_open for the Weather panel under the Cockpit promises nothing for later', async () => {
+  const { calls, runner } = listPanelRig({ cockpit: true });
+  setContextListPresence('weather', { count: 3 });
+  const refused = await runner('set_panel_open', {
+    panelId: 'weather-panel',
+    open: true,
+  });
+  assert.equal(refused.ok, false);
+  assert.equal(
+    refused.say,
+    'The Weather list cannot open in Context while you are in the cockpit.',
+  );
+  assert.deepEqual(calls, []);
+  resetContextLists();
+});
+
+test('set_panel_open for the Space Missions panel says the layer is on when Context cannot open', async () => {
+  const { calls, runner, state } = listPanelRig({ noPanels: true });
+  const result = await runner('set_panel_open', {
+    panelId: 'space-missions-panel',
+    open: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(state.missionsOn, true);
+  assert.equal(
+    result.say,
+    'Space Missions is on, but Context could not be opened here.',
+  );
+  assert.deepEqual(calls, [['setEnabled', 'rocket-launches', true, 'voice']]);
+  resetContextLists();
+});
+
+test('Missions aliases await activation before confirming or changing the visible list', async () => {
+  for (const [action, args] of [
+    ['set_panel_open', { panelId: 'space-missions-panel', open: true }],
+    ['set_context_mode', { mode: 'missions' }],
+  ]) {
+    for (const succeeded of [true, false]) {
+      let settle;
+      const settlement = new Promise((resolve) => {
+        settle = resolve;
+      });
+      const { runner, calls } = listPanelRig({ starting: true, settlement });
+      setContextListPresence('weather', { count: 3 });
+      contextListChoice.value = 'weather';
+      contextListsActive.value = true;
+      let finished = false;
+      const pending = runner(action, args).then((result) => {
+        finished = true;
+        return result;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(finished, false, action);
+      assert.deepEqual(calls, [
+        ['setEnabled', 'rocket-launches', true, 'voice'],
+      ]);
+      assert.equal(
+        shownList(listsOn(contextListPresence), contextListChoice.value),
+        'weather',
+      );
+      settle(succeeded);
+      const result = await pending;
+      assert.equal(result.ok, succeeded, action);
+      assert.equal(contextListsActive.value, true);
+      assert.equal(
+        shownList(listsOn(contextListPresence), contextListChoice.value),
+        succeeded ? 'space-missions' : 'weather',
+      );
+      if (!succeeded)
+        assert.deepEqual(calls, [
+          ['setEnabled', 'rocket-launches', true, 'voice'],
+        ]);
+      runner.dispose();
+      resetContextLists();
+    }
+  }
+});
+
+test('Missions aliases leave Context alone after a newer turn or Cockpit takes over during activation', async () => {
+  for (const [action, args] of [
+    ['set_panel_open', { panelId: 'missions panel', open: true }],
+    ['set_context_mode', { mode: 'space-missions' }],
+  ]) {
+    for (const takeover of ['newer turn', 'cockpit']) {
+      let settle;
+      const settlement = new Promise((resolve) => {
+        settle = resolve;
+      });
+      const { runner, calls, state } = listPanelRig({
+        starting: true,
+        settlement,
+      });
+      setContextListPresence('weather', { count: 3 });
+      contextListChoice.value = 'weather';
+      contextListsActive.value = true;
+      let current = true;
+      const pending = runner(action, args, { isCurrent: () => current });
+      await new Promise((resolve) => setImmediate(resolve));
+      if (takeover === 'newer turn') current = false;
+      else state.cockpit = true;
+      settle(true);
+      const result = await pending;
+      if (action === 'set_panel_open' || takeover === 'newer turn')
+        assert.equal(result.ok, false);
+      if (takeover === 'cockpit')
+        assert.equal(
+          result.say,
+          'Space Missions is on, but its list cannot open in Context while you are in the cockpit.',
+          action,
+        );
+      assert.deepEqual(calls, [
+        ['setEnabled', 'rocket-launches', true, 'voice'],
+      ]);
+      assert.equal(
+        shownList(listsOn(contextListPresence), contextListChoice.value),
+        'weather',
+      );
+      runner.dispose();
+      resetContextLists();
+    }
+  }
+});
+
+test('set_panel_open for the Weather and Recent Imagery panels opens their list in Context while their layer is on', async () => {
+  for (const [panelId, list, words] of [
+    ['weather-panel', 'weather', ['weather', 'weather panel']],
+    [
+      'recent-imagery-panel',
+      'recent-imagery',
+      ['recent imagery', 'imagery panel'],
+    ],
+  ]) {
+    for (const panel of [panelId, ...words]) {
+      const { calls, runner } = listPanelRig();
+      const refused = await runner('set_panel_open', {
+        panelId: panel,
+        open: true,
+      });
+      assert.equal(refused.ok, false, panel);
+      assert.match(refused.say, /Turn (one|it) on first/);
+      assert.deepEqual(calls, [], 'no layer is switched on for it');
+      setContextListPresence(list, { count: 3 });
+      const opened = await runner('set_panel_open', {
+        panelId: panel,
+        open: true,
+      });
+      assert.equal(opened.ok, true, panel);
+      assert.equal(opened.panelId, 'global-context-panel');
+      assert.equal(opened.requestedPanelId, panelId);
+      assert.equal(opened.list, list);
+      assert.deepEqual(calls, [
+        ['global-context-panel', false, { explicit: true }],
+        ['reveal', 'global-context-panel'],
+      ]);
+      assert.equal(contextListsActive.value, true);
+      assert.equal(contextListChoice.value, list);
+    }
+  }
+  resetContextLists();
 });
 
 test('set_panel_open reaches the Utilities panel by its name, Draw or Import', async () => {
@@ -8896,7 +9274,7 @@ test('show_street_level tells missing imagery from a failing source', async () =
   assert.equal(broken.error, 'Mapillary graph HTTP 500');
 });
 
-test('show_street_level shows every photo it opens, also over a panel the user had closed', async () => {
+test('show_street_level shows every photo it opens, also over a Context panel the user had closed', async () => {
   globalThis.window = globalThis.window || {
     clearTimeout,
     setTimeout,
@@ -8916,10 +9294,10 @@ test('show_street_level shows every photo it opens, also over a panel the user h
     fly: false,
   });
   assert.deepEqual(harness.revealed, [
-    ['collapse', 'street-level-panel', false],
-    ['reveal', 'street-level-panel', { keepContextSheet: true }],
-    ['collapse', 'street-level-panel', false],
-    ['reveal', 'street-level-panel', { keepContextSheet: true }],
+    ['collapse', 'global-context-panel', false],
+    ['reveal', 'global-context-panel', undefined],
+    ['collapse', 'global-context-panel', false],
+    ['reveal', 'global-context-panel', undefined],
   ]);
   const missing = createStreetLevelHarness({ enabled: true, nearest: null });
   await missing.runner('show_street_level', {
@@ -9065,6 +9443,118 @@ test("voice focus is the open camera card's Fly to only while the view is free",
   assert.deepEqual(flown, ['cctv:cam-a'], 'Cockpit also retains the view');
 });
 
+test('the retired Radio panel opens Context on its station list', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  const styleManager = {
+    getCockpitState: () => ({ active: false }),
+    setPanelCollapsed(panelId, collapsed) {
+      opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+    },
+    revealPanel() {},
+  };
+  const events = [];
+  const onNearby = () => events.push('nearby');
+  globalThis.document?.addEventListener?.(CONTEXT_NEARBY_EVENT, onNearby);
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager,
+    dataManager: {
+      layers: new Map(),
+      getAll: () => [],
+      isEnabled: (id) => id === 'radio',
+    },
+  });
+  const radio = await runner('set_panel_open', {
+    panelId: 'radio-panel',
+    open: true,
+  });
+  assert.equal(radio.ok, true);
+  assert.equal(radio.panelId, 'global-context-panel');
+  // The CCTV panel's name shows a camera card's settings; with no camera
+  // card it opens nothing (see the Camera settings test).
+  const cameras = await runner('set_panel_open', {
+    panelId: 'cctv-panel',
+    open: true,
+  });
+  assert.equal(cameras.ok, false);
+  globalThis.document?.removeEventListener?.(CONTEXT_NEARBY_EVENT, onNearby);
+  assert.deepEqual(opened, ['global-context-panel:open']);
+  assert.deepEqual(events, ['nearby'], 'only Radio asks for the list');
+
+  // In Cockpit, Context is hidden: Radio's and Street Level's names say so,
+  // as contacts does, and open nothing.
+  opened.length = 0;
+  styleManager.getCockpitState = () => ({ active: true });
+  for (const panelId of ['radio-panel', 'street-level-panel']) {
+    const refused = await runner('set_panel_open', { panelId, open: true });
+    assert.equal(refused.ok, false, panelId);
+    assert.match(refused.error, /exit Cockpit first/);
+  }
+  assert.deepEqual(opened, []);
+});
+
+test('closing a retired panel leaves Context open; Radio off is said, not shown empty', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  let radioOn = false;
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager: {
+      getCockpitState: () => ({ active: false }),
+      setPanelCollapsed(panelId, collapsed) {
+        opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+      },
+      revealPanel() {},
+    },
+    dataManager: {
+      layers: new Map(),
+      getAll: () => [],
+      isEnabled: (id) => id === 'radio' && radioOn,
+    },
+  });
+  // "Close the radio panel" (or the camera or street-level one) closes
+  // nothing: Context holds everything else too.
+  for (const panelId of ['radio-panel', 'cctv-panel', 'street-level-panel']) {
+    const result = await runner('set_panel_open', { panelId, open: false });
+    assert.equal(result.ok, false, panelId);
+    assert.equal(result.applied, false, panelId);
+    assert.match(result.error, /nothing was closed/);
+  }
+  assert.deepEqual(opened, []);
+  // "Open radio" with Radio off says so and opens nothing.
+  const off = await runner('set_panel_open', {
+    panelId: 'radio-panel',
+    open: true,
+  });
+  assert.equal(off.ok, false);
+  assert.match(off.error, /Radio is off/);
+  assert.deepEqual(opened, []);
+  radioOn = true;
+  const on = await runner('set_panel_open', {
+    panelId: 'radio-panel',
+    open: true,
+  });
+  assert.equal(on.ok, true);
+  assert.deepEqual(opened, ['global-context-panel:open']);
+});
+
 test('voice volume reaches a station kept playing with Radio off', async () => {
   const volumes = [];
   let enableCalls = 0;
@@ -9153,6 +9643,160 @@ test('voice pause reaches a station kept playing with Radio off; volume reaches 
   assert.equal(volume.ok, true);
   assert.deepEqual(volumes, [0.3]);
   assert.equal(enableCalls, 0, 'Radio stays off');
+});
+
+/**
+ * A data manager whose Street Level layer reports `street` and, as the
+ * layer's own test of a settled photo, `settled` (by default the viewer has
+ * accepted photo mapillary:1).
+ */
+const acceptedStreetLevel = (
+  street = {},
+  settled = 'mapillary:1',
+  opening = false,
+) => ({
+  layers: new Map([
+    [
+      'street-level',
+      {
+        module: {
+          getUIState: () => ({
+            street: {
+              open: true,
+              loading: false,
+              error: null,
+              providerId: 'mapillary',
+              imageId: '1',
+              ...street,
+            },
+          }),
+          settledPhotoId: () => settled,
+          photoOpening: () => opening,
+        },
+      },
+    ],
+  ]),
+  getAll: () => [],
+});
+
+test("the retired Street Level panel opens the open photo's card, or its Data Layers row", async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  const runnerWith = (dataManager) =>
+    createGevActionRunner({
+      viewer: {
+        clock: { onTick: { addEventListener: () => () => {} } },
+        scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+        camera: { moveEnd: { addEventListener() {} } },
+      },
+      styleManager: {
+        getCockpitState: () => ({ active: false }),
+        setPanelCollapsed(panelId, collapsed) {
+          opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+        },
+        revealPanel() {},
+      },
+      dataManager,
+    });
+  const runner = runnerWith({ layers: new Map(), getAll: () => [] });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  try {
+    streetLevel.view = null;
+    const none = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    assert.equal(none.action, 'show_data_layers_menu');
+    assert.deepEqual(
+      opened,
+      ['data-panel:open'],
+      'Data Layers opens, not Context, without a photo',
+    );
+    opened.length = 0;
+
+    // The shape the presentation publishes (streetLevelPresentation.js).
+    streetLevel.view = {
+      viewer: {
+        open: true,
+        photo: { id: 'mapillary:1', lat: 30.26, lon: -97.74 },
+      },
+    };
+    const photos = [];
+    const onPhoto = (event) => photos.push(event.detail);
+    globalThis.document?.addEventListener?.(STREET_LEVEL_PHOTO_EVENT, onPhoto);
+    // The viewer has accepted that photo.
+    const shown = await runnerWith(acceptedStreetLevel())('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    globalThis.document?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_EVENT,
+      onPhoto,
+    );
+    assert.equal(shown.ok, true);
+    assert.equal(shown.panelId, 'global-context-panel');
+    assert.deepEqual(opened, ['global-context-panel:open']);
+    assert.deepEqual(photos, [
+      {
+        layerId: 'street-level',
+        id: 'mapillary:1',
+        lat: 30.26,
+        lon: -97.74,
+        explicit: true,
+      },
+    ]);
+  } finally {
+    streetLevel.view = saved;
+  }
+});
+
+test('the retired Street Level panel reports a Context panel that cannot open', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    // No setPanelCollapsed: this host has no Context panel to open.
+    styleManager: { getCockpitState: () => ({ active: false }) },
+    dataManager: acceptedStreetLevel(),
+  });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  const photos = [];
+  const onPhoto = (event) => photos.push(event.detail);
+  globalThis.document?.addEventListener?.(STREET_LEVEL_PHOTO_EVENT, onPhoto);
+  try {
+    streetLevel.view = {
+      viewer: {
+        open: true,
+        photo: { id: 'mapillary:1', lat: 30.26, lon: -97.74 },
+      },
+    };
+    const result = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.say, 'There is no panel to open here.');
+    assert.deepEqual(photos, [], 'no card is asked for');
+  } finally {
+    globalThis.document?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_EVENT,
+      onPhoto,
+    );
+    streetLevel.view = saved;
+  }
 });
 
 test('"go to Austin" is a place pick; a fly-to a later tool waits on is not', async () => {
@@ -9594,5 +10238,149 @@ test('show_street_level lets go of the card a photo brought up when the camera i
   } finally {
     cards.card = null;
     globalThis.document = saved;
+  }
+});
+
+test('the retired Street Level panel opens a shown photo while an unrelated lookup runs or left an error', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  // An empty lookup elsewhere is running and reported its own error; the
+  // accepted photo stays shown.
+  const dataManager = acceptedStreetLevel({
+    loading: true,
+    error: 'No street-level imagery within 50 m of that point',
+  });
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager: {
+      getCockpitState: () => ({ active: false }),
+      setPanelCollapsed(panelId, collapsed) {
+        opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+      },
+      revealPanel() {},
+    },
+    dataManager,
+  });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  try {
+    streetLevel.view = {
+      viewer: {
+        open: true,
+        photo: { id: 'mapillary:1', lat: 30.26, lon: -97.74 },
+      },
+    };
+    const shown = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    assert.equal(shown.panelId, 'global-context-panel');
+    assert.deepEqual(opened, ['global-context-panel:open']);
+  } finally {
+    streetLevel.view = saved;
+  }
+});
+
+/** Run the retired panel action with `dataManager` and a store photo. */
+async function retiredStreetLevelPanel(dataManager, storePhoto) {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const opened = [];
+  const photos = [];
+  const onPhoto = (event) => photos.push(event.detail);
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} } },
+    },
+    styleManager: {
+      getCockpitState: () => ({ active: false }),
+      setPanelCollapsed(panelId, collapsed) {
+        opened.push(`${panelId}:${collapsed ? 'closed' : 'open'}`);
+      },
+      revealPanel() {},
+    },
+    dataManager,
+  });
+  const streetLevel = useStreetLevelStore(applicationPinia());
+  const saved = streetLevel.view;
+  // A page with no Data Layers row to find; photo events still dispatch.
+  const savedCss = globalThis.CSS;
+  const savedDocument = globalThis.document;
+  globalThis.CSS = { escape: (value) => String(value) };
+  globalThis.document = Object.assign(new EventTarget(), {
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    body: { classList: { contains: () => false } },
+  });
+  globalThis.document?.addEventListener?.(STREET_LEVEL_PHOTO_EVENT, onPhoto);
+  try {
+    streetLevel.view = {
+      viewer: { open: true, photo: storePhoto },
+    };
+    const result = await runner('set_panel_open', {
+      panelId: 'street-level-panel',
+      open: true,
+    });
+    return { result, opened, photos };
+  } finally {
+    globalThis.document?.removeEventListener?.(
+      STREET_LEVEL_PHOTO_EVENT,
+      onPhoto,
+    );
+    streetLevel.view = saved;
+    globalThis.CSS = savedCss;
+    globalThis.document = savedDocument;
+  }
+}
+
+test('the retired Street Level panel opens Data Layers, with a reason, for a photo the layer has not accepted', async () => {
+  const photo = { id: 'mapillary:1', lat: 30.26, lon: -97.74 };
+  const empty = { layers: new Map(), getAll: () => [] };
+  for (const [name, dataManager, reason] of [
+    [
+      'still loading',
+      acceptedStreetLevel({ loading: true }, null, true),
+      /still opening/,
+    ],
+    [
+      'rejected by its provider',
+      acceptedStreetLevel({ error: 'Provider unavailable' }, null),
+      /did not open/,
+    ],
+    [
+      'another id accepted',
+      acceptedStreetLevel({}, 'mapillary:2'),
+      /did not open/,
+    ],
+    [
+      'viewer closed',
+      acceptedStreetLevel({ open: false }, null),
+      /did not open/,
+    ],
+    ['no layer, a stored photo', empty, /did not open/],
+  ]) {
+    const { result, opened, photos } = await retiredStreetLevelPanel(
+      dataManager,
+      photo,
+    );
+    assert.equal(result.action, 'show_data_layers_menu', name);
+    assert.match(result.reason, reason, name);
+    assert.match(result.say, /Data Layers/, name);
+    assert.deepEqual(photos, [], `${name}: nothing announced`);
+    assert.ok(!opened.includes('global-context-panel:open'), name);
   }
 });

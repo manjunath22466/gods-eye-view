@@ -278,15 +278,20 @@ reserved: a decoder ignores that entry, as for collapsed 0.
 | 0   | `control-panel`        | `c`             | collapsed, unpinned |
 | 1   | `location-bar`         | `l`             | collapsed, unpinned |
 | 2   | `data-panel`           | `d`             | collapsed           |
-| 3   | `cctv-panel`           | `v`             | collapsed           |
-| 4   | `recent-imagery-panel` | `i`             | expanded            |
-| 5   | `street-level-panel`   | `t`             | collapsed           |
-| 6   | `radio-panel`          | `r`             | collapsed           |
+| 3   | `cctv-panel`           | `v`             | retired, ignored    |
+| 4   | `recent-imagery-panel` | `i`             | retired, ignored    |
+| 5   | `street-level-panel`   | `t`             | retired, ignored    |
+| 6   | `radio-panel`          | `r`             | retired, ignored    |
 | 7   | `scene-panel`          | `s`             | collapsed           |
 | 8   | `global-context-panel` | `g`             | collapsed           |
 | 9   | `pp-toggles`           | `p`             | collapsed           |
 | 10  | `param-slider-panel`   | `m`             | expanded            |
-| 11  | `space-missions-panel` | `n`             | collapsed           |
+| 11  | `space-missions-panel` | `n`             | retired, ignored    |
+
+A retired panel keeps its number and token so old links decode, but the app
+no longer writes its state and ignores it on restore: its content is in
+Context now (Radio's station list and tuner, a camera's or photo's card, the
+Recent Imagery and Space Missions list tabs).
 
 ### Style parameters (field 27)
 

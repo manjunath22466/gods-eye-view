@@ -616,10 +616,10 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
             }
             const timedOut =
               error?.name === 'AbortError' || error?.name === 'TimeoutError';
-            // GET /api/cctv/health serializes `message`, and the CCTV panel
-            // renders it as a status label, so the raw error would leave the
-            // server by a different door than the sanitized body below and
-            // land on screen.
+            // GET /api/cctv/health serializes `message`, and the browser
+            // folds it into the active camera's meta line, so the raw error
+            // would leave the server by a different door than the sanitized
+            // body below and land on screen.
             //
             // The log line drops the text too, unlike the catch at the bottom
             // of this file: a media-fetch failure names the camera's upstream

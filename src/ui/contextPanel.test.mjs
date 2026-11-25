@@ -1,6 +1,6 @@
 // src/ui/contextPanel.test.mjs — the Context panel: what is picked, led by
-// its hero, or situational awareness of the layers that are on, and the
-// Contacts mode switch ContextControls presents, over happy-dom.
+// its hero, or situational awareness of the layers that are on, over
+// happy-dom.
 import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,6 @@ import ContextView from './views/ContextView.vue';
 import EntityPreview from './views/panels/EntityPreview.vue';
 import { LayerPanel } from './layerPanel.js';
 import { useLayerFinderStore } from './stores/layerFinder.js';
-import CctvPanel from './views/panels/CctvPanel.vue';
 import {
   createContextCardOpener,
   useEntityCardStore,
@@ -49,12 +48,9 @@ import {
 import { loadFleetModelSet, resetFleetModelSet } from '../data/fleetModels.js';
 import fs from 'node:fs';
 import { HERO_AUTOPLAY_MS } from './entityHeroViews.js';
-import { useContextStore } from './stores/context.js';
 import { useBhoteKoshiPanelStore } from './stores/bhoteKoshiPanel.js';
 import { useDisplayStore } from './stores/display.js';
 import { useCockpitStore } from './stores/cockpit.js';
-import { activeTab, setEnabledLayers } from './contextLayerTabs.js';
-import { ContextControls } from './contextControls.js';
 import { createControls as createWildlifeControls } from '../layers/wildlifeSightings/controls.js';
 import { firePerimeterSnapshot } from '../layers/perimeters/records.js';
 import { setLocale } from '../i18n/index.js';
@@ -306,166 +302,26 @@ const flightsOn = (records, stats = {}) => ({
   stats: { count: records.length, lastUpdate: Date.now(), ...stats },
 });
 
-// The Contacts mode switch, rendered from what ContextControls presents.
-function contactsFixture(t) {
-  document.body.replaceChildren();
-  const host = document.body.appendChild(document.createElement('div'));
-  const pinia = createPinia();
-  const app = createApp(ContextView).use(pinia);
-  app.mount(host);
-  const $ = (id) => document.getElementById(id);
-  const store = useContextStore(pinia);
-  const controls = new ContextControls({
-    elements: {
-      _globalContextFlightsBtn: $('global-context-flights-btn'),
-      _installationsSearchBtn: $('installations-search-btn'),
-    },
-    installations: {},
-    actions: {
-      getCockpit: () => null,
-      claimVisualAuthority() {},
-      showToast() {},
-      setClearBusy() {},
-      syncDetection() {},
-      scheduleLayout() {},
-      refreshRadio() {},
-      setPanelCollapsed() {},
-    },
-    publish: (view) => store.publish(view),
-  });
-  t.after(() => {
-    controls.stop();
-    controls.disconnect();
-    app.unmount();
-  });
-  const sync = async () => {
-    controls._syncContextModeButtons();
-    await nextTick();
-  };
-  return { $, controls, pinia, sync };
-}
-
-test('before ContextControls renders, the switch shows its initial markup', (t) => {
-  const { $ } = contactsFixture(t);
-  const panel = $('global-context-panel');
-  assert.equal(
-    panel.className,
-    'ui-panel panel-collapsible collapsed ui-panel--collapsed',
-  );
-  assert.equal(panel.hasAttribute('data-context-mode'), false);
-  const tab = $('global-context-flights-btn');
-  assert.equal(
-    tab.className,
-    'ui-button ui-focus ui-button--ghost ui-button--accent context-mode-button',
-  );
-  assert.equal(tab.getAttribute('aria-selected'), 'false');
-  assert.equal(tab.getAttribute('tabindex'), '0');
-  assert.equal(tab.hasAttribute('aria-busy'), false);
-  assert.equal($('context-mode-standby').hidden, false);
-  assert.equal($('context-flights-view').hidden, true);
-  assert.equal($('global-context-missions-btn'), null);
-  assert.equal($('context-missions-view'), null);
-  assert.equal($('installations-search-btn').hasAttribute('aria-busy'), false);
-});
-
-test('a Contacts transition keeps the tab focusable until it settles', async (t) => {
-  const { $, controls, sync } = contactsFixture(t);
-  const contacts = $('global-context-flights-btn');
-  contacts.focus();
-  controls._contextModeChanging = true;
-  await sync();
-  assert.equal(document.activeElement, contacts);
-  assert.equal(contacts.disabled, false);
-  assert.equal(contacts.getAttribute('tabindex'), '0');
-  assert.equal(contacts.getAttribute('aria-disabled'), 'true');
-  assert.equal(contacts.getAttribute('aria-busy'), 'true');
-
-  controls._contextModeChanging = false;
-  controls._contextMode = 'flights';
-  await sync();
-  assert.equal(document.activeElement, contacts);
-  assert.equal(contacts.disabled, false);
-  assert.equal(contacts.getAttribute('aria-disabled'), 'false');
-  assert.equal(contacts.getAttribute('aria-busy'), 'false');
-  assert.equal(contacts.classList.contains('active'), true);
-  assert.equal(contacts.getAttribute('aria-selected'), 'true');
-  assert.equal($('context-mode-standby').hidden, true);
-  assert.equal($('context-flights-view').hidden, false);
-});
-
-test('the panel carries the mode beside the classes its chrome writes', async (t) => {
-  const { $, controls, sync } = contactsFixture(t);
-  const panel = $('global-context-panel');
-  panel.classList.remove('collapsed');
-  controls._contextMode = 'flights';
-  await sync();
-  // Without an owner the button, and the kit class, keep the start state.
-  assert.equal(
-    panel.className,
-    'ui-panel panel-collapsible ui-panel--collapsed context-enabled',
-  );
-  assert.equal(panel.getAttribute('data-context-mode'), 'flights');
-  assert.equal($('context-flights-view').hidden, false);
-
-  panel.classList.add('collapsed');
-  controls._contextMode = null;
-  await sync();
-  assert.equal(
-    panel.className,
-    'ui-panel panel-collapsible ui-panel--collapsed collapsed',
-  );
-  assert.equal(panel.getAttribute('data-context-mode'), 'none');
-  assert.equal($('context-mode-standby').hidden, false);
-  assert.equal($('context-flights-view').hidden, true);
-});
-
-test('the nearby sites search is busy, without native disable, until it settles', async (t) => {
-  const { $, controls } = contactsFixture(t);
-  const button = $('installations-search-btn');
-  let release;
-  let enables = 0;
-  controls._dataManager = {
-    layers: new Map([['military-installations', {}]]),
-    setEnabled: () => {
-      enables += 1;
-      return new Promise((resolve) => (release = resolve));
-    },
-    isEnabled: () => true,
-  };
-  controls.installations.searchNearby = async () => true;
-  button.focus();
-  button.click();
+test('Context has no tabs and no Contacts controls; Radio has no rail panel of its own', async (t) => {
+  const { $ } = fixture(t, [flightsOn([])]);
   await nextTick();
-  assert.equal(button.getAttribute('aria-busy'), 'true');
-  assert.equal(button.getAttribute('aria-disabled'), 'true');
-  assert.equal(button.disabled, false);
-  assert.equal(document.activeElement === button, true);
-  button.click();
-  assert.equal(enables, 1, 'a busy search ignores a second click');
-
-  release(true);
-  await turn();
-  await nextTick();
-  assert.equal(button.getAttribute('aria-busy'), 'false');
-  assert.equal(button.getAttribute('aria-disabled'), 'false');
-});
-
-test('with Context closed, the collapsible sections are already in the page for PanelChrome', (t) => {
-  // PanelChrome finds collapsible panels once, at startup, by their collapse
-  // buttons; Context starts closed, so a section that mounts only while it
-  // is open would never be registered and its +/- would do nothing.
-  contactsFixture(t);
-  assert.equal(
-    document
-      .getElementById('global-context-panel')
-      .classList.contains('collapsed'),
-    true,
-  );
-  const targets = [
-    ...document.querySelectorAll('.panel-collapse-btn[data-collapse-target]'),
-  ].map((button) => button.dataset.collapseTarget);
-  for (const id of ['station-panel', 'live-panel', 'radio-panel'])
-    assert.ok(targets.includes(id), `${id} is there to be registered`);
+  const panel = $('#global-context-panel');
+  assert.equal(panel.parentElement.id, 'right-context-rail');
+  // Radio's own controls stay in the page, folded away until its stations show.
+  assert.equal($('#radio-panel').tagName, 'DETAILS');
+  assert.equal($('#radio-panel').closest('#right-context-rail'), null);
+  assert.ok($('#radio-panel').closest('.radio-fold-home[hidden]'));
+  for (const gone of [
+    '.context-tabs',
+    '#context-tab-btn-props',
+    '#global-context-flights-btn',
+    '#context-flights-view',
+    '#installations-search-btn',
+    '#cockpit-entry',
+    '#tr3b-toggle',
+  ])
+    assert.equal(Boolean($(gone)), false, `${gone} is gone`);
+  assert.ok($('#context-body'));
 });
 
 const NEAREST = '.nearby-lists__row--nearest button';
@@ -604,7 +460,7 @@ test('filtered Nearby keeps Acartia attribution visible on selection', async (t)
   contextSearchOpen.value = true;
   contextSearchText.value = 'orca';
   await nextTick();
-  assert.ok($('#context-tab-view').classList.contains('context-searching'));
+  assert.ok($('#context-body').classList.contains('context-searching'));
 
   const button = $('.nearby-lists [data-row-layer="wildlife-sightings"]');
   assert.match(button.textContent, /Orca/);
@@ -980,7 +836,7 @@ test('Context search hides the empty globe controls once the query is typed', as
   contextSearchOpen.value = true;
   contextSearchText.value = 'paris';
   await nextTick();
-  assert.ok($('#context-tab-view').classList.contains('context-searching'));
+  assert.ok($('#context-body').classList.contains('context-searching'));
   for (const selector of selectors)
     assert.equal(getComputedStyle($(selector)).display, 'none', selector);
 });
@@ -1504,11 +1360,6 @@ test('Esc while typing a camera calibration value cancels the edit and keeps the
   cctv.publish(
     presentCctvPanel({ enabled: true, activeCameraId: 'cam1' }, true),
   );
-  // The camera tools live in the CCTV panel until Camera settings borrows them.
-  const toolsHost = document.body.appendChild(document.createElement('div'));
-  const toolsApp = createApp(CctvPanel).use(pinia);
-  toolsApp.mount(toolsHost);
-  t.after(() => toolsApp.unmount());
   cards.select({ layerId: 'cctv', id: 'cam1' }, { fly: false });
   await nextTick();
   $('#context-tab-camera').click();
@@ -1679,6 +1530,59 @@ function radioLayer({ playing = null } = {}) {
   return radio;
 }
 
+test('Radio on: its stations show in Context, nearest first within the radius; only the selected one can be pinned', async (t) => {
+  const radio = radioLayer();
+  const { $, cards, pinia, close } = fixture(t, [
+    { id: 'radio', name: 'Radio', enabled: true, records: [] },
+  ]);
+  const dm = cards.layerModule;
+  cards.layerModule = (id) => (id === 'radio' ? radio : dm(id));
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+  await nextTick();
+  const rows = [...document.querySelectorAll('.radio-stations__list li')].map(
+    (row) => row.textContent,
+  );
+  assert.equal(rows.length, 2, 'the far station is outside the radius');
+  assert.match(rows[0], /KUT 90\.5/);
+  assert.equal(
+    document.querySelectorAll('.radio-stations .entity-card__action--pin')
+      .length,
+    1,
+    'one Pin, on the selected station',
+  );
+  assert.ok(
+    $('#radio-fold-slot #radio-panel'),
+    'the fold moves under the list',
+  );
+  document.querySelectorAll('.radio-stations__list button')[1].click();
+  assert.deepEqual(
+    radio.calls.at(-1),
+    ['select', 'kutx', true],
+    'a row plays its station',
+  );
+  $('.radio-stations .entity-card__action--pin').click();
+  await nextTick();
+  const pinned = usePinnedStore(pinia);
+  t.after(() => pinned.unpin('radio:kut'));
+  assert.deepEqual(
+    pinned.pins.map((pin) => [pin.key, pin.kind]),
+    [['radio:kut', 'station']],
+  );
+  // Closing Context takes the list away; the fold goes back to its home.
+  close();
+  await nextTick();
+  await nextTick();
+  assert.ok(
+    $('.radio-fold-home > #radio-panel'),
+    'the fold is back in the page',
+  );
+});
+
+/**
+ * Rows laid out as a browser would, for the list's height cap: each row
+ * 24 px tall, one under another (happy-dom lays nothing out).
+ */
 function layRowsOut(t) {
   const row = (el) =>
     el.tagName === 'LI' &&
@@ -2235,6 +2139,52 @@ test('while expanded the mini player at the column’s foot controls playback', 
 
 // Radio's source is chosen on its Data Layers row; Context shows only that
 // source, with no switch or tabs of its own.
+test('Context shows only the Radio source chosen on its row: the stations, or the local receiver', async (t) => {
+  const { $, radio } = await radioOnWithList(t, { playing: null });
+  assert.ok($('.radio-stations__list'), 'the internet stations');
+  assert.equal($('.local-receiver'), null);
+  radio.emit({
+    enabled: false,
+    source: 'local',
+    localReceiver: true,
+    selected: null,
+    audioState: 'stopped',
+    playingStationId: null,
+  });
+  await nextTick();
+  assert.equal($('.radio-stations__list'), null, 'no station list');
+  assert.equal(
+    $('.radio-stations:not(.local-receiver)'),
+    null,
+    'no Now playing for a station',
+  );
+  const local = $('.local-receiver');
+  assert.ok(local, 'the local receiver instead');
+  assert.match(local.textContent, /LOCAL RTL-SDR/);
+  assert.match(local.textContent, /CONNECT/);
+  assert.equal(
+    document.querySelectorAll(
+      '#global-context-panel [data-chip-id^="radio-source"], #global-context-panel [role="tab"][id*="radio"]',
+    ).length,
+    0,
+    'no switch or tabs in Context',
+  );
+  assert.equal(
+    $('#global-context-panel #sdr-radio-card'),
+    null,
+    'the full card stays on the row',
+  );
+  radio.emit({ enabled: true, source: 'internet', localReceiver: false });
+  await nextTick();
+  assert.ok($('.radio-stations__list'), 'the stations again');
+  assert.equal($('.local-receiver'), null);
+});
+
+// Under an open Context the dock and the mini player stand at the foot of
+// the column, wherever the panel above them ends, and the panel gives up
+// their height: neither measures the other, so a dock arriving lays the
+// column out once. Until the panel has made room they wait unseen rather
+// than show over its last rows.
 test('under an open Context the corner stands at the column’s foot, whatever the panel’s height, and waits unseen until the panel makes room', async (t) => {
   const { $ } = await radioOnWithList(t);
   const corner = $('.context-corner');
@@ -2700,26 +2650,19 @@ test('Undo from the keyboard focuses the pin put back, or the Pinned tab', async
   );
 });
 
-// A layer a person turns on opens its old panel too (Space Missions'
-// reveal, Weather's first appearance); that open is not a person leaving
-// Context's list.
-for (const [layerId, listId, panelId, paneId] of [
-  [
-    'rocket-launches',
-    'space-missions',
-    'space-missions-panel',
-    'context-live-missions',
-  ],
-  ['weather-radar', 'weather', 'weather-panel', 'context-live-weather'],
+// Turning a list layer on from Data Layers selects its list inside Context.
+for (const [layerId, listId] of [
+  ['rocket-launches', 'space-missions'],
+  ['weather-radar', 'weather'],
 ]) {
-  test(`turning ${layerId} on keeps its list in Context while its old panel opens itself`, async (t) => {
+  test(`turning ${layerId} on from Data Layers shows its list in Context`, async (t) => {
     const { $, cards, pinia, notifyLayers } = fixture(t, [flightsOn([])]);
     t.after(resetContextLists);
     const chrome = usePanelChromeStore(pinia);
     const owner = chrome.connect({});
     t.after(() => chrome.detach(owner));
     chrome.publish(owner, 'global-context-panel', { collapsed: false });
-    chrome.publish(owner, panelId, { collapsed: true });
+    chrome.publish(owner, 'data-panel', { collapsed: false });
     await settleTicks();
     cards.allLayers();
     await settleTicks();
@@ -2734,13 +2677,10 @@ for (const [layerId, listId, panelId, paneId] of [
       useSpaceMissionsStore(pinia).setEnabled(true);
     else setContextListPresence(listId, { count: 2 });
     await settleTicks();
-    const listShows = () =>
-      $('#context-lists').style.display !== 'none' &&
-      $(`#${paneId}`).style.display !== 'none';
-    assert.equal(listShows(), true, 'the list shows');
-    chrome.publish(owner, panelId, { collapsed: false });
-    await settleTicks();
-    assert.equal(listShows(), true, 'the list still shows');
+    assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
+    assert.notEqual($('#context-lists').style.display, 'none');
+    assert.notEqual($(`#context-list-${listId}`).style.display, 'none');
+    assert.equal(chrome.panels['data-panel'].collapsed, false);
   });
 }
 
@@ -2797,15 +2737,8 @@ test('turning Radio on brings Inspect forward and keeps the pick; a station pick
     'test01',
     'the pick (and any follow) stays',
   );
-  setEnabledLayers(['flights', 'radio']);
-  t.after(() => setEnabledLayers([]));
+  pinned.show('pinned');
   await nextTick();
-  $('#context-tab-btn-props').click();
-  await nextTick();
-  assert.equal(
-    $('#context-tab-btn-props').getAttribute('aria-selected'),
-    'true',
-  );
   document.dispatchEvent(
     new CustomEvent('gev:radio-selected', { detail: { stationId: 'kut' } }),
   );
@@ -2815,10 +2748,7 @@ test('turning Radio on brings Inspect forward and keeps the pick; a station pick
     null,
     'a station picked on the globe is the new pick',
   );
-  assert.equal(
-    $('#context-tab-btn-view').getAttribute('aria-selected'),
-    'true',
-  );
+  assert.equal($('#context-tab-inspect').getAttribute('aria-selected'), 'true');
 });
 
 test('the notice that a pin went stays while it is held', (t) => {
@@ -3160,6 +3090,190 @@ test('an aircraft without a photo, route or model shows a close-up map, never it
   assert.equal(Boolean($('.entity-hero__placeholder')), false);
 });
 
+test('a camera card: Fly to, Pin and Dock in the row; its tools are a Camera settings tab; docking never pins', async (t) => {
+  const camera = { id: 'cam1', name: 'I-35 @ 12th', lat: 30.27, lon: -97.73 };
+  const { $, cards, pinia } = fixture(t, [
+    {
+      id: 'cctv',
+      name: 'Cameras',
+      enabled: true,
+      records: [camera],
+      module: {
+        frameUrlForCamera: (id) => ({
+          url: `/frame/${id}.jpg`,
+          refreshMs: 10_000,
+        }),
+        cameraDetails: () => ({
+          name: camera.name,
+          city: 'Austin',
+          provider: 'TxDOT',
+          credit: 'City of Austin',
+          feedType: 'image',
+          headingDeg: 0,
+          fovDeg: 40,
+          rangeM: 120,
+          refreshMs: 10_000,
+        }),
+      },
+    },
+    flightsOn([flight('test01', 30.3, -97.7)]),
+  ]);
+  // The camera is the active one (CctvControls publishes this).
+  useCctvStore(pinia).publish(
+    presentCctvPanel({ enabled: true, activeCameraId: 'cam1' }, true),
+  );
+  cards.select({ layerId: 'cctv', id: 'cam1' }, { fly: false });
+  await nextTick();
+  await nextTick();
+  const tiles = [
+    ...document.querySelectorAll('#entity-card .entity-card__tile'),
+  ].map((tile) => [
+    tile.querySelector('span').textContent,
+    tile.querySelector('strong').textContent,
+  ]);
+  assert.deepEqual(tiles, [
+    ['City', 'Austin'],
+    ['Field of view', '40°'],
+    ['Range', '120 m'],
+  ]);
+  // The provider is named plainly as the source; the feed is its own fact;
+  // facing and refresh, not in the row, are here too.
+  const more = $('#entity-card .entity-card__more').textContent;
+  assert.match(more, /Feed\s*image/);
+  assert.match(more, /Data source\s*TxDOT/);
+  assert.match(more, /Facing\s*N/);
+  assert.match(more, /Refresh\s*10 s/);
+  assert.doesNotMatch(
+    more,
+    /City|Field of view|Range/,
+    'nothing in the row again under More details',
+  );
+  // The source line names the provider and the frame's age, not its refresh.
+  assert.doesNotMatch(
+    $('#entity-card .entity-card__source-line')?.textContent || '',
+    /10 s/,
+  );
+  assert.match(
+    $('#entity-card .entity-card__subtitle').textContent,
+    /^Austin · 30\.27, -97\.73$/,
+  );
+  // Three buttons and the Ask icon; the dock is one of the buttons, not an
+  // icon on the image.
+  const row = [
+    ...document.querySelectorAll(
+      '#entity-card .entity-card__action-row button',
+    ),
+  ];
+  assert.deepEqual(
+    row.map((button) => button.textContent.trim() || 'ask'),
+    ['my_locationFly to', 'keepPin', 'picture_in_picture_altDock', 'ask'],
+  );
+  assert.equal($('.entity-hero__dock'), null, 'no dock icon on a camera image');
+  // The camera's tools are a Camera settings tab beside Inspect, not part of
+  // the card.
+  assert.ok(!$('#entity-card #cctv-tools'), 'no tools on the card');
+  assert.ok(!$('#entity-card .cctv-tools__summary'), 'no Camera tools fold');
+  const tabNames = () =>
+    [
+      ...document.querySelectorAll(
+        '#context-body > .context-pin-tabs [role="tab"]',
+      ),
+    ].map((tab) => tab.textContent.trim());
+  assert.deepEqual(tabNames(), ['Inspect', 'Camera settings']);
+  $('#context-tab-camera').click();
+  await nextTick();
+  await nextTick();
+  assert.equal($('#context-tab-camera').getAttribute('aria-selected'), 'true');
+  assert.ok(
+    !$('#global-context-panel #entity-card'),
+    'the card gives way to the tab',
+  );
+  assert.ok(
+    $('#context-tab-panel #cctv-tools-slot #cctv-tools'),
+    'the tools are in the tab',
+  );
+  // A search puts the tools away; clearing it brings them back.
+  contextSearchOpen.value = true;
+  contextSearchText.value = 'zzz';
+  await nextTick();
+  await nextTick();
+  assert.ok($('.cctv-tools-home #cctv-tools'), 'home while searching');
+  contextSearchText.value = '';
+  closeContextSearch();
+  await nextTick();
+  await nextTick();
+  assert.ok(
+    $('#context-tab-panel #cctv-tools-slot #cctv-tools'),
+    'back in the tab',
+  );
+  // Inspect again: the tools go home and the card is back.
+  $('#context-tab-inspect').click();
+  await nextTick();
+  await nextTick();
+  assert.ok($('.cctv-tools-home #cctv-tools'), 'home on Inspect');
+  assert.ok($('#entity-card'), 'the card is back');
+  // Voice or search asking for camera settings shows the tab.
+  document.dispatchEvent(new CustomEvent(CAMERA_SETTINGS_EVENT));
+  await nextTick();
+  await nextTick();
+  await nextTick();
+  assert.equal($('#context-tab-camera').getAttribute('aria-selected'), 'true');
+  $('#context-tab-inspect').click();
+  await nextTick();
+  // Dock: pressed while docked, and pressing again undocks.
+  const dock = () => $('.entity-card__action--dock');
+  dock().click();
+  await nextTick();
+  assert.equal(dock().getAttribute('aria-pressed'), 'true');
+  assert.match(dock().textContent, /Docked/);
+  const docked = $('.context-corner .docked-view');
+  assert.ok(docked, 'docked bottom right');
+  assert.match(docked.textContent, /I-35 @ 12th/);
+  assert.equal(
+    docked.querySelector('img').getAttribute('src'),
+    '/frame/cam1.jpg',
+  );
+  // Credited under its picture as its card's source line names it; the dock
+  // keeps who it is from, for when Cameras goes off.
+  assert.equal(
+    docked.querySelector('.docked-view__credit')?.textContent,
+    'TxDOT · City of Austin',
+  );
+  assert.deepEqual(useDockedStore(pinia).view.source, {
+    provider: 'TxDOT',
+    credit: 'City of Austin',
+  });
+  assert.equal(usePinnedStore(pinia).pins.length, 0, 'docking never pins');
+  dock().click();
+  await nextTick();
+  assert.equal($('.docked-view'), null, 'pressing Docked undocks');
+  dock().click();
+  await nextTick();
+  // Inspect stays free: another pick keeps the dock, and the tools go home.
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  await nextTick();
+  assert.ok($('.docked-view'), 'the camera stays docked');
+  assert.ok($('.cctv-tools-home #cctv-tools'), 'the tools stay home');
+  assert.ok(!$('#context-tab-camera'), 'no Camera settings tab off a camera');
+  cards.select({ layerId: 'cctv', id: 'cam1' }, { fly: false });
+  await nextTick();
+  assert.ok($('#context-tab-camera'), 'the tab is back with the camera card');
+  cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
+  await nextTick();
+  $('.docked-view').querySelector('button').click();
+  await nextTick();
+  assert.equal(cards.card.identity.id, 'cam1', 'back in Context');
+  assert.equal(useDockedStore(pinia).view, null, 'and no longer docked');
+  // Its pin keeps who the feed is from, to credit its still.
+  $('.entity-card__action--pin').click();
+  await nextTick();
+  assert.deepEqual(usePinnedStore(pinia).pins[0]?.source, {
+    provider: 'TxDOT',
+    credit: 'City of Austin',
+  });
+});
+
 test('a docked camera whose layer goes off says it is out of feed, not live', async (t) => {
   let frames = true;
   const camera = { id: 'cam1', name: 'I-35 @ 12th', lat: 30.27, lon: -97.73 };
@@ -3283,6 +3397,7 @@ test('Esc with a camera’s enlarged view open closes only the view, from the pa
     viewer,
     getDataManager: dataManager,
     pinia,
+    inspector: { counts: { update() {}, note() {}, stop() {} } },
   });
   t.after(() => {
     disconnect();
@@ -3441,7 +3556,7 @@ test('the tab row is one line: Inspect holds its start, the other tabs scroll be
   const strip = row.querySelector('.context-pin-tabs__strip');
   assert.deepEqual(
     [...strip.querySelectorAll('[role="tab"]')].map((tab) => tab.id),
-    ['context-tab-camera', 'context-tab-lists', 'context-tab-pinned'],
+    ['context-tab-camera', 'context-tab-pinned'],
   );
   // Arrows go from Inspect into the strip and on.
   const inspect = $('#context-tab-inspect');
@@ -4614,6 +4729,74 @@ test('with Local receiver chosen the mini player offers no pinned station; back 
   assert.match($('.radio-mini').textContent, /KUT 90\.5/);
 });
 
+test('with Radio off, Previous and Next step without turning Radio on, and are disabled with nothing to step through', async (t) => {
+  const { $, radio, turnedOn, close } = await radioOffWithPinnedStation(t);
+  close();
+  await nextTick();
+  $('[aria-label="Next filtered station"]').click();
+  $('[aria-label="Previous filtered station"]').click();
+  assert.deepEqual(radio.calls.slice(-2), [
+    ['step', 1],
+    ['step', -1],
+  ]);
+  assert.deepEqual(turnedOn, []);
+  radio.emit({ filteredCount: 0 });
+  await nextTick();
+  const next = $('.radio-mini [aria-label="Next filtered station"]');
+  const previous = $('.radio-mini [aria-label="Previous filtered station"]');
+  assert.ok(next && previous, 'still there');
+  assert.equal(next.disabled, true);
+  assert.equal(previous.disabled, true);
+});
+
+test('with Radio off, Next on a paused pinned station shows the station stepped to, ready to play, and Play plays it', async (t) => {
+  const { $, radio, close } = await radioOffWithPinnedStation(t);
+  close();
+  await nextTick();
+  // As the layer steps with Radio off: a paused stream of the station left
+  // behind is let go, and the selection moves on.
+  radio.stepStationWhileOff = (direction) => {
+    radio.calls.push(['step', direction]);
+    radio.emit({
+      audioState: 'stopped',
+      playingStationId: null,
+      selected: radio.stations[1],
+    });
+    return true;
+  };
+  $('.radio-mini__play').click();
+  await settle();
+  radio.emit({ audioState: 'playing' });
+  await nextTick();
+  $('.radio-mini__play').click();
+  await nextTick();
+  assert.equal(
+    $('.radio-mini').getAttribute('aria-label'),
+    'Radio playback: Paused',
+  );
+  assert.match($('.radio-mini').textContent, /KUT 90\.5/);
+  $('[aria-label="Next filtered station"]').click();
+  await nextTick();
+  assert.match(
+    $('.radio-mini').textContent,
+    /KUTX 98\.9/,
+    'the station stepped to',
+  );
+  assert.doesNotMatch($('.radio-mini').textContent, /KUT 90\.5/);
+  assert.equal(
+    $('.radio-mini').getAttribute('aria-label'),
+    'Radio station',
+    'ready to play',
+  );
+  $('.radio-mini__play').click();
+  await nextTick();
+  assert.deepEqual(
+    radio.calls.at(-1),
+    ['play', 'kutx'],
+    'Play plays it, not the pin',
+  );
+});
+
 test('the mini player’s name says what it is doing: playing, loading, paused or unavailable', async (t) => {
   const { $, radio } = await radioOnWithList(t);
   const label = () => $('.radio-mini').getAttribute('aria-label');
@@ -5008,7 +5191,10 @@ test(
       document.activeElement === $('.view-context__blocks'),
       'focus moves to the globe results when the last matching row leaves',
     );
-    assert.ok(!$('.view-context__block'), 'the unmatched group is gone');
+    assert.ok(
+      !$('.view-context__blocks .view-context__block'),
+      'the unmatched globe group is gone',
+    );
     assert.match(
       $('.view-context__blocks [role="status"]')?.textContent ?? '',
       /\b0\b/,
@@ -5435,13 +5621,15 @@ test('folded, opening Context from its name by keyboard moves focus to the expan
   );
 });
 
-test('a layer turned on at globe view shows its block at once, as Loading, not at the next refresh', async (t) => {
+test('Cameras turned on at globe view adds the inline list without a duplicate layer block', async (t) => {
   const cameras = {
     id: 'cctv',
-    name: 'CCTV',
+    name: 'Cameras',
     enabled: false,
-    module: { getAnalystRecords: undefined },
-    stats: { count: 0, loading: true },
+    module: {
+      getAnalystRecords: undefined,
+      camerasNear: () => [{ id: 'cam1', name: 'I-35 @ 12th', km: 1 }],
+    },
   };
   const { $, cards, notifyLayers } = fixture(t, [
     flightsOn([flight('near01', 28.1, -80)]),
@@ -5449,32 +5637,12 @@ test('a layer turned on at globe view shows its block at once, as Loading, not a
   ]);
   cards.setView({ center: { lat: 28, lon: -80 }, heightM: 18_000_000 });
   await nextTick();
-  assert.equal($('.view-context__block[data-layer="cctv"]'), null);
+  assert.equal($('[data-list-card="cctv"]'), null);
   cameras.enabled = true;
   notifyLayers();
   await nextTick();
-  const block = $('.view-context__block[data-layer="cctv"]');
-  assert.ok(block, 'the block shows without waiting for the refresh');
-  assert.match(
-    block.querySelector('strong').textContent,
-    /…/,
-    'its count is still coming',
-  );
-  assert.equal(
-    block.querySelector('.view-context__block-head .entity-mark')?.textContent,
-    'videocam',
-    'a camera keeps its glyph',
-  );
-  assert.ok(block.querySelector('.view-context__dot--loading'));
-
-  cameras.stats = { count: 32, lastUpdate: Date.now() };
-  notifyLayers();
-  await nextTick();
-  assert.equal(
-    block.querySelector('strong').textContent,
-    '32',
-    'the loaded camera count is shown even without analyst rows',
-  );
+  assert.match($('[data-list-card="cctv"]').textContent, /I-35 @ 12th/);
+  assert.equal($('.view-context__block[data-layer="cctv"]'), null);
 });
 
 async function settleWeather(t) {
@@ -5526,6 +5694,13 @@ test('the local time stays on a nearby pan once the same country is confirmed, a
 });
 
 test('with a layer on, zoomed in, the weather block shows the reading the local time came from, with no read of its own', async (t) => {
+  const style = document.createElement('style');
+  style.textContent = fs.readFileSync(
+    new URL('./styles/spot-conditions.css', import.meta.url),
+    'utf8',
+  );
+  document.head.append(style);
+  t.after(() => style.remove());
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const reads = [];
   const brief = async (lat, lon) => {
@@ -5572,13 +5747,13 @@ test('with a layer on, zoomed in, the weather block shows the reading the local 
     /18 °C/,
   );
   assert.match(block.textContent, /feels 17°/);
+  const factsGrid = block.querySelector('.spot-conditions__weather-facts');
+  assert.equal(getComputedStyle(factsGrid).display, 'grid');
   const facts = Object.fromEntries(
-    [...block.querySelectorAll('.spot-conditions__weather-facts div')].map(
-      (node) => [
-        node.querySelector('dt').textContent,
-        node.querySelector('dd').textContent,
-      ],
-    ),
+    [...factsGrid.querySelectorAll('div')].map((node) => [
+      node.querySelector('dt').textContent,
+      node.querySelector('dd').textContent,
+    ]),
   );
   assert.deepEqual(Object.keys(facts), ['Wind', 'Cloud', 'Visibility', 'Rain']);
   assert.match(facts.Wind, /15 km\/h/);
@@ -5724,7 +5899,7 @@ test("a street-level photo's card moving on to the next image keeps Context's ta
     lon: -97.74,
   };
   const next = { ...photo, id: 'mapillary:2', name: 'Sixth Street' };
-  const { cards } = fixture(t, [
+  const { $, cards, pinia } = fixture(t, [
     {
       id: 'street-level',
       name: 'Street Level',
@@ -5734,18 +5909,30 @@ test("a street-level photo's card moving on to the next image keeps Context's ta
     },
     flightsOn([flight('test01', 30.3, -97.7)]),
   ]);
-  t.after(() => {
-    activeTab.value = 'view';
-  });
   cards.select({ layerId: 'street-level', id: photo.id }, { follow: false });
   await nextTick();
-  activeTab.value = 'props';
-  cards.select({ layerId: 'street-level', id: next.id }, { reveal: false });
+  usePinnedStore(pinia).pin({
+    key: cards.card.key,
+    identity: cards.card.identity,
+    title: photo.name,
+    icon: 'streetview',
+  });
   await nextTick();
-  assert.equal(activeTab.value, 'props', 'the walk keeps the tab');
+  $('#context-tab-pinned').click();
+  cards.advance({ layerId: 'street-level', id: next.id });
+  await nextTick();
+  assert.equal(
+    $('#context-tab-pinned').getAttribute('aria-selected'),
+    'true',
+    'the walk keeps the tab',
+  );
   cards.select({ layerId: 'flights', id: 'test01' }, { follow: false });
   await nextTick();
-  assert.equal(activeTab.value, 'view', 'a new pick shows its card');
+  assert.equal(
+    $('#context-tab-inspect').getAttribute('aria-selected'),
+    'true',
+    'a new pick shows its card',
+  );
 });
 
 test('nothing on: up to three suggested layers, and Open shows Data Layers without switching any on', async (t) => {
@@ -6125,9 +6312,7 @@ test('Inspector replies respect Clean View before its visibility observer runs',
 
 test('hiding or replacing the mounted Inspector cancels its weather and count requests', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
-  t.after(() => {
-    activeTab.value = 'view';
-  });
+  t.after(resetContextLists);
   const countRequests = [];
   const weatherRequests = [];
   const pending = (requests, signal) => {
@@ -6202,14 +6387,6 @@ test('hiding or replacing the mounted Inspector cancels its weather and count re
       () => $('#context-tab-lists').click(),
       () => $('#context-tab-inspect').click(),
       true,
-    ],
-    [
-      () => {
-        activeTab.value = 'props';
-      },
-      () => {
-        activeTab.value = 'view';
-      },
     ],
     [
       () => display.publishPhoneShell({ enabled: true, sheet: 'layers' }),
@@ -6539,7 +6716,7 @@ test('Space Missions turned off while its list shows: Context goes to Inspect an
   const missions = useSpaceMissionsStore(pinia);
   for (const focusIn of [
     '#context-tab-lists',
-    '#context-live-missions',
+    '[data-mission-roster-focus-continuation]',
     null,
   ]) {
     missions.setEnabled(true);
@@ -6555,13 +6732,9 @@ test('Space Missions turned off while its list shows: Context goes to Inspect an
     assert.equal($('#context-tab-lists').getAttribute('aria-selected'), 'true');
     assert.match($('#context-tab-lists').textContent, /Missions · 3/);
     const outside = document.body.appendChild(document.createElement('button'));
-    // A control in the list, as a roster row would be.
-    const inside = $('#context-live-missions').appendChild(
-      document.createElement('button'),
-    );
-    if (focusIn === '#context-live-missions') inside.focus();
-    else if (focusIn) $(focusIn).focus();
-    else outside.focus();
+    const focusTarget = focusIn ? $(focusIn) : outside;
+    focusTarget.focus();
+    assert.equal(document.activeElement === focusTarget, true);
     missions.setEnabled(false);
     await nextTick();
     await nextTick();
@@ -6584,7 +6757,6 @@ test('Space Missions turned off while its list shows: Context goes to Inspect an
         'focus outside Context stays put',
       );
     outside.remove();
-    inside.remove();
   }
 });
 
@@ -6602,11 +6774,9 @@ test('Space Missions turned off as the only tab: focus moves to Context’s body
   await nextTick();
   $('#context-tab-lists').click();
   await nextTick();
-  const inside = $('#context-live-missions').appendChild(
-    document.createElement('button'),
-  );
-  t.after(() => inside.remove());
+  const inside = $('[data-mission-roster-focus-continuation]');
   inside.focus();
+  assert.equal(document.activeElement === inside, true);
   missions.setEnabled(false);
   await nextTick();
   await nextTick();
@@ -6636,20 +6806,21 @@ test('a field layer still loading reads …, not "No value"', async (t) => {
   assert.doesNotMatch(wind.textContent, /No value/);
 });
 
-test('Properties pauses the Inspector retry clock', async (t) => {
+test('switching phone sheets pauses the mounted Inspector retry clock', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
-  t.after(() => {
-    activeTab.value = 'view';
-  });
   let reads = 0;
   let elapsed = 0;
-  const { $, point } = fixture(t, [flightsOn([flight('a1', 30.3, -97.7)])], {
-    brief: async () => {
-      reads++;
-      return null;
+  const { $, pinia, point } = fixture(
+    t,
+    [flightsOn([flight('a1', 30.3, -97.7)])],
+    {
+      brief: async () => {
+        reads++;
+        return null;
+      },
+      weatherClock: { nowMonotonic: () => elapsed },
     },
-    weatherClock: { nowMonotonic: () => elapsed },
-  });
+  );
   const advance = async (ms) => {
     elapsed += ms;
     t.mock.timers.tick(ms);
@@ -6662,17 +6833,22 @@ test('Properties pauses the Inspector retry clock', async (t) => {
   assert.equal(reads, 1, 'weather is read once the view settles');
   await advance(20_000);
   const mounted = $('.view-context');
-  activeTab.value = 'props';
+  const display = useDisplayStore(pinia);
+  display.publishPhoneShell({ enabled: true, sheet: 'layers' });
   await nextTick();
   await advance(60_000);
   assert.equal(
     $('.view-context'),
     mounted,
-    'Properties keeps Inspector mounted',
+    'the phone sheet keeps Inspector mounted',
   );
-  assert.equal(reads, 1, 'time in Properties does not count toward the retry');
+  assert.equal(
+    reads,
+    1,
+    'time on another sheet does not count toward the retry',
+  );
 
-  activeTab.value = 'view';
+  display.publishPhoneShell({ enabled: true, sheet: 'context' });
   await nextTick();
   await advance(36_000);
   await advance(400);
@@ -6680,6 +6856,96 @@ test('Properties pauses the Inspector retry clock', async (t) => {
   await advance(4000);
   await advance(400);
   assert.equal(reads, 2, 'the retry uses the remaining visible time');
+});
+
+test('the view stops its refresh ticks while Context shows another tab', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let reads = 0;
+  let elapsed = 0;
+  const { $, pinia, point } = fixture(
+    t,
+    [flightsOn([flight('a1', 30.3, -97.7)])],
+    {
+      brief: async () => {
+        reads++;
+        return null;
+      },
+      weatherClock: { nowMonotonic: () => elapsed },
+    },
+  );
+  const advance = async (ms) => {
+    elapsed += ms;
+    t.mock.timers.tick(ms);
+    await nextTick();
+    await turn();
+  };
+  const pinned = usePinnedStore(pinia);
+  pinned.pin({
+    key: 'flights:a1',
+    kind: 'item',
+    title: 'A1',
+    identity: { layerId: 'flights', id: 'a1' },
+  });
+  point(HERE);
+  await nextTick();
+  await advance(400);
+  assert.equal(reads, 1, 'the spot weather is read once the view settles');
+
+  $('#context-tab-pinned').click();
+  await nextTick();
+  assert.equal($('.view-context'), null, 'Pinned unmounts Inspector');
+  await advance(16 * 4000);
+  await advance(400);
+  assert.equal(reads, 1, 'no retry while another tab is shown');
+
+  $('#context-tab-inspect').click();
+  await nextTick();
+  assert.ok($('.view-context'), 'Inspect remounts Inspector');
+  await advance(16 * 4000);
+  await advance(400);
+  assert.equal(reads, 2, 'the read comes once the view is shown again');
+});
+
+test('Radio on with no station picked: the place, then Radio, then Nearby; no worldwide counts or pointer', async (t) => {
+  const radio = radioLayer();
+  radio.emit({ selected: null });
+  const { $, cards } = fixture(t, [
+    { id: 'radio', name: 'Radio', enabled: true, records: [] },
+  ]);
+  const dm = cards.layerModule;
+  cards.layerModule = (id) => (id === 'radio' ? radio : dm(id));
+  cards.setView({ center: HERE, heightM: 40_000 });
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+  await nextTick();
+  const view = $('.view-context');
+  const title = view.querySelector('.view-context__title');
+  const stations = view.querySelector('.radio-stations');
+  assert.ok(title && stations, 'the place and Radio are one view');
+  assert.ok(
+    title.compareDocumentPosition(stations) & Node.DOCUMENT_POSITION_FOLLOWING,
+    'the place first',
+  );
+  assert.match(
+    $('.radio-stations__idle').textContent,
+    /No station selected · pick one to play/,
+  );
+  assert.equal(
+    $('.view-context__tiles--counts'),
+    null,
+    'no worldwide count tiles while a layer is on',
+  );
+  assert.doesNotMatch(
+    view.textContent,
+    /Turn on layers/,
+    'no pointer to Data Layers',
+  );
+  assert.doesNotMatch(view.textContent, /No layers on/);
+  // The privacy note is a line under the list, not in the tuner fold.
+  assert.equal(
+    Boolean(stations.querySelector(':scope > .radio-stations__privacy')),
+    true,
+  );
+  assert.equal(Boolean($('#radio-panel .radio-stations__privacy')), false);
 });
 
 test('a sparse station list offers to widen the radius; tag chips show four, then More', async (t) => {
@@ -6716,6 +6982,34 @@ test('a sparse station list offers to widen the radius; tag chips show four, the
   ];
   assert.equal(chips.length, 4, 'four tags');
   assert.ok($('.radio-stations__more'), 'and More');
+});
+
+test('with Context closed, the collapsible sections are already in the page for PanelChrome', async (t) => {
+  // PanelChrome finds collapsible panels once, at startup, by their collapse
+  // buttons; Context starts closed, so a section that mounts only while it
+  // is open would never be registered and its +/- would do nothing.
+  const { $, close } = fixture(t, []);
+  close();
+  await nextTick();
+  assert.equal(
+    $('#global-context-panel').classList.contains('collapsed'),
+    true,
+  );
+  const targets = [
+    ...document.querySelectorAll('.panel-collapse-btn[data-collapse-target]'),
+  ].map((button) => button.dataset.collapseTarget);
+  // Radio has no collapsible section of its own here: its stations are in
+  // Context and its tuner is a fold that moves under the station list.
+  for (const id of ['station-panel', 'live-panel']) {
+    assert.ok(targets.includes(id), `${id} is there to be registered`);
+    // The space station's STATION and LIVE sections follow the lists.
+    assert.equal(
+      $('#context-lists').compareDocumentPosition(document.getElementById(id)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      Node.DOCUMENT_POSITION_FOLLOWING,
+      `${id} comes after the lists`,
+    );
+  }
 });
 
 test('a pinned aircraft whose layer is off opens flown to where it was, not followed', async (t) => {
@@ -6826,6 +7120,63 @@ test('a docked street-level photo that another item replaces closes, unless its 
   assert.deepEqual(closed, ['mapillary:1']);
 });
 
+test('a dock replacement keeps the original card, dock slot, and one busy announcement', async (t) => {
+  const a = {
+    id: 'mapillary:A',
+    name: 'Congress Ave',
+    lat: HERE.lat,
+    lon: HERE.lon,
+  };
+  const { $, cards, pinia } = fixture(t, [
+    { id: 'street-level', name: 'Street Level', enabled: true, records: [a] },
+  ]);
+  const streetLevel = useStreetLevelStore(pinia);
+  const docked = useDockedStore(pinia);
+  const publish = (loading) =>
+    streetLevel.publish({
+      enabled: true,
+      dockPhotoLoading: loading,
+      viewer: { open: true, photo: { id: a.id }, renderMode: 'letterbox' },
+    });
+  let cancelled = false;
+  streetLevel.attach({
+    cancelDockedPhoto: () => {
+      cancelled = true;
+      publish(false);
+    },
+  });
+  cards.select({ layerId: 'street-level', id: a.id }, { follow: false });
+  docked.dock({
+    key: 'street-level:mapillary:A',
+    kind: 'street',
+    title: a.name,
+    identity: { layerId: 'street-level', id: a.id },
+  });
+  publish(false);
+  await nextTick();
+  await nextTick();
+  const frame = $('.docked-view__frame');
+  const holder = $('#sl-docked-slot');
+  publish(true);
+  await nextTick();
+  assert.equal(cards.card.identity.id, a.id);
+  assert.equal(frame.getAttribute('aria-busy'), 'true');
+  assert.match($('.docked-view__status').textContent, /Loading photo/);
+  assert.equal(
+    $('#sl-docked-slot'),
+    holder,
+    'the host holds its existing place in the dock',
+  );
+  assert.equal($('#sl-viewer-wrap').parentElement, holder);
+  $('.docked-view__cancel-photo').click();
+  await nextTick();
+  assert.equal(cancelled, true);
+  assert.equal(cards.card.identity.id, a.id);
+  assert.equal(frame.hasAttribute('aria-busy'), false);
+  assert.equal($('.docked-view__status').textContent, '');
+  assert.equal($('#sl-docked-slot'), holder);
+});
+
 test('the dock says when a replacement photo did not load or a pick waits on the restore', async (t) => {
   const a = {
     id: 'mapillary:A',
@@ -6918,7 +7269,7 @@ for (const still of [null, 'https://example.org/original-photo.jpg']) {
     });
     const sourceCard = cards.card;
     const dock = docked.view;
-    const alert = () => $('.docked-view__frame [role="alert"]');
+    const alert = () => $('.docked-view__frame > [role="alert"]');
     publish({ dockPhotoLoading: true, dockPhotoRestoring: true });
     await nextTick();
     assert.equal($('.docked-view__frame').getAttribute('aria-busy'), 'true');

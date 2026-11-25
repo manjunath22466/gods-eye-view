@@ -254,14 +254,6 @@ export function renderRadioState(state) {
     },
   };
   this.store?.publish(this._radioView);
-  if (
-    !enabled &&
-    !transitioning &&
-    !this.actions.preservePanelStateDuringClear() &&
-    !this._radioPanel.classList.contains('collapsed')
-  ) {
-    this.actions.setPanelCollapsed('radio-panel', true);
-  }
   this.actions.scheduleLayout();
 }
 

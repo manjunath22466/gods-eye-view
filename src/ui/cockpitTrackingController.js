@@ -876,14 +876,8 @@ export function exit({ restoreTracking = true } = {}) {
     layer?.refocusTrackedById?.(subject);
   }
   this.syncEntry();
-  // Return to the card or readout control that opened Cockpit.
-  const readoutEntry = document.getElementById('cockpit-entry-readout');
-  const restoreTarget =
-    this.entryFocusOrigin === this.entry ||
-    this.entryFocusOrigin?.hasAttribute('data-entity-cockpit-entry') ||
-    (readoutEntry && this.entryFocusOrigin === readoutEntry)
-      ? this.entryFocusOrigin
-      : this.entry || this.entryFocusOrigin;
+  // Return to the control that opened Cockpit, such as the card's entry.
+  const restoreTarget = this.entryFocusOrigin;
   this.entryFocusOrigin = null;
   // The entry shows when Vue flushes the presence; read it after.
   Promise.resolve().then(() => {

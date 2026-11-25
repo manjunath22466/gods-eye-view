@@ -97,7 +97,6 @@
       "src/cockpitSubjectProviders.js",
       "src/ui/views/CommandDockView.vue",
       "src/ui/views/ContextView.vue",
-      "src/ui/views/panels/RadioPanel.vue",
       "src/ui/views/panels/SdrCard.vue",
       "src/ui/views/panels/RadioTuner.vue",
       "src/ui/views/panels/LocalePicker.vue",
@@ -130,9 +129,6 @@
       "src/ui/radioTunerModel.js",
       "src/ui/views/panels/MissionDetail.vue",
       "src/ui/views/panels/MissionRoster.vue",
-      "src/ui/views/panels/SpaceMissionsPanel.vue",
-      "src/ui/views/panels/AwarenessPanel.vue",
-      "src/ui/views/panels/AwarenessNames.vue",
       "src/ui/views/DisplayControlsView.vue",
       "src/ui/views/LayerPanelsView.vue",
       "src/ui/views/ProviderSettingsView.vue",
@@ -157,18 +153,14 @@
       "src/i18n/locales/uk.json",
       "src/i18n/locales/zh-CN.json",
       "src/i18n/locales/zh-Hant.json",
-      "src/ui/views/panels/StreetLevelPanel.vue",
       "src/ui/views/panels/PortalSlot.vue",
       "src/ui/views/panels/usePortalSource.js",
       "src/ui/stores/portalTargets.js",
       "src/ui/portalTargets.js",
-      "src/ui/views/panels/CctvPanel.vue",
       "src/ui/views/panels/CctvTools.vue",
       "src/ui/cctv/CctvCalValue.vue",
-      "src/ui/cctv/CctvPicker.vue",
       "src/ui/stores/cctv.js",
       "src/ui/stores/radio.js",
-      "src/ui/stores/context.js",
       "src/ui/stores/spaceMissions.js",
       "src/ui/stores/cockpit.js",
       "src/ui/stores/locale.js",
@@ -269,7 +261,6 @@
       "src/ui/views/panels/WorldTimeline.vue",
       "src/ui/surfaceKeyboard.js",
       "src/scenes/storyTags.js",
-      "src/ui/contextLayerTabs.js",
       "src/ui/contextSearch.js",
       "src/ui/contextLists.js",
       "src/ui/layerNames.js",
@@ -407,7 +398,11 @@
       "src/ui/views/panels/CameraList.vue",
       "src/ui/kit/ContextListCard.vue",
       "src/ui/dockedCamera.js",
-      "src/ui/views/panels/DockedView.vue"
+      "src/ui/views/panels/DockedView.vue",
+      "src/ui/views/panels/RadioFold.vue",
+      "src/ui/views/panels/StreetLevelViewer.vue",
+      "src/ui/labelLayers.js",
+      "src/ui/rideFace.js"
     ],
     "external": ["vue", "pinia", "vue-i18n"]
   },
@@ -1191,6 +1186,7 @@
   "cctv-controls": {
     "exports": ["./ui/cctv"],
     "modules": [
+      "src/data/cctvCalibrationWords.js",
       "src/data/iconOrientation.js",
       "src/ui/cctvEvents.js",
       "src/data/headingDegrees.js",
@@ -1231,8 +1227,7 @@
       "src/geo/vector.js",
       "src/geo/ellipsoid.js",
       "src/geo/horizon.js",
-      "src/render/rendererOf.js",
-      "src/data/cctvCalibrationWords.js"
+      "src/render/rendererOf.js"
     ],
     "external": ["vue", "pinia", "vue-i18n", "cesium"]
   },
@@ -1242,7 +1237,6 @@
       "src/i18n/marker.js",
       "src/ui/context.js",
       "src/ui/contextActions.js",
-      "src/ui/contextBindings.js",
       "src/ui/contextControls.js",
       "src/ui/contextLayerChanges.js",
       "src/ui/contextPresentation.js",
@@ -1250,7 +1244,6 @@
       "src/ui/contextSubscriptions.js",
       "src/ui/contextTransactions.js",
       "src/contextModePolicy.js",
-      "src/rightRailPolicy.js",
       "src/ui/panelRailGeometry.js",
       "src/i18n/index.js",
       "src/i18n/locale.js",
@@ -1448,7 +1441,6 @@
       "src/hudLayouts.js",
       "src/hudLayoutPolicy.js",
       "src/cyberSonar.js",
-      "src/ui/radioPanelPlacement.js",
       "src/app/stateChannel.js",
       "src/bloom.js",
       "src/cctvFocusPolicy.js",
@@ -1475,7 +1467,6 @@
       "src/mapStackChips.js",
       "src/navigationPolicy.js",
       "src/panelStackLayout.js",
-      "src/rightRailPolicy.js",
       "src/styles/anime.js",
       "src/styles/noir.js",
       "src/styles/retro.js",
@@ -1581,7 +1572,6 @@
       "src/ui/cockpitTrackingController.js",
       "src/ui/context.js",
       "src/ui/contextActions.js",
-      "src/ui/contextBindings.js",
       "src/ui/contextControls.js",
       "src/ui/contextLayerChanges.js",
       "src/ui/contextPresentation.js",
@@ -1666,6 +1656,7 @@
       "src/ui/shellFacade.js",
       "src/ui/streetLevelControls.js",
       "src/ui/streetLevelEvents.js",
+      "src/ui/stores/pinned.js",
       "src/ui/streetLevelViewerPlacement.js",
       "src/ui/streetPhotoCredit.js",
       "src/ui/streetLevelPresentation.js",
@@ -1722,7 +1713,6 @@
       "src/ui/stores/streetLevel.js",
       "src/ui/stores/cctv.js",
       "src/ui/stores/radio.js",
-      "src/ui/stores/context.js",
       "src/ui/stores/spaceMissions.js",
       "src/ui/stores/cockpit.js",
       "src/ui/stores/locale.js",
@@ -1844,7 +1834,8 @@
       "src/ui/mapTiles.js",
       "src/ui/placeCard.js",
       "src/ui/cardFocus.js",
-      "src/ui/placePick.js"
+      "src/ui/placePick.js",
+      "src/ui/streetLevelRowControls.js"
     ],
     "external": [
       "cesium",
@@ -3514,6 +3505,7 @@
   "cctv-layer": {
     "exports": ["./layers/cctv"],
     "modules": [
+      "src/data/cctvCalibrationWords.js",
       "src/render/cesium/google3d.js",
       "src/render/cesium/globe.js",
       "src/render/cesium/imagery.js",
@@ -3642,8 +3634,7 @@
       "src/render/vectorBase/index.js",
       "src/render/vectorBase/style.js",
       "src/render/vectorBase/paint.js",
-      "src/render/vectorBase/expressions.js",
-      "src/data/cctvCalibrationWords.js"
+      "src/render/vectorBase/expressions.js"
     ],
     "external": ["hls.js", "cesium", "pbf", "@mapbox/vector-tile", "kdbush"]
   },
@@ -4354,7 +4345,6 @@
       "src/awarenessEcho.js",
       "src/hudLayouts.js",
       "src/hudLayoutPolicy.js",
-      "src/ui/radioPanelPlacement.js",
       "src/render/cesium/iconSetPrimitive.js",
       "src/render/recession.js",
       "src/data/iconSet.js",
@@ -4899,7 +4889,6 @@
       "src/overlays/worldOverlayTokens.js",
       "src/panelStackLayout.js",
       "src/renderGovernor.js",
-      "src/rightRailPolicy.js",
       "src/scenes/director.js",
       "src/scenes/sceneSaveError.js",
       "src/scenes/playbackAdapter.js",
@@ -4979,7 +4968,6 @@
       "src/ui/composition.js",
       "src/ui/context.js",
       "src/ui/contextActions.js",
-      "src/ui/contextBindings.js",
       "src/ui/contextControls.js",
       "src/ui/contextLayerChanges.js",
       "src/ui/contextPresentation.js",
@@ -5312,6 +5300,7 @@
       "src/data/pickedContext.js",
       "src/ui/streetLevelControls.js",
       "src/ui/streetLevelEvents.js",
+      "src/ui/stores/pinned.js",
       "src/ui/streetLevelViewerPlacement.js",
       "src/ui/streetPhotoCredit.js",
       "src/ui/streetLevelPresentation.js",
@@ -5556,7 +5545,6 @@
       "src/ui/stores/streetLevel.js",
       "src/ui/stores/cctv.js",
       "src/ui/stores/radio.js",
-      "src/ui/stores/context.js",
       "src/ui/stores/spaceMissions.js",
       "src/ui/stores/cockpit.js",
       "src/ui/stores/locale.js",
@@ -5762,7 +5750,8 @@
       "src/ui/mapTiles.js",
       "src/ui/placeCard.js",
       "src/ui/cardFocus.js",
-      "src/ui/placePick.js"
+      "src/ui/placePick.js",
+      "src/ui/streetLevelRowControls.js"
     ],
     "external": [
       "hls.js",
@@ -5791,6 +5780,7 @@
   "application-layer-construction": {
     "exports": ["./application/layers"],
     "modules": [
+      "src/data/cctvCalibrationWords.js",
       "src/data/units.js",
       "src/data/vesselSprites.js",
       "src/data/rotorFrames.js",
@@ -6623,8 +6613,7 @@
       "src/layers/satellites/tiangongStation.js",
       "src/layers/satellites/tiangongJoints.js",
       "src/layers/satellites/tiangongArticulation.js",
-      "src/layers/satellites/tiangongModel.js",
-      "src/data/cctvCalibrationWords.js"
+      "src/layers/satellites/tiangongModel.js"
     ],
     "external": [
       "hls.js",
@@ -6938,7 +6927,6 @@
       "src/cyberSonar.js",
       "src/hudLayouts.js",
       "src/hudLayoutPolicy.js",
-      "src/ui/radioPanelPlacement.js",
       "src/bloom.js",
       "src/cockpitVisionPolicy.js",
       "src/contactsDetectionPolicy.js",
@@ -6998,7 +6986,6 @@
   "ui-panel-chrome": {
     "exports": ["./ui/panel-chrome"],
     "modules": [
-      "src/ui/radioPanelPlacement.js",
       "src/panelStackLayout.js",
       "src/ui/leftPanelRail.js",
       "src/ui/panelChrome.js",

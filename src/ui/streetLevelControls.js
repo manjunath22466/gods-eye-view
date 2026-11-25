@@ -1,12 +1,10 @@
-import { isExplicitLayerStateOrigin } from '../data/layerState.js';
-import {
-  presentStreetLevelPanel,
-  SINCE_STOPS,
-} from './streetLevelPresentation.js';
+import { presentStreetLevelPanel } from './streetLevelPresentation.js';
+import { streetLevelRowControls } from './streetLevelRowControls.js';
 import { useStreetLevelStore } from './stores/streetLevel.js';
 import { placeStreetLevelViewer } from './streetLevelViewerPlacement.js';
 import { applicationPinia } from './vueRuntime.js';
 import { onLocaleChange, t, translateKnown } from '../i18n/index.js';
+import { MOBILE_SHEET_ATTR } from './mobileSheets.js';
 
 const RENDER_MODE_KEY = 'gev:street-level:render-mode';
 /** <body> classes of the modes that hide every panel; an expanded photo leaves with them. */
@@ -18,9 +16,12 @@ function isEmbedPage() {
 }
 
 /**
- * Drives the Street Level panel body: provider chips, filters and viewer.
- * The panel view renders what this presents (`gev-street-level` store); the
- * panel chrome itself belongs to the application shell.
+ * Drives Street Level's UI: the photo viewer on its card in Context
+ * (StreetLevelViewer.vue, `gev-street-level` store) and the provider chips
+ * and filters on its Data Layers row (streetLevelRowControls.js). An open
+ * photo, and each image the viewer moves on to, is announced through
+ * `actions.showPhoto`, so Context can show its card. The standalone Street
+ * Level panel is retired.
  */
 export class StreetLevelControls {
   constructor({
@@ -34,11 +35,6 @@ export class StreetLevelControls {
     this.actions = actions;
     this.store = store;
     this._storeToken = store.attach({
-      // The readout follows the thumb; coverage is rebuilt once, on release.
-      setSinceStop: (stop) =>
-        this._setParams({ sinceDays: SINCE_STOPS[stop]?.days ?? 0 }),
-      describeSinceStop: (stop) => t(SINCE_STOPS[stop]?.label ?? ''),
-      setPano: (pano) => this._setParams({ pano }),
       setRenderMode: (mode) => {
         this.layer.setViewerRenderMode?.(mode);
         try {
@@ -47,23 +43,23 @@ export class StreetLevelControls {
           /* storage unavailable */
         }
       },
-      openPhoto: (id) => this.layer.openPhoto?.(id, { frame: false }),
-      closePhoto: (id, options) => this.layer.closePhoto?.(id, options),
-      stopPlayback: () => this.layer.stopPlayback?.(),
       cancelDockedPhoto: () => this.layer.cancelDockedPhoto?.(),
+      /** Close the photo whose card went away, unless another took over. */
+      closePhoto: (id, options) => this.layer.closePhoto?.(id, options),
+      /** Stop a playing sequence: the photo is out of sight. */
+      stopPlayback: () => this.layer.stopPlayback?.(),
+      /** Open a remembered photo again (its card was picked from a list). */
+      openPhoto: (id) => this.layer.openPhoto?.(id, { frame: false }),
     });
     this.destroyed = false;
     this.listeners = new AbortController();
     this._unsubscribe = null;
     this._state = null;
     this._view = null;
-    this._wasEnabled = null;
     this._wasOpen = false;
     this._photoRequests = 0;
     this._publishedPhotoRevision = 0;
-    // Whether the last switch-on was explicit (user, voice, tool), not a restore.
-    this._explicitEnable = false;
-    this._unsubscribeEnableRequests = null;
+    this._rowOpen = null;
     this._resizeQueued = false;
     this._elements = this._collect();
     this._bind();
@@ -74,14 +70,16 @@ export class StreetLevelControls {
   }
 
   _collect() {
-    const byId = (id) => this.root?.querySelector(`#${id}`) || null;
+    // Context moves the viewer out of this root into its own home
+    // (streetLevelViewerPlacement.js), possibly before the controls start,
+    // so an element missing from the root is looked up on the page.
+    const byId = (id) =>
+      this.root?.querySelector(`#${id}`) ||
+      this.root?.ownerDocument?.getElementById(id) ||
+      null;
     return {
-      status: byId('sl-status'),
-      providerChips: byId('sl-provider-chips'),
-      nearestBtn: byId('sl-nearest-btn'),
       viewerWrap: byId('sl-viewer-wrap'),
       viewerExpand: byId('sl-viewer-expand'),
-      viewerClose: byId('sl-viewer-close'),
       viewer: byId('sl-viewer'),
     };
   }
@@ -97,31 +95,13 @@ export class StreetLevelControls {
     const el = this._elements;
     if (!this.root) return;
     this.layer.attachViewerHost?.(el.viewer);
-
-    this.listen(el.status, 'click', () => this._toggleEnabled());
-    this.listen(el.providerChips, 'click', (event) => {
-      const button = event.target?.closest?.('.data-toggle-chip');
-      if (!button || button.disabled) return;
-      // A keyless chip shows its tooltip instead of switching; others switch.
-      const chip = this._view?.providers.find(
-        (entry) => entry.id === button.dataset.chipId,
-      );
-      if (chip?.state === 'error') {
-        if (button.title) this.actions.showToast?.(button.title);
-        return;
-      }
-      this._toggleProvider(button.dataset.chipId);
-    });
-    this.listen(el.nearestBtn, 'click', () => {
-      const nearest = this._view?.nearest;
-      if (!nearest?.visible || nearest.disabled) return;
-      this.layer.openNearest?.(undefined, {
-        providerIds: nearest.providerIds,
-        frame: false,
-        aim: 'screen-centre',
-      });
-    });
-    this.listen(el.viewerClose, 'click', () => this.layer.closeViewer?.());
+    // The Data Layers row's filters, presented from the latest state.
+    this.layer.presentRowControls?.(() =>
+      streetLevelRowControls(this._view, {
+        toggleProvider: (id) => this._toggleProvider(id),
+        openNearest: () => this._openNearest(),
+      }),
+    );
     // EXPAND is the browser's fullscreen. iPhone Safari has no element
     // fullscreen, so there it is a top-layer popover; with neither, no button.
     this._expandMode =
@@ -139,8 +119,8 @@ export class StreetLevelControls {
         this.listen(el.viewerWrap, 'toggle', (event) =>
           this._onPopoverToggle(event),
         );
-      // Esc shrinks the photo before the panel's own Esc can collapse it, in
-      // a browser that hands the key to the page while full screen too.
+      // Esc shrinks the photo before Context's own Esc can close its card,
+      // in a browser that hands the key to the page while full screen too.
       this.listen(el.viewerWrap, 'keydown', (event) => {
         if (event.key !== 'Escape' || !this.isViewerExpanded()) return;
         event.preventDefault();
@@ -165,7 +145,7 @@ export class StreetLevelControls {
     } catch {
       /* storage unavailable */
     }
-    // MapillaryJS only tracks window resizes; the panel resizes on its own.
+    // MapillaryJS only tracks window resizes; the card resizes on its own.
     if (typeof ResizeObserver === 'function' && el.viewer) {
       this._resizeObserver = new ResizeObserver(() => this._requestResize());
       this._resizeObserver.observe(el.viewer);
@@ -189,15 +169,62 @@ export class StreetLevelControls {
     });
   }
 
-  async _toggleEnabled() {
-    const enabled = this.actions.isEnabled?.() === true;
+  /** OPEN: the nearest image under the screen centre, for keyboard users. */
+  async _openNearest() {
+    const nearest = this._view?.nearest;
+    if (!nearest?.visible || nearest.disabled) return;
+    const options = {
+      providerIds: nearest.providerIds,
+      frame: false,
+      aim: 'screen-centre',
+    };
+    this._endRowOpen();
+    if (isEmbedPage() || this.actions.dockedPhoto?.())
+      return this.layer.openNearest?.(undefined, options);
+    const body = this.root.ownerDocument.body;
+    const request = {
+      count:
+        (this.layer.getUIState?.()?.photoRequests ?? this._photoRequests) + 1,
+      sheet: body.getAttribute(MOBILE_SHEET_ATTR),
+      surfaceChanged: false,
+    };
+    this._rowOpen = request;
     try {
-      await this.actions.setEnabled?.(!enabled);
-    } catch (error) {
-      this.actions.showToast?.(
-        translateKnown(error?.message || '') || t('Street Level toggle failed'),
-      );
+      request.stopWatching = this.actions.watchContextSurface?.(() => {
+        request.surfaceChanged = true;
+      });
+      const opened = await this.layer.openNearest?.(undefined, options);
+      const state = this.layer.getUIState?.() ?? this._state;
+      const photo = state?.acceptedPhoto;
+      if (
+        opened !== true ||
+        this.destroyed ||
+        this._rowOpen !== request ||
+        this._photoRequests !== request.count ||
+        state?.photoRequests !== request.count ||
+        state.enabled !== true ||
+        photo?.requestId !== request.count
+      )
+        return opened;
+      this._publishedPhotoRevision = photo.revision;
+      this.actions.showPhoto?.(photo, {
+        revealFromOpen:
+          !request.surfaceChanged &&
+          !isEmbedPage() &&
+          !this.actions.dockedPhoto?.() &&
+          !PANEL_HIDING_MODES.some((mode) => body.classList.contains(mode)) &&
+          body.getAttribute(MOBILE_SHEET_ATTR) === request.sheet,
+      });
+      return opened;
+    } finally {
+      this._endRowOpen(request);
     }
+  }
+
+  _endRowOpen(request = this._rowOpen) {
+    if (!request || this._rowOpen !== request) return;
+    this._rowOpen = null;
+    request.stopWatching?.();
   }
 
   async _ensureEnabled() {
@@ -217,10 +244,15 @@ export class StreetLevelControls {
   /**
    * Lighting a chip turns the layer on and darkens the others (one source at
    * a time); darkening the lit one turns the layer off, keeping the provider.
+   * A chip whose source lacks its key says how to add it instead.
    */
   async _toggleProvider(providerId) {
     const chip = this._view?.providers.find((entry) => entry.id === providerId);
     if (!chip) return;
+    if (chip.state === 'error') {
+      if (chip.title) this.actions.showToast?.(chip.title);
+      return;
+    }
     if (!chip.active) {
       // Every registered provider in one update (those hidden on this map
       // too), so the share link records the swap.
@@ -262,12 +294,12 @@ export class StreetLevelControls {
       else if (this._expandMode === 'fullscreen')
         await wrap.requestFullscreen();
       else {
-        // Only while open: a closed popover is hidden even inside the panel.
+        // Only while open: a closed popover is hidden even inside the card.
         wrap.popover = 'auto';
         wrap.showPopover();
       }
     } catch {
-      /* refused (no user gesture, policy): the panel view stays */
+      /* refused (no user gesture, policy): the card view stays */
     }
   }
 
@@ -343,6 +375,7 @@ export class StreetLevelControls {
       this._embedHome = null;
       if (parent?.isConnected)
         parent.insertBefore(wrap, next?.parentNode === parent ? next : null);
+      // Then wherever it belongs now: a photo's card, the dock or home.
       placeStreetLevelViewer();
       this._requestResize();
     }
@@ -352,23 +385,12 @@ export class StreetLevelControls {
     this._unsubscribe?.();
     this._unsubscribe = null;
     if (this.destroyed || !this.root) return;
-    this._unsubscribeEnableRequests?.();
-    this._unsubscribeEnableRequests = this.actions.subscribeEnableRequests(
-      (origin) => {
-        this._explicitEnable = isExplicitLayerStateOrigin(origin);
-      },
-    );
     this.layer.attachDockedPhoto?.(
-      this.actions.dockedPhoto,
+      this.actions.dockedPhoto ?? null,
       this.actions.dockedPhotoCanPresent,
     );
     this._unsubscribe = this.layer.subscribe?.((state) => this.render(state));
     if (this.layer.getUIState) this.render(this.layer.getUIState());
-  }
-
-  setCollapsed(collapsed, options = {}) {
-    this.actions.setPanelCollapsed?.(collapsed, options);
-    if (!collapsed) this._requestResize();
   }
 
   render(state) {
@@ -381,47 +403,38 @@ export class StreetLevelControls {
     this._reactToTransitions(view, state);
   }
 
-  /** A closed image leaves EXPAND, and focus stays in the panel. */
+  /** A closed image leaves EXPAND, and focus stays in Context. */
   _leaveClosedViewer(view) {
     if (view.viewer.open) return;
     this._exitExpanded();
-    // Closing the image (its × button) hides the wrap: move focus out
-    // first, or it drops to <body>.
+    // A closing image hides the wrap: move focus out first, or it drops to
+    // <body>.
     const wrap = this._elements.viewerWrap;
     if (wrap && !wrap.hidden && wrap.contains(document.activeElement))
-      this._elements.status?.focus?.({ preventScroll: true });
+      this.actions.focusContext?.();
   }
 
-  /**
-   * Open the panel on a switch-on or when an image opens. Never persisted:
-   * the stored collapse state stays the user's own choice.
-   */
+  /** Report the request and its settled photo to the current surface owner. */
   _reactToTransitions(view, state) {
-    const enabled = view.enabled;
-    if (enabled && this._wasEnabled === false) {
-      // A restore must not reopen a panel the user or a share link kept collapsed.
-      if (this._explicitEnable) this.setCollapsed(false, { persist: false });
-      this._explicitEnable = false;
-    }
-    this._wasEnabled = enabled;
-    // Other size changes reach the viewer through the ResizeObserver; opening
-    // asks for one resize because the element may not have a size yet.
     const open = view.viewer.open;
-    if (open && !this._wasOpen) {
-      this.setCollapsed(false, { persist: false });
-      // A phone shows the rail only as a tab sheet: open it, or the photo
-      // loads where nobody sees it. Embed mode lifts the photo instead.
-      if (!isEmbedPage()) this.actions.revealPanel?.();
-    }
+    if (open && !this._wasOpen) this._requestResize();
     this._wasOpen = open;
     // A new request first, so a card picked after it can keep its place.
     const requests = state.photoRequests ?? 0;
+    if (this._rowOpen && requests > this._rowOpen.count) this._endRowOpen();
     if (requests !== this._photoRequests) {
       this._photoRequests = requests;
       if (requests > 0) this.actions.photoRequested?.(requests);
     }
     const photo = state.acceptedPhoto;
-    if (photo && photo.revision !== this._publishedPhotoRevision) {
+    // The row OPEN reports its own accepted photo with the reveal intent.
+    const awaitingRowOpen =
+      this._rowOpen && photo?.requestId === this._rowOpen.count;
+    if (
+      photo &&
+      photo.revision !== this._publishedPhotoRevision &&
+      !awaitingRowOpen
+    ) {
       this._publishedPhotoRevision = photo.revision;
       this.actions.showPhoto?.(photo);
     }
@@ -431,10 +444,11 @@ export class StreetLevelControls {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this._endRowOpen();
     this._offLocale();
     this._exitExpanded();
     // Its `toggle` is not heard once destroyed: a popover left on the wrap
-    // would hide the viewer even inside the panel.
+    // would hide the viewer even inside the card.
     if (this._expandMode === 'popover')
       this._elements.viewerWrap?.removeAttribute('popover');
     this._watchPanelHidingModes(false);
@@ -444,8 +458,7 @@ export class StreetLevelControls {
     this._resizeObserver = null;
     this._unsubscribe?.();
     this._unsubscribe = null;
-    this._unsubscribeEnableRequests?.();
-    this._unsubscribeEnableRequests = null;
+    this.layer.presentRowControls?.(null);
     this.layer.attachDockedPhoto?.(null);
     this.layer.attachViewerHost?.(null);
     this.store.detach(this._storeToken);

@@ -306,7 +306,6 @@
   "scripts/qa-camera-controls.mjs",
   "src/ui/context.js",
   "src/ui/contextActions.js",
-  "src/ui/contextBindings.js",
   "src/ui/contextControls.js",
   "src/ui/contextControls.test.mjs",
   "src/ui/contextLayerChanges.js",
@@ -1094,7 +1093,6 @@
   "src/layers/localAdsb/index.test.mjs",
   "src/ui/localSdrControls.test.mjs",
   "src/ui/sdrCardActions.test.mjs",
-  "src/ui/radioPanelActions.test.mjs",
   "src/ui/localSdrMarkup.test.mjs",
   "src/ui/localSdrPresentation.test.mjs",
   "src/data/localReceiversProxy.test.mjs",
@@ -1809,5 +1807,13 @@
   "src/ui/cameraCredit.js",
   "src/ui/cameraCredit.test.mjs",
   "src/ui/kit/ContextListCard.vue",
-  "src/ui/kit/ContextListCard.test.mjs"
+  "src/ui/kit/ContextListCard.test.mjs",
+  "src/ui/radioFoldActions.test.mjs",
+  "src/ui/panelRailView.test.mjs",
+  "src/ui/radioFold.test.mjs",
+  "src/ui/streetLevelRowControls.js",
+  "src/ui/labelLayers.js",
+  "src/ui/rideFace.js",
+  "src/ui/radioSource.test.mjs",
+  "src/ui/contextRadioSheet.test.mjs"
 ]

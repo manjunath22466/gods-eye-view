@@ -7,9 +7,10 @@ export const MOBILE_SHEET_ATTR = 'data-mobile-sheet';
  */
 export const MOBILE_SHEET_PANELS = Object.freeze({
   layers: Object.freeze(['data-panel']),
-  cameras: Object.freeze(['cctv-panel', 'street-level-panel']),
+  // Radio has no tab of its own: its stations show inside Context, as the
+  // lists of Space Missions, Weather, News and Recent Imagery do; cameras and
+  // street-level photos open their cards in Context too.
   context: Object.freeze(['global-context-panel']),
-  missions: Object.freeze(['space-missions-panel']),
   search: Object.freeze(['location-bar']),
   more: Object.freeze(['control-panel', 'pp-toggles']),
 });

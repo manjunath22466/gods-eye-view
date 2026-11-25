@@ -16,7 +16,7 @@
 import { h, render as renderVue } from 'vue';
 import { t } from '../i18n/index.js';
 import { EXCLUSIVE_SURFACE_CLASSES } from '../exclusiveSurfaces.js';
-import { LABEL_LAYERS } from './contextLayerTabs.js';
+import { LABEL_LAYERS } from './labelLayers.js';
 import {
   CAMERA_SETTINGS_EVENT,
   ESCAPE_OWNING_DIALOGS,
@@ -95,23 +95,16 @@ function openVisualSteps() {
   return openPanelSteps(LEFT_RAIL, 'pp-toggles', t('Visual'));
 }
 
-/** Steps that bring up a section of Context's Properties tab. */
-function propertiesSteps(section, text) {
-  const pane = `#context-tab-${section}`;
-  const tab = () => $('#context-tab-btn-props');
+/** Steps that bring up a group of settings in the Visual panel. */
+function visualSettingsSteps(control, text) {
+  const group = () => $(control)?.closest('.pp-toggle-group') || $(control);
   return [
-    ...openPanelSteps(RIGHT_RAIL, 'global-context-panel', t('Context')),
+    ...openVisualSteps(),
     {
-      targets: () => [tab()],
-      text: () => t('Open Properties: settings for the layers that are on'),
-      skip: () => !tab(),
-      done: () => tab()?.getAttribute('aria-selected') === 'true',
-    },
-    {
-      prepare: () => $(pane)?.scrollIntoView?.({ block: 'center' }),
-      targets: () => [$(pane)?.closest('.context-props__section') || $(pane)],
+      prepare: () => group()?.scrollIntoView?.({ block: 'center' }),
+      targets: () => [group()],
       text,
-      skip: () => !$(pane)?.offsetParent,
+      skip: () => !group()?.offsetParent,
     },
   ];
 }
@@ -156,10 +149,9 @@ export function layerSettingsGuide(layer) {
             }),
       skip: () => !$(controls),
     },
-    // Labels and 3D models now sit in Context's Properties while their
-    // layers are on.
+    // Labels and 3D models are Visual settings.
     ...(LABEL_LAYERS.has(layer.id)
-      ? propertiesSteps('labels', () =>
+      ? visualSettingsSteps('#detection-toggle', () =>
           t(
             'Labels tag {layer} on the map. Density sets how many are labelled; Fade and Outside set how they thin out beyond the scope.',
             {
@@ -169,7 +161,7 @@ export function layerSettingsGuide(layer) {
         )
       : []),
     ...(AIRCRAFT_LAYERS.has(layer.id)
-      ? propertiesSteps('aircraft', () =>
+      ? visualSettingsSteps('#models3d-toggle', () =>
           t(
             '3D models: Proximity shows them up close only, All shows every aircraft as a model.',
           ),
@@ -394,10 +386,13 @@ export const FEATURE_GUIDES = Object.freeze({
         ),
     },
   ],
+  // The settings of the layers that are on: their labels and how dense they
+  // are, and 3D models, are Visual settings; each layer's own options are on
+  // its Data Layers row.
   properties: () =>
-    propertiesSteps('labels', () =>
+    visualSettingsSteps('#detection-toggle', () =>
       t(
-        'Properties holds the settings for the layers that are on, each layer marked by a coloured dot',
+        'Labels for the layers that are on: Density sets how many are labelled. Each layer’s own options are on its Data Layers row',
       ),
     ),
   north: () => [
